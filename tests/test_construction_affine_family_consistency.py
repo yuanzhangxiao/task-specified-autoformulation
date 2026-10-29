@@ -11,6 +11,7 @@ from autoformalism.research.construction_affine_family_consistency import (
     COMBINED_SYMBOLIC_POLICY,
     COMMON_ZERO_FORCING_POLICY,
     DEFINED_ZERO_FORCING_POLICY,
+    SCALED_READOUT_POLICY,
     SYMBOLIC_INITIAL_POLICY,
     WEIGHTED_SYMBOLIC_POLICY,
     _display,
@@ -174,6 +175,196 @@ def test_consistent_affine_family_is_not_certified_scientifically():
     assert report["status"] == "deferred"
     assert not report["conflicts"]
     assert not report["scientific_correctness_established"]
+
+
+def scaled_problem(*, readout="a+c*m", role="nonnegative_coefficient", **options):
+    """One unknown output gain; x also consumes m without that gain."""
+    payload = problem(pin_root=True, **options).model_dump(mode="json")
+    payload["base_candidate"]["processes"][0]["expression"] = readout
+    if "c" in readout:
+        payload["base_candidate"]["parameters"].append(
+            {"name": "c", "scope": "global", "role": role}
+        )
+    return PrefixFitProblem.model_validate(payload)
+
+
+def scaled_evidence(source, *, z=None, **options):
+    return evidence(
+        source, [[2, 3, 4], [1, 1, 2], [3, 4, 5]],
+        z=[[2, 2, 2]] * 3 if z is None else z, **options,
+    )
+
+
+def test_scaled_readout_pins_weighted_initials_without_dividing_unknown_gain():
+    source = scaled_problem()
+    data = scaled_evidence(source)
+    before = source.model_dump(mode="json"), deepcopy(data)
+    historical = assess(source, data)
+    assert not historical["conflicts"]
+    assert "scaled_readout_initial_policy" not in historical
+    assert historical == assess(source, data, scaled_readout_initials=False)
+    report = assess(source, data, scaled_readout_initials=True)
+    assert report["scaled_readout_initial_policy"] == SCALED_READOUT_POLICY
+    assert prompt_view(report)["scaled_readout_initial_policy"] == SCALED_READOUT_POLICY
+    check = conflicts(report, "affine_initial_superposition")[0]
+    certificate = check["scaled_initial_readout_constraints"][0]
+    assert certificate["state"] == "m"
+    assert certificate["readout_channel"] == "z"
+    assert certificate["shared_gain"] == "c"
+    assert certificate["zero_gain_case"]["status"] == (
+        "contradicts_exact_recorded_initial_readout"
+    )
+    assert certificate["zero_gain_case"]["witness"]["residual_exact"] == "1"
+    assert certificate["rows"][0]["known_state_initials_exact"] == {"a": "1"}
+    assert certificate["rows"][0]["original_readout"] == "readout"
+    assert certificate["rows"][0]["expanded_process_relations"] == {
+        "readout": "a+c*m"
+    }
+    assert check["model_relations"]["x"] == "-k*x + m + u"
+    # In particular, an unscaled consumer of m is allowed: the original full
+    # affine closure, not only the observed product, is used by this proof.
+    witness = check["witnesses"][0]
+    weights = list(map(Fraction, witness["weights_exact"]))
+    residuals = [
+        Fraction(v["scaled_initial_residual_exact"]) for v in certificate["rows"]
+    ]
+    assert sum(w * r for w, r in zip(weights, residuals, strict=True)) == 0
+    assert report == assess(source, data, scaled_readout_initials=True)
+    assert before == (source.model_dump(mode="json"), data)
+    assert not report["parameter_fitting_performed"]
+
+
+@pytest.mark.parametrize("role", ["coefficient", "nonnegative_coefficient"])
+def test_scaled_readout_zero_gain_stratum_keeps_a_free_initial(role):
+    source = scaled_problem(role=role)
+    report = assess(
+        source, scaled_evidence(source, z=[[1, 1, 1]] * 3),
+        scaled_readout_initials=True,
+    )
+    assert not report["conflicts"]
+
+
+def test_scaled_readout_declared_positive_gain_excludes_zero_without_residual():
+    source = scaled_problem(role="positive_shape")
+    report = assess(
+        source, scaled_evidence(source, z=[[1, 1, 1]] * 3),
+        scaled_readout_initials=True,
+    )
+    check = conflicts(report, "affine_initial_superposition")[0]
+    certificate = check["scaled_initial_readout_constraints"][0]
+    assert certificate["zero_gain_case"] == {
+        "status": "excluded_by_declared_positive_domain", "witness": None,
+    }
+
+
+def test_scaled_readout_tiny_residual_does_not_exclude_zero_by_float_noise():
+    source = scaled_problem()
+    report = assess(
+        source, scaled_evidence(source, z=[[1+1e-12] * 3] * 3),
+        scaled_readout_initials=True,
+    )
+    assert not report["conflicts"]
+
+
+def test_scaled_readout_compatible_affine_identity_is_not_rejected():
+    source = scaled_problem()
+    report = assess(
+        source, evidence(
+            source, [[2, 3, 4], [1, 2, 3], [3, 4, 5]], z=[[2, 2, 2]] * 3,
+        ), scaled_readout_initials=True,
+    )
+    assert report["status"] == "deferred"
+    assert not report["conflicts"]
+
+
+def test_scaled_readout_negative_rational_scale_and_parameter_alias():
+    payload = scaled_problem(readout="a-2*gain*m").model_dump(mode="json")
+    payload["base_candidate"]["parameters"].append(
+        {"name": "c", "scope": "global", "role": "coefficient"}
+    )
+    payload["base_candidate"]["processes"].append(
+        {"name": "gain", "expression": "c"}
+    )
+    source = PrefixFitProblem.model_validate(payload)
+    report = assess(source, scaled_evidence(source), scaled_readout_initials=True)
+    certificate = conflicts(report, "affine_initial_superposition")[0][
+        "scaled_initial_readout_constraints"
+    ][0]
+    assert certificate["rational_scale_exact"] == "-2"
+    assert certificate["rows"][0]["scaled_initial_residual_exact"] == "-1/2"
+    assert certificate["rows"][0]["expanded_process_relations"]["gain"] == "c"
+
+
+@pytest.mark.parametrize("budget_kind", ["operations", "depth", "bits"])
+def test_scaled_readout_bounded_proof_exhaustion_defers(monkeypatch, budget_kind):
+    import autoformalism.research.construction_affine_family_consistency as gate
+
+    source = scaled_problem()
+    if budget_kind == "operations":
+        original = gate._InitialBudget
+        monkeypatch.setattr(gate, "_InitialBudget", lambda: original(remaining=0))
+    elif budget_kind == "depth":
+        monkeypatch.setitem(gate.INITIAL_READOUT_LIMITS, "expansion_depth", 1)
+    else:
+        monkeypatch.setitem(gate.INITIAL_READOUT_LIMITS, "rational_bits", 1)
+    assert not assess(
+        source, scaled_evidence(source), scaled_readout_initials=True
+    )["conflicts"]
+
+
+def test_scaled_readout_rejects_nonshared_dynamics_gain():
+    payload = scaled_problem().model_dump(mode="json")
+    payload["base_candidate"]["parameters"][-1]["scope"] = "trajectory_specific"
+    source = PrefixFitProblem.model_validate(payload)
+    with pytest.raises(ValueError, match="globally shared"):
+        assess(source, scaled_evidence(source), scaled_readout_initials=True)
+
+
+@pytest.mark.parametrize(
+    "options,readout",
+    [
+        ({"extra_root": True}, "a+c*m"),
+        ({"extra_root": True}, "a+c*m+c*n"),
+        ({"nonlinear": True}, "a+c*m"),
+        ({}, "a+u*m"),
+        ({}, "a+t*m"),
+        ({}, "a+x*m"),
+        ({}, "a+c*u*m"),
+        ({}, "a+c*x*m"),
+        ({}, "a+c*t*m"),
+        ({}, "a+c+m*c"),
+        ({}, "a+c*m/tau"),
+        ({}, "a+c*c*m"),
+    ],
+)
+def test_scaled_readout_unsupported_or_unpinned_cases_defer(options, readout):
+    source = scaled_problem(readout=readout, **options)
+    report = assess(source, scaled_evidence(source), scaled_readout_initials=True)
+    assert not report["conflicts"]
+
+
+@pytest.mark.parametrize("role", ["coefficient", "nonnegative_coefficient"])
+def test_scaled_readout_negative_residual_does_not_infer_state_sign(role):
+    source = scaled_problem(role=role)
+    # The proof can use a nonzero residual of either sign without asserting
+    # latent-state positivity or a fitted sign/value for the shared gain.
+    report = assess(
+        source, scaled_evidence(source, z=[[0, 0, 0]] * 3),
+        scaled_readout_initials=True,
+    )
+    assert conflicts(report, "affine_initial_superposition")
+
+
+@pytest.mark.parametrize("uncertain", ["y", "z", "u"])
+def test_scaled_readout_requires_exact_observations_and_initial_conditioning(uncertain):
+    source = scaled_problem()
+    data = scaled_evidence(source)
+    data["contract"]["absolute_error_bounds"][uncertain] = None
+    data["sha256"] = content_hash({
+        key: value for key, value in data.items() if key != "sha256"
+    })
+    report = assess(source, data, scaled_readout_initials=True)
+    assert not conflicts(report, "affine_initial_superposition")
 
 
 @pytest.mark.parametrize("map_root", [False, True])

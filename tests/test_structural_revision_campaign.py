@@ -301,6 +301,19 @@ def test_identical_qualified_checks_are_memoized_without_shared_mutable_results(
     assert calls == 4
     assert cli._assessment(parent, problem)["status"] != first["status"]
     assert calls == 4
+    scaled = cli._assessment(parent, problem, scaled_readout_initials=True)
+    assert calls == 5
+    assert "scaled_readout_initial_policy" in scaled["affine_family_consistency"]
+    assert cli._assessment(parent, problem, scaled_readout_initials=True) == scaled
+    assert calls == 5
+    assert cli._assessment(parent, problem)["status"] != first["status"]
+    assert calls == 5
+    for invalid in (None, 0, 1, "false"):
+        with pytest.raises(
+            ValueError, match="scaled_readout_initials must be a boolean"
+        ):
+            cli._assessment(parent, problem, scaled_readout_initials=invalid)
+    assert calls == 5
 
 
 def test_property_citations_require_displayed_candidate_evidence(

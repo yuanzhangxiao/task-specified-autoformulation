@@ -1,5 +1,9 @@
 # Returned admission-guard results: 29 October 2026
 
+Follow-up: the scaled-readout proof and fresh qualification of all 23 retained
+models are implemented in [the new Orion handoff](PHASE_C_SCALED_READOUT_HANDOFF.md).
+The frozen results and independent-audit history below remain unchanged.
+
 Both ACES jobs completed operationally. The frozen runtime admitted five 20B
 records and six 120B records, all with deferred checks. Independent equation
 review holds one additional 120B model back. After removing that record and

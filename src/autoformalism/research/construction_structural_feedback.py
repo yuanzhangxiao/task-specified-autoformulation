@@ -415,6 +415,18 @@ def consistency_view(report: dict, parent: dict | None = None) -> dict:
                     "bounds cannot repair the identity. This is an exact-data "
                     "contradiction, not a lower bound on approximate NMSE."
                 )
+            if conflict.get("scaled_initial_readout_constraints"):
+                conflict["repair_feedback"] += (
+                    " The displayed scaled-readout constraints link latent initial "
+                    "values and shared gains to the observed initial outputs. "
+                    "A trajectory-specific initial value is not an independent "
+                    "degree of freedom when this readout fixes its scaled value. "
+                    "Respect every displayed gain-domain case; do not assume an "
+                    "unknown gain is nonzero or silently divide by it. Repair a "
+                    "permitted scientific premise of the certificate, rather than "
+                    "only renaming a gain or declaring the same initial value free. "
+                    "This exact-reproduction check is not a bound on fitted NMSE."
+                )
         _factor_zero_restriction_context(view)
         result["affine_family_consistency"] = view
     result["repair_scope"] = _REPAIR_SCOPE

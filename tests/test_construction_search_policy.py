@@ -123,6 +123,7 @@ def run(
     action_feedback=False,
     repair_contract=False,
     admission_guard=False,
+    scaled_readout_initials=False,
 ):
     client = Client(payloads)
     result = engine.run_episode(
@@ -138,6 +139,7 @@ def run(
         action_feedback=action_feedback,
         repair_contract=repair_contract,
         admission_guard=admission_guard,
+        scaled_readout_initials=scaled_readout_initials,
     )
     return result, client
 
@@ -1351,3 +1353,86 @@ def test_admission_flag_reaches_parent_and_child_assessments(parent, monkeypatch
     assert json.loads(client.calls[0]["user"])["editing_scope"][
         "initialization_review"
     ] == engine.INITIALIZATION_REMINDER
+
+
+def test_scaled_readout_opt_in_preserves_defaults_and_changes_request_identity(parent):
+    old = engine.assess_candidate(parent, patch())
+    explicit = engine.assess_candidate(parent, patch(), scaled_readout_initials=False)
+    assert explicit == old
+    assert "scaled_readout_initial_policy" not in old
+    assert engine.system_for(scaled_readout_initials=True) == engine.system_for()
+    first = engine.request(parent, "independent")
+    default = engine.request(parent, "independent", scaled_readout_initials=False)
+    enabled = engine.request(parent, "independent", scaled_readout_initials=True)
+    assert first == default
+    packet = json.loads(enabled)
+    assert packet.pop("assessment_policy") == {
+        "scaled_readout_initial_policy": engine.SCALED_READOUT_POLICY
+    }
+    # The synthetic gate ignores scientific flags. Only proof-policy metadata
+    # changes here; the benchmark/model/edit contract and system are untouched.
+    assert packet == json.loads(first)
+    assert content_hash(enabled) != content_hash(first)
+    scoped = engine.assess_candidate(parent, None, scaled_readout_initials=True)
+    assert scoped["scaled_readout_initial_policy"] == engine.SCALED_READOUT_POLICY
+    assert scoped["status"] == "rejected"
+    assert scoped["diagnostic"]["code"] == "RESPONSE_SCHEMA_OR_AVAILABILITY"
+
+
+@pytest.mark.parametrize("invalid", [None, 0, 1, "false"])
+def test_scaled_readout_flag_rejects_nonboolean_settings(parent, invalid):
+    for call in (
+        lambda: engine.system_for(scaled_readout_initials=invalid),
+        lambda: engine.request(parent, "independent", scaled_readout_initials=invalid),
+        lambda: engine.assess_candidate(
+            parent, patch(), scaled_readout_initials=invalid
+        ),
+        lambda: run(parent, [], "independent", scaled_readout_initials=invalid),
+    ):
+        with pytest.raises(
+            ValueError, match="scaled_readout_initials must be a boolean"
+        ):
+            call()
+
+
+def test_scaled_readout_flag_reaches_parent_child_and_branch_assessments(
+    parent, monkeypatch
+):
+    original = base._assessment
+    seen = []
+
+    def record(*args, **kwargs):
+        seen.append(kwargs.get("scaled_readout_initials"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(base, "_assessment", record)
+    result, client = run(
+        parent, [patch()] * 3, "independent", scaled_readout_initials=True
+    )
+    assert seen and all(seen)
+    assert result["scaled_readout_initial_policy"] == engine.SCALED_READOUT_POLICY
+    assert all(
+        c["scaled_readout_initial_policy"] == engine.SCALED_READOUT_POLICY
+        for c in result["candidates"]
+    )
+    assert all(
+        json.loads(call["user"])["assessment_policy"]["scaled_readout_initial_policy"]
+        == engine.SCALED_READOUT_POLICY for call in client.calls
+    )
+    intended = engine.assess_candidate(
+        parent, patch("a*mem"), candidate_id="initial", scaled_readout_initials=True
+    )
+    delta = {
+        **branch.reference(intended), "mode": "delta", "patch": patch(),
+        "drop_actions": [],
+    }
+    before = deepcopy(intended)
+    seen.clear()
+    changed = engine._assess_branch_reply(
+        parent, delta, intended, common_zero_forcing=False,
+        scaled_readout_initials=True, candidate_id="repair",
+    )
+    assert changed["status"] == "eligible"
+    assert seen and all(seen)
+    assert changed["scaled_readout_initial_policy"] == engine.SCALED_READOUT_POLICY
+    assert intended == before

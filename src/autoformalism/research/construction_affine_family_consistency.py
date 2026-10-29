@@ -65,6 +65,7 @@ WEIGHTED_SYMBOLIC_POLICY = "weighted-shared-symbolic-initials-1"
 COMBINED_SYMBOLIC_POLICY = "combined-symbolic-map-readout-initials-1"
 COMMON_ZERO_FORCING_POLICY = "certified-common-zero-forcing-affine-1"
 DEFINED_ZERO_FORCING_POLICY = "defined-common-zero-forcing-affine-1"
+SCALED_READOUT_POLICY = "shared-scaled-initial-readout-1"
 MAX_ZERO_RESTRICTIONS = 8
 MAX_TRIPLES = 256
 MAX_TIMES = 64
@@ -612,6 +613,199 @@ def _combined_initials(
     return result
 
 
+def _scaled_readout_row(model, row, training, numeric, roots, affine_outputs):
+    """Recognize numeric-offset readouts of one shared gain times one state.
+
+    This bounded polynomial expansion records products; it does not divide by
+    an unknown gain, solve for a fitted initial, or rewrite the candidate. Only
+    rational arithmetic and monomials consisting of one global parameter and
+    one unresolved state are supported. Unknown offsets and additional free
+    states deliberately remain outside this proof.
+    """
+    states = set(model.state_names)
+    parameters = {
+        p.name: p for p in model.validated.candidate.parameters
+        if p.scope.value == "global" and p.name not in roots
+    }
+    public = _public_initial(row, training)
+    result = {}
+    for channel, parsed in sorted(model.validated.observation_expressions.items()):
+        if (
+            channel not in row.targets
+            or channel not in affine_outputs
+            or training.contract.absolute_error_bounds.get(channel) != 0
+        ):
+            continue
+        budget = _InitialBudget()
+        processes_used, public_used, initials_used = {}, {}, {}
+
+        def clean(poly, budget=budget):
+            if len(poly) > INITIAL_READOUT_LIMITS["coordinates"]:
+                raise _InitialUnsupported("scaled readout monomial limit")
+            return {key: budget.check(value) for key, value in poly.items() if value}
+
+        def interpret(node, budget=budget):
+            budget.check(Fraction(0))
+            budget.depth += 1
+            try:
+                if budget.depth > INITIAL_READOUT_LIMITS["expansion_depth"]:
+                    raise _InitialUnsupported("scaled readout expansion depth limit")
+                return interpret_node(node)
+            finally:
+                budget.depth -= 1
+
+        def interpret_node(
+            node, budget=budget, processes_used=processes_used,
+            public_used=public_used, initials_used=initials_used,
+        ):
+            if isinstance(node, ast.Expression):
+                return interpret(node.body)
+            if isinstance(node, ast.Constant):
+                return clean({(): Fraction(node.value)})
+            if isinstance(node, ast.Name):
+                name = node.id
+                if name in states:
+                    if name in numeric:
+                        initials_used[name] = str(numeric[name])
+                        return clean({(): numeric[name]})
+                    return {(("state", name),): Fraction(1)}
+                if name in model.validated.process_expressions:
+                    expression = model.validated.process_expressions[name]
+                    processes_used[name] = expression.source
+                    return interpret(expression.tree)
+                if name in parameters:
+                    return {(("parameter", name),): Fraction(1)}
+                if name in public:
+                    value = _exact(public[name].constant)
+                    public_used[name] = str(value)
+                    return clean({(): value})
+                raise _InitialUnsupported("unsupported scaled initial symbol")
+            if isinstance(node, ast.UnaryOp):
+                sign = -1 if isinstance(node.op, ast.USub) else 1
+                return clean({key: sign * value for key, value in interpret(
+                    node.operand
+                ).items()})
+            if isinstance(node, ast.BinOp):
+                # Evaluate both operands even when multiplication later yields
+                # zero; unsupported or undefined expressions cannot disappear.
+                left, right = interpret(node.left), interpret(node.right)
+                if isinstance(node.op, (ast.Add, ast.Sub)):
+                    sign = -1 if isinstance(node.op, ast.Sub) else 1
+                    return clean({
+                        key: left.get(key, Fraction(0))
+                        + sign * right.get(key, Fraction(0))
+                        for key in left.keys() | right.keys()
+                    })
+                if isinstance(node.op, ast.Mult):
+                    product = {}
+                    for first, a in left.items():
+                        for second, b in right.items():
+                            key = tuple(sorted(first + second))
+                            if len(key) > 2 or (
+                                len(key) == 2
+                                and [kind for kind, _ in key] != ["parameter", "state"]
+                            ):
+                                raise _InitialUnsupported(
+                                    "unsupported scaled readout product"
+                                )
+                            product[key] = budget.check(
+                                product.get(key, Fraction(0)) + budget.check(a * b)
+                            )
+                    return clean(product)
+                if (
+                    isinstance(node.op, ast.Div)
+                    and set(right) == {()} and right[()]
+                ):
+                    return clean({
+                        key: value / right[()] for key, value in left.items()
+                    })
+            raise _InitialUnsupported("unsupported scaled readout expression")
+
+        try:
+            polynomial = interpret(parsed.tree)
+            terms = {key: value for key, value in polynomial.items() if key}
+            if len(terms) != 1:
+                continue
+            monomial, scale = next(iter(terms.items()))
+            if len(monomial) != 2 or [kind for kind, _ in monomial] != [
+                "parameter", "state"
+            ]:
+                continue
+            gain, state = monomial[0][1], monomial[1][1]
+            offset = polynomial.get((), Fraction(0))
+            observed = budget.check(Fraction(row.targets[channel][0]))
+            residual = budget.check(observed - offset)
+            result.setdefault(state, []).append({
+                "channel": channel,
+                "gain": gain,
+                "gain_domain": parameters[gain].domain.value,
+                "rational_scale_exact": str(scale),
+                "observed_initial_exact": str(observed),
+                "numeric_offset_exact": str(offset),
+                "scaled_initial_residual_exact": str(budget.check(residual / scale)),
+                "zero_gain_residual_exact": str(residual),
+                "zero_gain_numerical_guard_exact": str(_guard([observed, offset])),
+                "original_readout": parsed.source,
+                "expanded_process_relations": processes_used,
+                "exact_public_initials": public_used,
+                "known_state_initials_exact": initials_used,
+            })
+        except (_InitialUnsupported, _Unsupported):
+            continue
+    return result
+
+
+def _scaled_initial_constraint(state, rows, scaled_initials):
+    """Cancel weighted initials without evaluating or dividing by their gain."""
+    values = [scaled_initials.get(row.trajectory_id, {}).get(state, []) for row in rows]
+    common = set.intersection(*(
+        {(v["channel"], v["gain"], v["rational_scale_exact"]) for v in line}
+        for line in values
+    ))
+    for channel, gain, scale in sorted(common):
+        entries = [next(
+            v for v in line
+            if (v["channel"], v["gain"], v["rational_scale_exact"])
+            == (channel, gain, scale)
+        ) for line in values]
+        exclusion = next((
+            {"trajectory_id": row.trajectory_id, "sample_index": 0,
+             "residual_exact": entry["zero_gain_residual_exact"],
+             "numerical_guard_exact": entry["zero_gain_numerical_guard_exact"]}
+            for row, entry in zip(rows, entries, strict=True)
+            if abs(Fraction(entry["zero_gain_residual_exact"]))
+            > Fraction(entry["zero_gain_numerical_guard_exact"])
+        ), None)
+        positive = all(entry["gain_domain"] == "positive" for entry in entries)
+        if not positive and exclusion is None:
+            continue  # k=0 can leave a genuinely free initial state.
+        residuals = [Fraction(v["scaled_initial_residual_exact"]) for v in entries]
+        return residuals, {
+            "policy": SCALED_READOUT_POLICY,
+            "state": state,
+            "readout_channel": channel,
+            "shared_gain": gain,
+            "rational_scale_exact": scale,
+            "zero_gain_case": {
+                "status": "excluded_by_declared_positive_domain" if positive
+                else "contradicts_exact_recorded_initial_readout",
+                "witness": exclusion,
+            },
+            "nonzero_gain_case": "For every remaining shared nonzero gain k, "
+            "the exact readouts imply k*z_i(0)=r_i. Weights cancelling r_i "
+            "therefore cancel z_i(0). No value of k or 1/k is computed or fitted.",
+            "rows": [
+                {"trajectory_id": row.trajectory_id, **entry}
+                for row, entry in zip(rows, entries, strict=True)
+            ],
+            "required_cancellation": "sum(weights_i * scaled_initial_residual_i) = 0",
+            "original_affine_closure_required": True,
+            "candidate_or_parameter_domains_modified": False,
+            "scope": "Exact initial and trajectory reproduction only; no NMSE bound.",
+        }
+    return None
+
+
 def _closed_states(
     output: _Affine, equations: dict[str, _Affine], state_names: set[str]
 ) -> tuple[set[str], set[str]]:
@@ -678,9 +872,11 @@ def _guard(values) -> Fraction:
 def _superposition(
     rows, target, states, initials, problem, observed, training, readout_initials,
     *, map_initials=None, map_initial_policy=WEIGHTED_SYMBOLIC_POLICY,
+    scaled_initials=None,
 ):
     constraints = [[Fraction(1)] * 3]
     known = {}
+    scaled_constraints = []
     for state in sorted(states):
         values = [initials[row.trajectory_id].get(state) for row in rows]
         if all(value is not None for value in values):
@@ -697,6 +893,18 @@ def _superposition(
         if weighted is not None:
             coefficient_rows, known[state] = weighted
             constraints.extend(coefficient_rows)
+            continue
+        scaled = _scaled_initial_constraint(state, rows, scaled_initials or {})
+        if scaled is not None:
+            residuals, certificate = scaled
+            constraints.append(residuals)
+            known[state] = {
+                "source": "exact scaled readout with a shared nonzero gain",
+                "policy": SCALED_READOUT_POLICY,
+                "shared_gain": certificate["shared_gain"],
+                "scaled_initial_residuals_exact": list(map(str, residuals)),
+            }
+            scaled_constraints.append(certificate)
             continue
         keys = [
             _exact_initial_key(state, row, problem, observed, training) for row in rows
@@ -734,6 +942,8 @@ def _superposition(
                     "weighted_observation_defect": _display(defect),
                     "target_numerical_guard": _display(guard),
                     "initial_state_values": known,
+                    **({"scaled_initial_readout_constraints": scaled_constraints}
+                       if scaled_constraints else {}),
                     "required_identity": "weighted observed output sum = 0 "
                     "at every common time",
                     "scope": "Requires exact time-zero reproduction. No bound on "
@@ -815,6 +1025,7 @@ def _checks(
     roots=frozenset(),
     zero_forcing=frozenset(),
     admission_guard=False,
+    scaled_readout_initials=False,
 ):
     rows_to_check = training.trajectories[:MAX_TRAJECTORIES]
     if any(len(row.time) > MAX_SAMPLES for row in rows_to_check):
@@ -920,6 +1131,15 @@ def _checks(
             }
             for row in rows_to_check
         }
+    scaled_initials = (
+        {
+            row.trajectory_id: _scaled_readout_row(
+                model, row, training, initials[row.trajectory_id], roots, outputs
+            )
+            for row in rows_to_check
+        }
+        if scaled_readout_initials else {}
+    )
     result = []
     for target in problem.context.targets:
         for kind, test in (
@@ -981,6 +1201,7 @@ def _checks(
                         **(
                             {
                                 "map_initials": map_initials,
+                                "scaled_initials": scaled_initials,
                                 "map_initial_policy": (
                                     COMBINED_SYMBOLIC_POLICY
                                     if combined_symbolic_initials
@@ -1005,6 +1226,10 @@ def _checks(
                                 target
                             ].source,
                         )
+                        if "scaled_initial_readout_constraints" in witness:
+                            check["scaled_initial_readout_constraints"] = witness[
+                                "scaled_initial_readout_constraints"
+                            ]
                         # Initial readouts can pin hidden coordinates even when
                         # they lie outside the selected target's dynamic closure.
                         # Preserve every conditional obligation used by any
@@ -1194,7 +1419,9 @@ def _zero_forcing_checks(problem, model, training, checks, **options):
             used = names & dependencies[target]
             if not used:
                 continue
-            if options.get("admission_guard", False):
+            if options.get("admission_guard", False) or options.get(
+                "scaled_readout_initials", False
+            ):
                 # Exact initial readouts from other targets may also use a
                 # restricted input outside this target's dynamic closure.
                 # Certify every substituted schedule, not just the target path.
@@ -1262,6 +1489,7 @@ def assess(
     combined_symbolic_initials: bool = False,
     common_zero_forcing: bool = False,
     admission_guard: bool = False,
+    scaled_readout_initials: bool = False,
 ) -> dict[str, Any]:
     """Audit affine conflicts with separately opt-in symbolic initial proofs."""
     if not isinstance(problem, PrefixFitProblem):
@@ -1308,6 +1536,7 @@ def assess(
                 combined_symbolic_initials=combined_symbolic_initials,
                 roots=set(initialization["trajectory_parameter_names"]),
                 admission_guard=admission_guard,
+                scaled_readout_initials=scaled_readout_initials,
             )
         )
         if common_zero_forcing and not missing:
@@ -1318,6 +1547,7 @@ def assess(
                 combined_symbolic_initials=combined_symbolic_initials,
                 roots=set(initialization["trajectory_parameter_names"]),
                 admission_guard=admission_guard,
+                scaled_readout_initials=scaled_readout_initials,
             )
     except _Unsupported as exc:
         checks = [
@@ -1353,6 +1583,10 @@ def assess(
         **(
             {"defined_zero_forcing_policy": DEFINED_ZERO_FORCING_POLICY}
             if admission_guard else {}
+        ),
+        **(
+            {"scaled_readout_initial_policy": SCALED_READOUT_POLICY}
+            if scaled_readout_initials else {}
         ),
         "status": "conflict" if conflicts else "deferred",
         "child_problem_sha256": content_hash(problem.model_dump(mode="json")),
@@ -1455,6 +1689,10 @@ def prompt_view(report: dict[str, Any]) -> dict[str, Any]:
         **(
             {"defined_zero_forcing_policy": report["defined_zero_forcing_policy"]}
             if "defined_zero_forcing_policy" in report else {}
+        ),
+        **(
+            {"scaled_readout_initial_policy": report["scaled_readout_initial_policy"]}
+            if "scaled_readout_initial_policy" in report else {}
         ),
         "status_counts": dict(Counter(item["status"] for item in report["checks"])),
         "conflicts": report["conflicts"],

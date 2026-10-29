@@ -17,6 +17,9 @@ from autoformalism.llm.staged_topology import visible_response
 from autoformalism.research import construction_branch_feedback as branch_feedback
 from autoformalism.research import construction_branch_patch as branch_patch
 from autoformalism.research import construction_structural_feedback as feedback
+from autoformalism.research.construction_affine_family_consistency import (
+    SCALED_READOUT_POLICY,
+)
 from autoformalism.research.construction_repair_identity import (
     diagnostic_identity,
     family_identity,
@@ -118,12 +121,21 @@ that outcome does not accept any model. Do not request fitting here.
 """.strip()
 
 
+def _scaled_readout_policy(enabled: bool) -> dict:
+    """Record an explicit proof opt-in without changing historical artifacts."""
+    if type(enabled) is not bool:
+        raise ValueError("scaled_readout_initials must be a boolean")
+    return {"scaled_readout_initial_policy": SCALED_READOUT_POLICY} if enabled else {}
+
+
 def system_for(
     branch_delta: bool = False,
     repair_contract: bool = False,
     admission_guard: bool = False,
+    scaled_readout_initials: bool = False,
 ) -> str:
     """Preserve historical system text unless branch composition is enabled."""
+    _scaled_readout_policy(scaled_readout_initials)
     if admission_guard and not repair_contract:
         raise ValueError("admission_guard requires repair_contract")
     if repair_contract:
@@ -255,13 +267,16 @@ def assess_candidate(
     affected_target: str = "",
     common_zero_forcing: bool = False,
     admission_guard: bool = False,
+    scaled_readout_initials: bool = False,
 ) -> dict:
     """Normalize and validate one detached candidate before judging repetition.
 
     The static result is kept even when qualified data checks reject it, allowing
     complete-model identity comparison. It is never an adopted model or fit export.
     """
+    policy_record = _scaled_readout_policy(scaled_readout_initials)
     result = {
+        **policy_record,
         "id": candidate_id,
         "call_index": call_index,
         "option_index": option_index,
@@ -291,6 +306,7 @@ def assess_candidate(
             combined_symbolic_initials=True,
             common_zero_forcing=common_zero_forcing,
             admission_guard=admission_guard,
+            scaled_readout_initials=scaled_readout_initials,
         )
         static = apply_structural_revision(
             PrefixFitProblem.model_validate(parent["problem"]),
@@ -320,6 +336,7 @@ def assess_candidate(
             combined_symbolic_initials=True,
             common_zero_forcing=common_zero_forcing,
             admission_guard=admission_guard,
+            scaled_readout_initials=scaled_readout_initials,
         )
         result.update(status="eligible", audit=applied["audit"])
     except (ValueError, TypeError, KeyError) as exc:
@@ -485,10 +502,12 @@ def request(
     branch_delta: bool = False,
     common_zero_forcing: bool = False,
     admission_guard: bool = False,
+    scaled_readout_initials: bool = False,
     action_feedback: bool = False,
     repair_contract: bool = False,
 ) -> str:
     """Build one exact request; history never silently becomes an adopted model."""
+    _scaled_readout_policy(scaled_readout_initials)
     if policy not in POLICIES:
         raise ValueError("unknown construction search policy")
     _validate_limits(options_count, maximum_calls)
@@ -550,6 +569,7 @@ def request(
             combined_symbolic_initials=True,
             common_zero_forcing=common_zero_forcing,
             admission_guard=admission_guard,
+            scaled_readout_initials=scaled_readout_initials,
         )
     )
     packet["editing_scope"]["patch_semantics"] = (
@@ -595,6 +615,8 @@ def request(
     }
     if admission_guard:
         packet["editing_scope"]["initialization_review"] = INITIALIZATION_REMINDER
+    if scaled_readout_initials:
+        packet["assessment_policy"] = _scaled_readout_policy(scaled_readout_initials)
     if history:
         packet["attempted_repairs"] = ledger_view(history, literal=branch_delta)
     if repair_contract and batch:
@@ -705,6 +727,7 @@ def _assess_branch_reply(
     *,
     common_zero_forcing: bool,
     admission_guard: bool = False,
+    scaled_readout_initials: bool = False,
     repair_contract: bool = False,
     **metadata,
 ) -> dict:
@@ -716,7 +739,8 @@ def _assess_branch_reply(
     except ValueError as exc:
         result = assess_candidate(
             parent, None, common_zero_forcing=common_zero_forcing,
-            admission_guard=admission_guard, **metadata
+            admission_guard=admission_guard,
+            scaled_readout_initials=scaled_readout_initials, **metadata
         )
         result.update(
             submitted_reply=deepcopy(raw),
@@ -733,7 +757,8 @@ def _assess_branch_reply(
         return result
     result = assess_candidate(
         parent, composed, common_zero_forcing=common_zero_forcing,
-        admission_guard=admission_guard, **metadata
+        admission_guard=admission_guard,
+        scaled_readout_initials=scaled_readout_initials, **metadata
     )
     result.update(
         submitted_reply=deepcopy(raw),
@@ -836,10 +861,12 @@ def run_episode(
     branch_delta: bool = False,
     common_zero_forcing: bool = False,
     admission_guard: bool = False,
+    scaled_readout_initials: bool = False,
     action_feedback: bool = False,
     repair_contract: bool = False,
 ) -> dict:
     """Run bounded cached calls with policy-specific, deterministic routing."""
+    _scaled_readout_policy(scaled_readout_initials)
     if policy not in POLICIES:
         raise ValueError("unknown construction search policy")
     _validate_limits(options_count, maximum_calls)
@@ -872,6 +899,7 @@ def run_episode(
             system=system_for(
                 branch_delta, repair_contract=repair_contract,
                 admission_guard=admission_guard,
+                scaled_readout_initials=scaled_readout_initials,
             ),
             user=request(
                 parent,
@@ -885,6 +913,7 @@ def run_episode(
                 branch_delta=branch_delta,
                 common_zero_forcing=common_zero_forcing,
                 admission_guard=admission_guard,
+                scaled_readout_initials=scaled_readout_initials,
                 action_feedback=action_feedback,
                 repair_contract=repair_contract,
             ),
@@ -930,6 +959,7 @@ def run_episode(
                     intended,
                     common_zero_forcing=common_zero_forcing,
                     admission_guard=admission_guard,
+                    scaled_readout_initials=scaled_readout_initials,
                     repair_contract=repair_contract,
                     **metadata_fields,
                 )
@@ -939,6 +969,7 @@ def run_episode(
                     None if metadata.get("decision_contract_error") else payload,
                     common_zero_forcing=common_zero_forcing,
                     admission_guard=admission_guard,
+                    scaled_readout_initials=scaled_readout_initials,
                     **metadata_fields,
                 )
             )
@@ -1042,6 +1073,7 @@ def run_episode(
         result["common_zero_forcing"] = True
     if admission_guard:
         result["admission_policy"] = ADMISSION_POLICY
+    result.update(_scaled_readout_policy(scaled_readout_initials))
     if action_feedback:
         result["action_feedback_policy"] = (
             branch_feedback.ADMISSION_POLICY if admission_guard

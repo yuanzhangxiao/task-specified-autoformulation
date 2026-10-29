@@ -1,5 +1,16 @@
 # Orion handoff: fitting the returned construction models
 
+## New construction intake: 23 models, 29 October 2026
+
+The new saved-construction portfolio has passed corrected admission and static
+fitting-interface checks. It contains 23 distinct complete-model/domain
+identities from one T2-easy parent; **numerical qualification has not run**.
+The scaled-memory exact-reproduction conflict is now excluded by runtime proof.
+Use [the current work order](PHASE_C_SCALED_READOUT_HANDOFF.md) and its generated
+23-model package, preserving the fixed eight-unit prefix, original equations,
+parameter domains and initializer graphs. The earlier eight-model numerical
+campaign documented below remains separate and unchanged.
+
 ## Construction derivative recovery
 
 The returned local-recovery campaign verified all historical incumbents and all

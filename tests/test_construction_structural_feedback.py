@@ -141,6 +141,45 @@ def test_every_affine_target_retains_its_own_witness_and_assumptions():
     assert checked == before
 
 
+def test_scaled_readout_certificate_retains_constraints_and_targeted_repair_scope():
+    source = affine_problem(pin_root=True)
+    checked = affine_assess(
+        source,
+        affine_evidence(source, [[2, 3, 4], [1, 1, 2], [3, 4, 5]], z=[[2, 2, 2]] * 3),
+    )
+    plain = feedback.consistency_view(report(affine_family_consistency=checked))
+    constraint = {
+        "state": "z",
+        "readout": "y",
+        "gain": "k",
+        "offset": "x",
+        "zero_gain_case": {"status": "excluded_by_observed_initial_readout"},
+    }
+    conflict = next(
+        c for c in checked["conflicts"]
+        if c["property"] == "affine_initial_superposition"
+    )
+    conflict["scaled_initial_readout_constraints"] = [constraint]
+    before = deepcopy(checked)
+    shown = feedback.consistency_view(report(affine_family_consistency=checked))
+    row = next(
+        c for c in shown["affine_family_consistency"]["conflicts"]
+        if c["property"] == "affine_initial_superposition"
+    )
+    old = next(
+        c for c in plain["affine_family_consistency"]["conflicts"]
+        if c["property"] == "affine_initial_superposition"
+    )
+    assert row["scaled_initial_readout_constraints"] == [constraint]
+    assert row["witnesses"] == old["witnesses"]
+    assert shown["affine_family_consistency"]["assumptions"] == checked["assumptions"]
+    assert "not an independent degree of freedom" in row["repair_feedback"]
+    assert "do not assume an unknown gain is nonzero" in row["repair_feedback"]
+    assert "not a bound on fitted NMSE" in row["repair_feedback"]
+    assert "scaled-readout constraints" not in old["repair_feedback"]
+    assert checked == before
+
+
 def test_stronger_superposition_uses_same_identity_and_preserves_original_witness():
     source = affine_problem(pin_root=True)
     data = affine_evidence(

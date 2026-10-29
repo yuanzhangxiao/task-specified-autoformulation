@@ -1,5 +1,24 @@
 # Phase 1 Pipeline Design
 
+## Shared-scale initial readout proof
+
+The opt-in `shared-scaled-initial-readout-1` proof recognizes exact readouts
+`y_i(0) = c_i + k z_i(0)` with known numeric offsets and one globally shared
+gain. A positive gain domain excludes zero; otherwise an exact initial residual
+must exclude zero with the existing numerical guard. On the remaining nonzero
+stratum, weights cancelling `y_i(0)-c_i` also cancel `z_i(0)`. This adds an
+initial constraint to the original verified affine closed subsystem, without
+dividing by an unknown parameter, rewriting equations, or fitting initials.
+Certificates retain both gain cases, exact residuals, source readouts, and the
+weighted trajectory witness. Unknown offsets, unsupported gains, uncertain data,
+nonlinear state dynamics, or additional unconstrained initial directions defer.
+This is an exact-reproduction obstruction, never an approximate-error bound.
+
+`scaled_readout_initials` defaults off and is included in request, assessment
+cache and result identities when enabled. The offline saved-candidate replay
+enables it explicitly; existing live profiles remain frozen. See
+[the fitting handoff and proof limits](PHASE_C_SCALED_READOUT_HANDOFF.md).
+
 ## Defined-domain admission correction
 
 `construction-admission-guard-1` requires the existing repair contract and common

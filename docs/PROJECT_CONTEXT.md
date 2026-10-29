@@ -1,5 +1,17 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Scaled-readout proof and numerical handoff
+
+The opt-in scaled-initial-readout proof closes the remaining saved 120B gap:
+an unknown shared gain cannot hide the weighted initial-state relation imposed
+by exact outputs once its zero case is excluded. The original affine subsystem,
+equations and parameter domains are preserved. All 51 saved calls and 99 outcomes
+replay exactly; corrected reassessment retains 23 distinct models (14 previous
+plus nine new), all passing static fitting-interface checks. Their numerical
+qualification remains pending with Orion under the saved eight-unit prefix.
+No fitting, new generation or test evaluation was run. See
+[the proof and fitting work order](PHASE_C_SCALED_READOUT_HANDOFF.md).
+
 ## Returned admission-guard results
 
 Both 29 October arms completed: 20B admits five records across two seeds;
