@@ -247,3 +247,53 @@ def test_inspection_includes_submission_provenance(tmp_path):
             saved.extractfile("submissions/cpu-construction-portfolio-1/run.id").read()
             == b"123\n"
         )
+
+
+def test_inspection_exposes_pre_python_failures_without_claiming_fitting(tmp_path):
+    import json
+    import tarfile
+
+    campaign.prepare_inputs(tmp_path, inputs(), policy())
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    failure = b"Use the extracted source bundle, not an empty directory.\n"
+    (logs / "run-123_0.err").write_bytes(failure)
+    large = b"prefix" * 20000 + b"last diagnostic\n"
+    (logs / "run-123_0.out").write_bytes(large)
+    with tarfile.open(campaign.inspection(tmp_path)) as saved:
+        assert saved.extractfile("logs/run-123_0.err").read() == failure
+        assert saved.extractfile("logs/run-123_0.out").read() == large[-65536:]
+        manifest = json.load(saved.extractfile("inspection_log_tails.json"))
+        files = {row["path"]: row for row in manifest["files"]}
+        assert not files["logs/run-123_0.err"]["truncated"]
+        assert files["logs/run-123_0.out"]["truncated"]
+        assert files["logs/run-123_0.out"]["source_bytes_at_read"] == len(large)
+        summary = json.load(saved.extractfile("summary.json"))
+        assert summary["recorded"] == 0
+        assert summary["status_counts"] == {"not_started": 2}
+
+
+def test_inspection_refuses_symlinked_logs(tmp_path):
+    campaign.prepare_inputs(tmp_path, inputs(), policy())
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "run.err").symlink_to(tmp_path / "inputs.json")
+    with pytest.raises(ValueError, match="inspection log escapes"):
+        campaign.inspection(tmp_path)
+
+
+def test_inspection_bounds_the_number_of_log_tails(tmp_path):
+    import json
+    import tarfile
+
+    campaign.prepare_inputs(tmp_path, inputs(), policy())
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    for i in range(130):
+        (logs / f"run-{i:03d}.err").write_text("diagnostic\n")
+    with tarfile.open(campaign.inspection(tmp_path)) as saved:
+        manifest = json.load(saved.extractfile("inspection_log_tails.json"))
+        assert manifest["omitted_files"] == 2
+        assert len(manifest["files"]) == 128
+        assert "logs/run-000.err" not in saved.getnames()
+        assert "logs/run-129.err" in saved.getnames()

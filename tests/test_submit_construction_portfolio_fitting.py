@@ -296,7 +296,10 @@ def test_shell_inspection_never_prepares_or_submits(tmp_path, command):
 
 
 def test_worker_uses_array_index_and_rejects_invalid_index(tmp_path):
-    env = shell_environment(tmp_path) | {"SLURM_ARRAY_TASK_ID": "22"}
+    env = shell_environment(tmp_path) | {
+        "SLURM_ARRAY_TASK_ID": "22",
+        "AF_REPO_ROOT": str(REPO),
+    }
     wrapper = REPO / "scripts/hpc/start_construction_portfolio_fitting_delta.sh"
     subprocess.run(["bash", str(wrapper), "worker-run", "0"], env=env, check=True)
     args = (tmp_path / "args.txt").read_text().splitlines()
@@ -307,6 +310,75 @@ def test_worker_uses_array_index_and_rejects_invalid_index(tmp_path):
         ["bash", str(wrapper), "worker-run"], env=env, capture_output=True, text=True
     )
     assert result.returncode != 0 and "nonnegative task index" in result.stderr
+
+
+def copied_slurm_script(tmp_path):
+    """Mirror sbatch's copied script location, independently of the source tree."""
+    original = REPO / "scripts/hpc/start_construction_portfolio_fitting_delta.sh"
+    copied = tmp_path / "spool/slurmd/job23332572/slurm_script"
+    copied.parent.mkdir(parents=True)
+    copied.write_bytes(original.read_bytes())
+    return copied
+
+
+@pytest.mark.parametrize(
+    "stage,command", [("worker-run", "run"), ("worker-report", "report")]
+)
+def test_spool_copy_workers_preserve_exported_repository(tmp_path, stage, command):
+    env = shell_environment(tmp_path) | {
+        "AF_REPO_ROOT": str(REPO),
+        "SLURM_ARRAY_TASK_ID": "22",
+    }
+    copied = copied_slurm_script(tmp_path)
+    subprocess.run(["bash", str(copied), stage, "0"], env=env, check=True)
+    args = (tmp_path / "args.txt").read_text().splitlines()
+    assert args[0] == str(REPO / "scripts/run_construction_portfolio_fitting.py")
+    assert args[1] == command
+    assert args[args.index("--root") + 1] == env["AF_CONSTRUCTION_PORTFOLIO_ROOT"]
+    assert "prepare" not in args and "submit" not in args
+    if stage == "worker-run":
+        assert args[args.index("--index") + 1] == "22"
+    else:
+        assert "--index" not in args
+
+
+@pytest.mark.parametrize("stage", ["worker-run", "worker-report"])
+@pytest.mark.parametrize("missing", [True, False])
+def test_spool_copy_requires_nonempty_exported_repository(tmp_path, stage, missing):
+    env = shell_environment(tmp_path)
+    if not missing:
+        env["AF_REPO_ROOT"] = ""
+    copied = copied_slurm_script(tmp_path)
+    result = subprocess.run(
+        ["bash", str(copied), stage, "0"], env=env, capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert "Slurm workers require exported AF_REPO_ROOT" in result.stderr
+    assert not (tmp_path / "args.txt").exists()
+
+
+@pytest.mark.parametrize("stage", ["run", "status"])
+def test_login_stage_ignores_stale_inherited_repository(tmp_path, stage):
+    env = shell_environment(tmp_path) | {
+        "AF_REPO_ROOT": str(tmp_path / "unrelated-old-checkout")
+    }
+    wrapper = REPO / "scripts/hpc/start_construction_portfolio_fitting_delta.sh"
+    subprocess.run(["bash", str(wrapper), stage], env=env, check=True)
+    args = (tmp_path / "args.txt").read_text().splitlines()
+    assert args[0] == str(REPO / "scripts/run_construction_portfolio_fitting.py")
+    assert env["AF_REPO_ROOT"] not in args
+
+
+def test_corrected_launcher_defaults_to_fresh_v2_result_root(tmp_path):
+    env = shell_environment(tmp_path)
+    env.pop("AF_CONSTRUCTION_PORTFOLIO_ROOT")
+    wrapper = REPO / "scripts/hpc/start_construction_portfolio_fitting_delta.sh"
+    subprocess.run(["bash", str(wrapper), "status"], env=env, check=True)
+    args = (tmp_path / "args.txt").read_text().splitlines()
+    assert args[args.index("--root") + 1] == (
+        "/work/hdd/bibo/yxiao2/phase_c/construction-portfolio-fitting-v2"
+    )
+    assert env["AF_OUTPUT_ROOT"] not in args
 
 
 def test_missing_intake_stops_before_prepare_or_submit(tmp_path):

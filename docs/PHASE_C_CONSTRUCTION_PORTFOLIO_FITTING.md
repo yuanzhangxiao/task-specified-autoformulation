@@ -6,6 +6,45 @@ It is separate from the pending LLM-SR detention continuation and preserves all
 23 model/domain identities, the public data, and the eight-unit prefix contract.
 It makes no claim that the models have already been fitted successfully.
 
+## Worker launch correction after the first returned inspection
+
+The first returned archive contains the authenticated 23-model inputs and accepted
+Slurm receipts (`run=23332572`, `report=23332573`), but **zero result records and
+zero numerical operation reservations**. It is not evidence of failed model
+fitting. The archive omitted worker logs, so the historical Slurm exit states
+cannot be established from it alone.
+
+A local Slurm-copy simulation reproduced a concrete launcher bug: `sbatch`
+executes a copied script from its spool directory, and the original wrapper
+unconditionally recomputed `AF_REPO_ROOT` relative to that copy. This overwrote
+the correct exported checkout and failed before Python with
+`Use the extracted source bundle, not an empty directory.` Both fitting and
+report workers used the affected path.
+
+The corrected worker requires and preserves the exported checkout. Login-side
+commands still derive it from the actual launcher path, ignoring stale inherited
+repository variables. Tests execute copies of both worker stages in a simulated
+Slurm spool directory, cover missing exports and stale login environments, and
+confirm normal stage routing. Inspection archives now include bounded stdout
+and stderr tails (last 64 KiB per file, up to 128 files), with truncation/omission
+metadata in `inspection_log_tails.json`. Log tails are diagnostic evidence, not
+numerical operation receipts.
+
+Use the corrected bundle in a new persistent code directory and the fresh
+`construction-portfolio-fitting-v2` root. Preserve v1 and its receipts; do not
+overwrite its sealed launcher or reset its journal. Equations, input data,
+initial guesses, reduction policy and fitting budgets are unchanged. No remote
+jobs were submitted or cancelled during this repair.
+
+Original returned archive SHA256:
+`965d388b2ded40989eaf8caa26bcecf093ab96fd5e1f7faa6301186dd1d32002`.
+
+Repair verification: **242 focused tests passed**, including 35 launcher tests
+and the bounded-log cases. The returned empty report reconstructed exactly.
+Changed Python files and Bash syntax pass their checks; repository-wide Ruff
+still has the same 37 unrelated analysis findings. The original full-suite
+attempt and its limitation remain recorded below.
+
 ## Why another adapter is needed
 
 Earlier experiments also had adapters. Their runners were specialized to the
@@ -139,7 +178,7 @@ AF_REPO=$(mktemp -d /projects/bibo/yxiao2/repos/construction-portfolio.XXXXXX)
 tar -xzf "$AF_BUNDLE" -C "$AF_REPO"
 cd "$AF_REPO"
 sha256sum -c SHA256SUMS --quiet
-export AF_CONSTRUCTION_PORTFOLIO_ROOT=/work/hdd/bibo/yxiao2/phase_c/construction-portfolio-fitting-v1
+export AF_CONSTRUCTION_PORTFOLIO_ROOT=/work/hdd/bibo/yxiao2/phase_c/construction-portfolio-fitting-v2
 bash scripts/hpc/start_construction_portfolio_fitting_delta.sh run
 printf 'Keep this code directory: %s\n' "$AF_REPO"
 ```
@@ -153,7 +192,7 @@ for inspection or change code under a running campaign.
 From that same extracted directory, use:
 
 ```bash
-export AF_CONSTRUCTION_PORTFOLIO_ROOT=/work/hdd/bibo/yxiao2/phase_c/construction-portfolio-fitting-v1
+export AF_CONSTRUCTION_PORTFOLIO_ROOT=/work/hdd/bibo/yxiao2/phase_c/construction-portfolio-fitting-v2
 bash scripts/hpc/start_construction_portfolio_fitting_delta.sh status
 squeue -u "$USER" -o '%.22i %.42j %.12T %R'
 bash scripts/hpc/start_construction_portfolio_fitting_delta.sh inspect
@@ -163,8 +202,8 @@ Inspection rebuilds the report from recorded evidence and writes
 `$AF_CONSTRUCTION_PORTFOLIO_ROOT/inspection.tar.gz`. Download it from the Mac:
 
 ```bash
-scp yxiao2@login.delta.ncsa.illinois.edu:/work/hdd/bibo/yxiao2/phase_c/construction-portfolio-fitting-v1/inspection.tar.gz \
-  "$HOME/Downloads/construction-portfolio-fitting-v1-inspection.tar.gz"
+scp yxiao2@login.delta.ncsa.illinois.edu:/work/hdd/bibo/yxiao2/phase_c/construction-portfolio-fitting-v2/inspection.tar.gz \
+  "$HOME/Downloads/construction-portfolio-fitting-v2-inspection.tar.gz"
 ```
 
 The launcher deliberately ignores old detention output-root variables. An

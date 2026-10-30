@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import json
 import tarfile
 from collections import Counter
 from collections.abc import Callable
@@ -603,7 +604,7 @@ def report(root: Path) -> dict:
 
 
 def inspection(root: Path) -> Path:
-    """Package the compact frozen inputs, results and journals for local review."""
+    """Package evidence and bounded worker logs, including pre-Python failures."""
     report(root)
     files = [
         root / name
@@ -629,6 +630,45 @@ def inspection(root: Path) -> Path:
             item = tarfile.TarInfo(str(path.relative_to(root)))
             item.size, item.mode = len(payload), 0o600
             archive.addfile(item, io.BytesIO(payload))
+        logs = sorted(
+            path
+            for path in (root / "logs").glob("*")
+            if path.suffix in {".out", ".err"}
+        )
+        log_manifest = {
+            "scope": "Diagnostic log tails; not numerical operation receipts.",
+            "maximum_files": 128,
+            "maximum_bytes_per_file": 65536,
+            "omitted_files": max(0, len(logs) - 128),
+            "files": [],
+        }
+        for path in logs[-128:]:
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or not path.resolve().is_relative_to(root.resolve())
+            ):
+                raise ValueError("inspection log escapes campaign root or is irregular")
+            with path.open("rb") as stream:
+                size = stream.seek(0, 2)
+                stream.seek(max(0, size - 65536))
+                payload = stream.read(65536)
+            name = str(path.relative_to(root))
+            log_manifest["files"].append(
+                {
+                    "path": name,
+                    "source_bytes_at_read": size,
+                    "included_bytes": len(payload),
+                    "truncated": size > 65536,
+                }
+            )
+            item = tarfile.TarInfo(name)
+            item.size, item.mode = len(payload), 0o600
+            archive.addfile(item, io.BytesIO(payload))
+        payload = json.dumps(log_manifest, indent=2, sort_keys=True).encode()
+        item = tarfile.TarInfo("inspection_log_tails.json")
+        item.size, item.mode = len(payload), 0o600
+        archive.addfile(item, io.BytesIO(payload))
     destination = root / "inspection.tar.gz"
     temporary = root / ".inspection.tar.gz.tmp"
     temporary.write_bytes(buffer.getvalue())

@@ -1,12 +1,19 @@
 #!/bin/bash
 # Separate training-only CPU campaign; this script also serves as its Slurm worker.
 set -euo pipefail
-export AF_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-export AF_CONSTRUCTION_PORTFOLIO_ROOT=${AF_CONSTRUCTION_PORTFOLIO_ROOT:-/work/hdd/bibo/yxiao2/phase_c/construction-portfolio-fitting-v1}
-export AF_PYTHON=${AF_PYTHON:-/projects/bibo/yxiao2/venvs/autoformalism-v21/bin/python}
-export AF_CASADI_ROOT=${AF_CASADI_ROOT:-/projects/bibo/yxiao2/venvs/fitter-methods-v1-deps}
 AF_STAGE=${1:?Use run, submit, verify, status, report, or inspect}
 shift
+case "$AF_STAGE" in
+  worker-run|worker-report)
+    # Slurm executes a spool copy; its location is not the submitted repository.
+    : "${AF_REPO_ROOT:?Slurm workers require exported AF_REPO_ROOT}"
+    export AF_REPO_ROOT
+    ;;
+  *) export AF_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd) ;;
+esac
+export AF_CONSTRUCTION_PORTFOLIO_ROOT=${AF_CONSTRUCTION_PORTFOLIO_ROOT:-/work/hdd/bibo/yxiao2/phase_c/construction-portfolio-fitting-v2}
+export AF_PYTHON=${AF_PYTHON:-/projects/bibo/yxiao2/venvs/autoformalism-v21/bin/python}
+export AF_CASADI_ROOT=${AF_CASADI_ROOT:-/projects/bibo/yxiao2/venvs/fitter-methods-v1-deps}
 printf 'Construction portfolio: stage=%s host=%s started=%s\n' "$AF_STAGE" "$(hostname)" "$(date -u +%FT%TZ)" >&2
 [[ -x "$AF_PYTHON" ]] || { echo 'Set AF_PYTHON to an existing project Python.' >&2; exit 2; }
 AF_CLI="$AF_REPO_ROOT/scripts/run_construction_portfolio_fitting.py"
