@@ -1,0 +1,320 @@
+"""CPU portfolio scheduling preserves identities and never retries ambiguous jobs."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from autoformalism.benchmarks.audited_release import read_seal, seal
+from autoformalism.fitting import public_fitting as public
+from scripts import run_construction_portfolio_fitting as cli
+from scripts import submit_review_continuation as scheduler
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def prepared(tmp_path, monkeypatch):
+    """Use scheduler fixtures, not numerical fits or cluster sessions."""
+    root, code = tmp_path / "results", tmp_path / "code"
+    plan = {
+        "protocol": "construction-portfolio-fitting-1",
+        "source_sha256": "frozen-source",
+        "tasks": [
+            {
+                "index": i,
+                "task_id": f"candidate-{i:02d}",
+                "candidate_id": f"candidate-{i:02d}",
+            }
+            for i in range(23)
+        ],
+    }
+    seal(root / "plan.json", plan)
+    monkeypatch.setattr(cli.campaign, "verify", lambda *a, **k: (plan, {}))
+    monkeypatch.setattr(cli, "runtime_identity", lambda: {"mode": "native"})
+    for name in cli.ENTRYPOINTS:
+        path = code / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# frozen entrypoint\n")
+    monkeypatch.setattr(cli, "REPO", code)
+    monkeypatch.setenv("AF_REPO_ROOT", str(code))
+    monkeypatch.setenv("AF_CONSTRUCTION_PORTFOLIO_ROOT", str(root))
+    monkeypatch.delenv("AF_ACCOUNT", raising=False)
+    monkeypatch.delenv("AF_CONSTRUCTION_PORTFOLIO_CONCURRENCY", raising=False)
+    return root, code, plan
+
+
+def accepting(monkeypatch):
+    """Exercise the real intent/reply/id writer against mocked Slurm replies."""
+    commands = []
+
+    def accept(argv, **kwargs):
+        commands.append(argv)
+        return SimpleNamespace(
+            returncode=0, stdout=f"{100 + len(commands)}\n", stderr=""
+        )
+
+    monkeypatch.setattr(scheduler.subprocess, "run", accept)
+    return commands
+
+
+def test_23_cpu_tasks_afterany_report_and_deduplicated_submission(
+    prepared, monkeypatch, capsys
+):
+    root, _, _ = prepared
+    commands = accepting(monkeypatch)
+    monkeypatch.setenv("AF_OUTPUT_ROOT", "/unrelated/campaign")
+    result = cli.submit(root)
+    assert result["jobs"] == {"run": "101", "report": "102"}
+    assert result["tasks"] == 23 and result["maximum_parallel_tasks"] == 2
+    assert result["gpus"] == result["llm_calls"] == 0
+    assert result["validation_or_test_access"] is False
+    assert "--array=0-22%2" in commands[0]
+    assert "--time=02:00:00" in commands[0]
+    assert "--dependency=afterany:101" in commands[1]
+    assert "--time=00:30:00" in commands[1]
+    assert commands[0][-2:] == ["worker-run", "0"]
+    assert commands[1][-2:] == ["worker-report", "0"]
+    for command in commands:
+        assert "--account=bibo-delta-cpu" in command
+        assert "--partition=cpu" in command
+        assert "--cpus-per-task=1" in command and "--mem=8G" in command
+        assert not any("gpu" in part for part in command)
+    assert os.environ["AF_CONSTRUCTION_PORTFOLIO_ROOT"] == str(root)
+    assert os.environ["AF_OUTPUT_ROOT"] == "/unrelated/campaign"
+    messages = capsys.readouterr().err
+    assert messages.index("Slurm accepted run: job 101") < messages.index(
+        "Submitting report"
+    )
+    assert cli.submit(root) == result
+    assert len(commands) == 2
+    assert cli.verify_execution(root)["source_sha256"] == "frozen-source"
+
+
+def test_submit_verifies_scientific_inputs_once(prepared, monkeypatch):
+    root, _, plan = prepared
+    accepting(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        cli.campaign, "verify", lambda *a, **k: (calls.append(a), (plan, {}))[1]
+    )
+    cli.submit(root)
+    assert calls == [(root,)]
+
+
+@pytest.mark.parametrize("failure", ["blank", "nonzero", "timeout"])
+def test_ambiguous_reply_is_never_resubmitted(prepared, monkeypatch, failure):
+    root, _, _ = prepared
+    calls = []
+
+    def fail(argv, **kwargs):
+        calls.append(argv)
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, 60)
+        return SimpleNamespace(
+            returncode=int(failure == "nonzero"), stdout="", stderr="uncertain"
+        )
+
+    monkeypatch.setattr(scheduler.subprocess, "run", fail)
+    with pytest.raises(ValueError, match=r"uncertain|unconfirmed"):
+        cli.submit(root)
+    with pytest.raises(ValueError, match="uncertain"):
+        cli.submit(root)
+    assert len(calls) == 1
+    assert not (root / cli.SUBMISSIONS / "report.intent.json").exists()
+
+
+def test_array_confirmation_survives_ambiguous_report(prepared, monkeypatch):
+    root, _, _ = prepared
+    calls = []
+
+    def reply(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(
+            returncode=0, stdout="103\n" if len(calls) == 1 else "", stderr=""
+        )
+
+    monkeypatch.setattr(scheduler.subprocess, "run", reply)
+    with pytest.raises(ValueError, match="unconfirmed"):
+        cli.submit(root)
+    with pytest.raises(ValueError, match="uncertain report"):
+        cli.submit(root)
+    assert len(calls) == 2
+    assert (root / cli.SUBMISSIONS / "run.id").read_text().strip() == "103"
+
+
+@pytest.mark.parametrize("change", ["source", "entrypoint", "runtime", "concurrency"])
+def test_frozen_execution_rejects_changes(prepared, monkeypatch, change):
+    root, code, plan = prepared
+    commands = accepting(monkeypatch)
+    cli.submit(root)
+    if change == "source":
+        plan["source_sha256"] = "new-source"
+    elif change == "entrypoint":
+        (code / cli.ENTRYPOINTS[1]).write_text("changed worker\n")
+    elif change == "concurrency":
+        monkeypatch.setenv("AF_CONSTRUCTION_PORTFOLIO_CONCURRENCY", "3")
+    else:
+        monkeypatch.setattr(cli, "runtime_identity", lambda: {"mode": "changed"})
+    with pytest.raises(ValueError, match="identity differs"):
+        cli.verify_execution(root)
+    with pytest.raises(ValueError):
+        cli.submit(root)
+    assert len(commands) == 2
+
+
+@pytest.mark.parametrize("value", ["0", "24", "-1", "two"])
+def test_invalid_concurrency_cannot_submit(prepared, monkeypatch, value):
+    root, _, _ = prepared
+    commands = accepting(monkeypatch)
+    monkeypatch.setenv("AF_CONSTRUCTION_PORTFOLIO_CONCURRENCY", value)
+    with pytest.raises(ValueError, match="CONCURRENCY"):
+        cli.submit(root)
+    assert not commands
+
+
+def test_empty_array_cannot_submit(prepared, monkeypatch):
+    root, _, plan = prepared
+    plan["tasks"] = []
+    commands = accepting(monkeypatch)
+    with pytest.raises(ValueError, match="nonempty task array"):
+        cli.submit(root)
+    assert not commands
+
+
+def test_manifest_never_bypasses_scheduler_receipt_checks(prepared, monkeypatch):
+    root, _, _ = prepared
+    commands = accepting(monkeypatch)
+    cli.submit(root)
+    path = root / cli.SUBMISSIONS / "run.reply.json"
+    path.write_text(json.dumps({"returncode": 0, "stdout": "999\n"}))
+    with pytest.raises(ValueError, match="unconfirmed run"):
+        cli.submit(root)
+    assert len(commands) == 2
+
+
+def test_status_uses_only_bound_terminal_receipts(prepared, monkeypatch):
+    root, _, plan = prepared
+    task = plan["tasks"][0]
+    terminal = root / "results" / task["task_id"] / "result.json"
+    identity = {"plan_sha256": public.content_sha256(plan), "task": task}
+    seal(
+        terminal,
+        {
+            "identity": identity,
+            "status": "complete",
+            "fitting_status": "budget_stopped",
+        },
+    )
+    monkeypatch.setattr(
+        cli.campaign, "report", lambda *a: pytest.fail("expensive report")
+    )
+    monkeypatch.setattr(cli.campaign, "verify", lambda *a: pytest.fail("input load"))
+    result = cli.status(root)
+    assert result["expected"] == 23 and result["recorded"] == 1
+    assert result["tasks"][0]["status"] == "complete"
+    assert result["tasks"][0]["fitting_status"] == "budget_stopped"
+    assert result["tasks"][0]["terminal_receipt_present"]
+    changed = read_seal(terminal)
+    changed["identity"]["plan_sha256"] = "different"
+    public._write(
+        terminal, {"value": changed, "sha256": public.content_sha256(changed)}
+    )
+    with pytest.raises(ValueError, match="status receipt differs"):
+        cli.status(root)
+
+
+def test_run_checks_execution_before_fitting(tmp_path, monkeypatch):
+    def rejected(root):
+        raise ValueError("launcher identity differs")
+
+    monkeypatch.setattr(cli, "verify_execution", rejected)
+    monkeypatch.setattr(cli.campaign, "run_task", lambda *a: pytest.fail("fitted"))
+    with pytest.raises(ValueError, match="identity differs"):
+        cli.main(["run", "--root", str(tmp_path), "--index", "0"])
+
+
+def test_status_rejects_path_traversal_before_reading_results(tmp_path):
+    seal(tmp_path / "plan.json", {"tasks": [{"task_id": "../foreign"}]})
+    with pytest.raises(ValueError, match="unsafe portfolio task path"):
+        cli.status(tmp_path)
+
+
+def test_inspect_prints_exact_archive_path(tmp_path, monkeypatch, capsys):
+    archive = tmp_path / "inspection.tar.gz"
+    monkeypatch.setattr(cli.campaign, "inspection", lambda root: archive)
+    cli.main(["inspect", "--root", str(tmp_path)])
+    assert json.loads(capsys.readouterr().out) == {"archive": str(archive)}
+
+
+def shell_environment(tmp_path):
+    """Record shell argument routing without importing science or contacting Slurm."""
+    python = tmp_path / "python"
+    python.write_text('#!/bin/bash\nprintf "%s\\n" "$@" >> "$AF_ARGUMENT_LOG"\n')
+    python.chmod(0o755)
+    intake = tmp_path / "intake"
+    intake.mkdir()
+    (intake / "manifest.json").write_text("{}")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AF_")}
+    env.update(
+        AF_CONSTRUCTION_PORTFOLIO_ROOT=str(tmp_path / "campaign"),
+        AF_CONSTRUCTION_PORTFOLIO_INTAKE=str(intake),
+        AF_OUTPUT_ROOT=str(tmp_path / "wrong-campaign"),
+        AF_PYTHON=str(python),
+        AF_ARGUMENT_LOG=str(tmp_path / "args.txt"),
+    )
+    return env
+
+
+def test_shell_run_prepares_then_submits_specific_campaign(tmp_path):
+    env = shell_environment(tmp_path)
+    wrapper = REPO / "scripts/hpc/start_construction_portfolio_fitting_delta.sh"
+    subprocess.run(["bash", "-n", str(wrapper)], check=True)
+    subprocess.run(["bash", str(wrapper), "run"], env=env, check=True)
+    args = (tmp_path / "args.txt").read_text().splitlines()
+    assert args.index("prepare") < args.index("submit")
+    assert env["AF_CONSTRUCTION_PORTFOLIO_ROOT"] in args
+    assert env["AF_CONSTRUCTION_PORTFOLIO_INTAKE"] in args
+    assert env["AF_OUTPUT_ROOT"] not in args
+    assert str(REPO / "configs/construction_portfolio_fitting_v1.json") in args
+    assert not {"pytest", "run", "--index"} & set(args)
+
+
+@pytest.mark.parametrize("command", ["status", "report", "inspect"])
+def test_shell_inspection_never_prepares_or_submits(tmp_path, command):
+    env = shell_environment(tmp_path)
+    wrapper = REPO / "scripts/hpc/start_construction_portfolio_fitting_delta.sh"
+    subprocess.run(["bash", str(wrapper), command], env=env, check=True)
+    args = (tmp_path / "args.txt").read_text().splitlines()
+    assert command in args
+    assert not {"prepare", "submit", "run", "--index"} & set(args)
+
+
+def test_worker_uses_array_index_and_rejects_invalid_index(tmp_path):
+    env = shell_environment(tmp_path) | {"SLURM_ARRAY_TASK_ID": "22"}
+    wrapper = REPO / "scripts/hpc/start_construction_portfolio_fitting_delta.sh"
+    subprocess.run(["bash", str(wrapper), "worker-run", "0"], env=env, check=True)
+    args = (tmp_path / "args.txt").read_text().splitlines()
+    assert args[args.index("--index") + 1] == "22"
+    assert "prepare" not in args and "submit" not in args
+    env["SLURM_ARRAY_TASK_ID"] = "invalid"
+    result = subprocess.run(
+        ["bash", str(wrapper), "worker-run"], env=env, capture_output=True, text=True
+    )
+    assert result.returncode != 0 and "nonnegative task index" in result.stderr
+
+
+def test_missing_intake_stops_before_prepare_or_submit(tmp_path):
+    env = shell_environment(tmp_path)
+    env["AF_CONSTRUCTION_PORTFOLIO_INTAKE"] = str(tmp_path / "missing")
+    wrapper = REPO / "scripts/hpc/start_construction_portfolio_fitting_delta.sh"
+    result = subprocess.run(
+        ["bash", str(wrapper), "run"], env=env, capture_output=True, text=True
+    )
+    assert result.returncode != 0 and "extracted, complete" in result.stderr
+    assert not (tmp_path / "args.txt").exists()

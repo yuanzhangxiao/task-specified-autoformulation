@@ -368,6 +368,7 @@ class TrainingOracle:
         if training.name != "train":
             raise ValueError("joint fitting accepts training only")
         self.problem = problem
+        self.training = training
         self.system, guesses, self.audit, self.settings, variables = _compile(
             problem, policy
         )
