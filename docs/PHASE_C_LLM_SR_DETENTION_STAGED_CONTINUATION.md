@@ -2,7 +2,78 @@
 
 Date: 2026-10-28. Opt-in, two-task CPU experiment using training data only.
 
-## Returned evidence
+## Returned continuation: 29 October
+
+Both tasks completed. The returned report reconstructs exactly from authenticated
+operation receipts. The 366-entry saved residual vectors reproduce the NMSEs,
+and recomputed scaled gradients agree with the saved assessment to floating-point
+roundoff. No fitting or integration was performed during this local review.
+
+| Start and coordinates | Before this continuation | Retained training NMSE | Reduction | Accepted steps |
+|---|---:|---:|---:|---:|
+| `perturbed_0`, original | 3.5854978934e-6 | 3.1187880955e-6 | 13.02% | 15 |
+| `generic_1`, reduced | 3.1999016188e-6 | 3.0324170615e-6 | 5.23% | 17 |
+
+Each retained endpoint is its own best and last accepted checkpoint and matches
+the final derivative qualification. Independent Radau/DOP853 loss differences
+are 1.98e-15 and 3.26e-15; maximum prediction differences are 1.79e-10 and
+1.49e-10. These are verified training improvements, not held-out results.
+
+Both searches consumed their 1,800-second allowance, interrupting a final
+Jacobian calculation after preserving the preceding useful checkpoint. Endpoint
+verification and all 17 coordinate audits completed. Reliable feasible descent
+remains: the original-coordinate `kappa` gradient is -0.00176786 with empirical
+error 4.22e-8; the reduced `b_fraction` gradient is 0.0260683 with error 4.11e-6.
+Both strict audits were correctly skipped. No stationarity, unique coefficients,
+global optimum, or parameter-confidence conclusion follows. In particular, the
+original `h_max` and `Q_max` sensitivity columns are locally zero and their local
+derivative checks remain inconclusive; an executed audit is not a stronger pass.
+
+| New measured operation wall time | `perturbed_0` | `generic_1` |
+|---|---:|---:|
+| Search | 1,800.20 s | 1,800.25 s |
+| Endpoint diagnostics | 353.18 s | 316.84 s |
+| Independent verification | 7.00 s | 6.96 s |
+| Total | 2,160.38 s | 2,124.06 s |
+
+Totals are about 36.01 and 35.40 minutes, excluding queue time, reporting and
+final receipt writes. Historical and nested invocation costs are not added again.
+Startup was about nine seconds to Python and another 1.9 seconds for input
+authentication; these logs show no infrastructure failure.
+
+Improvement is now much slower than in the preceding segment. The last accepted
+steps reduced the current loss by only 0.220% and 0.068%, respectively. A read-only
+inspection of the saved Jacobian shows nearly parallel parameter effects. With
+the uncentered similarity `abs(J_i.T @ J_j) / (norm(J_i) * norm(J_j))`,
+`k_loss`/`k_gw` score 0.99999247 and `d_fraction`/`M_fraction` score approximately
+0.999999999999992. This suggests a poorly conditioned local search, but these
+search-quality sensitivities do not certify structural nonidentifiability or
+parameter uncertainty. The already known exact original-coefficient ambiguity
+remains a separate algebraic fact.
+
+Recommendation: retain these endpoints as numerical controls and prioritize the
+[23-model construction campaign](PHASE_C_CONSTRUCTION_PORTFOLIO_FITTING.md).
+Do not automatically renew another identical continuation. If this control is
+revisited, compare the current optimizer with improved handling of correlated
+local parameter directions from the same saved endpoints and matched budgets.
+Any coordinate change must preserve original domains and lifting, retain
+independent original-equation verification, and revisit temporarily inactive
+directions. Smaller incremental gains are an allocation decision, not evidence
+that the achievable error floor or a local minimum has been reached.
+
+Returned archive SHA256:
+`5328905f9155caae5b7c7c185b0320d9512ea412d8ac48aa6f385744f30e5d9e`.
+Reconstructed report content SHA256:
+`cd4232912bb93105aecfcf3e96b612590813c196b384b08f31296de2d949a74f`.
+Report file SHA256:
+`45d3695a0b24c2dcf7efcb794245eef7d0df4f5473a117561cbf0663436fd85e`.
+
+Review verification: exact report replay plus independent residual/gradient
+recomputation passed; 22 continuation regression tests passed. Repository Ruff
+still reports 37 existing findings in unrelated analysis files. This update
+changes documentation only and does not alter the submitted 23-model campaign.
+
+## Earlier staged-polishing evidence
 
 The returned staged-polishing report reconstructs exactly from its operation
 receipts. Saved residuals reproduce both losses, and all 17 saved gradient
@@ -40,7 +111,7 @@ Source report content SHA256:
 Source report file SHA256:
 `e84c3863bfcaca65c1fba8cc2bc9c6411fa259865361fca2c0aad6159f67a9ac`.
 
-## Approved next experiment
+## Completed continuation design
 
 Give each of these two endpoints one additional uninterrupted 1,800-second
 search using the existing numerical algorithm and staged endpoint checks.
