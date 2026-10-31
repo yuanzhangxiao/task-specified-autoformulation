@@ -122,9 +122,41 @@ class _TimedOracle:
         return value
 
 
-def _invalidate(result, error, stage):
+def _bounded_diagnostic(value, *, depth=0, remaining=None):
+    """Retain bounded JSON evidence without interpreting an integration failure."""
+    remaining = [256] if remaining is None else remaining
+    remaining[0] -= 1
+    if remaining[0] < 0:
+        return "[item limit]"
+    if depth >= 6:
+        return "[depth limit]"
+    if value is None or isinstance(value, (bool, str, int, float)):
+        if isinstance(value, str):
+            return value[:2000]
+        if isinstance(value, float) and not np.isfinite(value):
+            return str(value)
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key)[:128]: _bounded_diagnostic(
+                item, depth=depth + 1, remaining=remaining
+            )
+            for key, item in list(value.items())[:64]
+            if remaining[0] > 0
+        }
+    if isinstance(value, (tuple, list)):
+        return [
+            _bounded_diagnostic(item, depth=depth + 1, remaining=remaining)
+            for item in value[:64] if remaining[0] > 0
+        ]
+    return f"[unsupported {type(value).__name__}]"
+
+
+def _invalidate(result, error, stage, *, preserve_diagnostic=False):
     """Keep useful candidates but revoke qualification after incomplete work."""
     result.update(status="incomplete", error=f"{type(error).__name__}: {error}")
+    if preserve_diagnostic and isinstance(getattr(error, "diagnostic", None), Mapping):
+        result["failure_diagnostic"] = _bounded_diagnostic(error.diagnostic)
     if stage == "search":
         result["stop_reason"] = (
             "budget_limited" if isinstance(error, TimeoutError) else "numerical_failure"
@@ -138,7 +170,9 @@ def _invalidate(result, error, stage):
         result["assessment"] = None
 
 
-def _finish(result, budget, checkpoint, stage, interrupted=None):
+def _finish(
+    result, budget, checkpoint, stage, interrupted=None, *, preserve_diagnostic=False
+):
     """Measure the final write once, then check both inclusive and active limits.
 
     A persisted progress snapshot necessarily predates its own write. The returned
@@ -149,7 +183,7 @@ def _finish(result, budget, checkpoint, stage, interrupted=None):
     try:
         budget.check()
     except TimeoutError as error:
-        _invalidate(result, error, stage)
+        _invalidate(result, error, stage, preserve_diagnostic=preserve_diagnostic)
     if interrupted is None and not budget.callback_failures:
         try:
             budget.check(numerical=False)
@@ -158,10 +192,10 @@ def _finish(result, budget, checkpoint, stage, interrupted=None):
             budget.callback(lambda: checkpoint(snapshot))
             budget.check()
         except Exception as error:
-            _invalidate(result, error, stage)
+            _invalidate(result, error, stage, preserve_diagnostic=preserve_diagnostic)
         except BaseException as error:
             interrupted = error
-            _invalidate(result, error, stage)
+            _invalidate(result, error, stage, preserve_diagnostic=preserve_diagnostic)
     result["timing"] = budget.snapshot()
     if interrupted is not None:
         interrupted.execution_receipt = deepcopy(result)

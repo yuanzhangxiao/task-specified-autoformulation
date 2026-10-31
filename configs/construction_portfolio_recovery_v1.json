@@ -1,0 +1,6 @@
+{
+  "population": "scaled-readout-23",
+  "replay_seconds": 180,
+  "coordinate_seconds": 60,
+  "diagnostic_seconds": 180
+}

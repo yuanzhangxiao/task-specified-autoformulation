@@ -285,6 +285,21 @@ def search(
         interrupted, result = error, last
         continuation._invalidate(result, error, "search")
         result.update(stop_reason="interrupted", budget_exhausted=True)
+    # A returned optimizer receipt must distinguish normal termination from an
+    # exhausted allowance. Missing historical evidence remains unknown below.
+    stop = result.get("stop_reason")
+    result.setdefault(
+        "budget_exhausted",
+        True
+        if stop == "budget_limited"
+        else False
+        if stop in {
+            "step_or_gradient_converged", "gradient_converged",
+            "numerical_target_reached", "output_problem_solved",
+            "stationary_poor_fit", "numerical_failure",
+        }
+        else None,
+    )
     result.update(
         optimizer_start=dict(start),
         portfolio_execution=oracle.execution_receipt(),
@@ -359,6 +374,30 @@ def verify_endpoint(
     return result
 
 
+def budget_status(search_result: Mapping) -> bool | None:
+    """Read explicit budget evidence or a complete, normally stopped receipt.
+
+    Missing, partial and interrupted historical evidence stays unknown. Callers
+    that normalize saved receipts must retain the original fields as provenance.
+    """
+    explicit = search_result.get("budget_exhausted")
+    if type(explicit) is bool:
+        return explicit
+    if "budget_exhausted" in search_result:
+        return None
+    if search_result.get("status") != "complete" or search_result.get("error"):
+        return None
+    stop = search_result.get("stop_reason")
+    if stop == "budget_limited":
+        return True
+    if stop in {
+        "step_or_gradient_converged", "gradient_converged",
+        "numerical_target_reached", "output_problem_solved", "stationary_poor_fit",
+    }:
+        return False
+    return None
+
+
 def diagnose(
     original,
     oracle,
@@ -411,7 +450,7 @@ def diagnose(
             verification=evidence,
             derivative=derivative,
             stop_reason=search_result.get("stop_reason") if matches else None,
-            budget_exhausted=bool(search_result.get("budget_exhausted", True)),
+            budget_exhausted=budget_status(search_result),
             history=history,
             coordinate_units=oracle.units,
             policy=_policy(),

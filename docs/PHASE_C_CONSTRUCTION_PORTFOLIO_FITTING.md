@@ -14,6 +14,11 @@ route and fail on several stiff fitted endpoints. See the
 [returned-results audit and next milestone](../work/agent-comms/2026-10-30-construction-portfolio-fitting-results.md)
 before interpreting missing forecasts or sending function-form revision feedback.
 
+The separate [numerical recovery campaign](PHASE_C_CONSTRUCTION_PORTFOLIO_RECOVERY.md)
+now preserves these fitted endpoints while correcting prefix propagation and
+requalifying blocked nonlinear starts. Its new root leaves v2 evidence intact;
+the full Delta recovery results are pending.
+
 ## Worker launch correction after the first returned inspection
 
 The first returned archive contains the authenticated 23-model inputs and accepted

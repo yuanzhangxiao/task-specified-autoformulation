@@ -161,6 +161,7 @@ def test_lazy_search_qualifies_synthetic_fit_and_records_distinct_costs():
     checkpoints = []
     searched = p.search(oracle, start, 15, 100, checkpoints.append)
     assert searched["best"]["training_nmse"] < 1e-8
+    assert searched["budget_exhausted"] is False
     assert searched["lazy_jacobian"]
     assert searched["jacobian_calls"] > 0
     assert searched["residual_calls"] > 0
@@ -184,6 +185,7 @@ def test_failed_initial_jacobian_retains_observed_residual_without_confidence():
     searched = p.search(oracle, oracle.start, 10, 10, lambda _: None)
     assert searched["best"]["parameters"] == oracle.start
     assert searched["stop_reason"] == "numerical_failure"
+    assert searched["budget_exhausted"] is False
     assert not searched["global_minimum_certified"]
     assert searched["failed_jacobian_calls"] == 1
 
@@ -198,3 +200,43 @@ def test_failed_checkpoint_prevents_more_numerical_work():
     result = p.search(oracle, oracle.start, 10, 10, failed)
     assert result["status"] == "incomplete"
     assert not base.calls
+
+
+@pytest.mark.parametrize(
+    ("receipt", "expected"),
+    [
+        ({"status": "complete", "stop_reason": "step_or_gradient_converged"}, False),
+        ({"status": "complete", "stop_reason": "budget_limited"}, True),
+        ({"stop_reason": "step_or_gradient_converged"}, None),
+        ({"status": "incomplete", "stop_reason": "step_or_gradient_converged"}, None),
+        ({"status": "complete", "stop_reason": "interrupted"}, None),
+        ({"status": "complete", "stop_reason": "unknown"}, None),
+        ({"budget_exhausted": "false"}, None),
+        ({"budget_exhausted": True}, True),
+        ({"budget_exhausted": False}, False),
+    ],
+)
+def test_search_budget_evidence_preserves_unknown(receipt, expected):
+    before = deepcopy(receipt)
+    assert p.budget_status(receipt) is expected
+    assert receipt == before
+
+
+@pytest.mark.parametrize(
+    ("stop", "expected"),
+    [
+        ("step_or_gradient_converged", False),
+        ("numerical_target_reached", False),
+        ("budget_limited", True),
+        ("numerical_failure", False),
+    ],
+)
+def test_every_new_terminal_search_records_budget_status(monkeypatch, stop, expected):
+    monkeypatch.setattr(
+        p.recovery_numerics,
+        "search",
+        lambda *args, **kwargs: {"stop_reason": stop},
+    )
+    oracle = p.PortfolioOracle(PairingFixture(), {})
+    result = p.search(oracle, oracle.start, 5, 5, lambda _: None)
+    assert result["budget_exhausted"] is expected
