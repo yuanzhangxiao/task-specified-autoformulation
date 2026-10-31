@@ -1,0 +1,10 @@
+{
+  "population": "scaled-readout-5",
+  "prerequisite_seconds": 600,
+  "coordinate_seconds": 240,
+  "qualification_seconds": 600,
+  "search_seconds": 1800,
+  "verification_seconds": 180,
+  "diagnostic_seconds": 600,
+  "maximum_calls": 500
+}

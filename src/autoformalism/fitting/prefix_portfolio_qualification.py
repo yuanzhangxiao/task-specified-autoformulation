@@ -273,13 +273,16 @@ def qualify_coordinate(
 
 
 def aggregate_qualification(
-    oracle: FixedRadauQualifier, receipts: Iterable[dict]
+    oracle: FixedRadauQualifier,
+    receipts: Iterable[dict],
+    *,
+    identity: dict | None = None,
 ) -> dict:
     """Require every active coordinate with matching finite local evidence."""
     required = tuple(int(i) for i in np.flatnonzero(oracle.lower < oracle.upper))
     point = oracle.vector(oracle.start)
     indexed, rows, baselines = {}, {}, set()
-    identity = _identity(oracle)
+    identity = _identity(oracle) if identity is None else deepcopy(identity)
     for receipt in receipts:
         index = receipt.get("index")
         if (

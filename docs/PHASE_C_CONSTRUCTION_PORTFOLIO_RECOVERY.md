@@ -11,6 +11,10 @@ nonlinear starts pass independent replay but their derivative prerequisites time
 out, and five starts fail both implicit solvers. Shared fitting remains unresolved.
 See [the returned-results audit](../work/agent-comms/2026-10-30-construction-portfolio-recovery-results.md)
 for the initialization gap, repeated-prerequisite defect and next priorities.
+The subsequent [five-model continuation](PHASE_C_CONSTRUCTION_PORTFOLIO_CONTINUATION.md)
+repairs the shared prerequisite/probe budgets and conditionally continues models
+12/15 after certified additive reductions and precision checks. The historical
+recovery policy described below remains unchanged.
 
 ## What changes
 
