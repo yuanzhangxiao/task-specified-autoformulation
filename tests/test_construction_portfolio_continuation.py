@@ -50,6 +50,11 @@ def test_affine_smoke_preserves_incumbents_and_qualifies_before_search(continued
     for index, result in enumerate(results):
         assert result["qualification"]["passed"], result
         assert result["shared_parameter_search_attempted"]
+        assert result["operation_statuses"]["search"] == "complete"
+        assert result["continuation_status"] in {
+            "continued_verified",
+            "continuation_no_improvement",
+        }
         assert result["retained"]["original_equations_verified"]
         assert (
             result["training_reconstruction_nmse"]
@@ -234,7 +239,9 @@ def new_nonlinear(recovered, tmp_path, monkeypatch):  # noqa: F811
 
 
 def test_shared_prerequisites_run_once_and_probe_receipts_are_authenticated(
-    recovered, tmp_path, monkeypatch  # noqa: F811
+    recovered,  # noqa: F811
+    tmp_path,
+    monkeypatch,
 ):
     root, calls = new_nonlinear(recovered, tmp_path, monkeypatch)
     result = campaign.run_task(root, 0)
@@ -260,7 +267,9 @@ def test_failed_prerequisite_blocks_all_probes(recovered, tmp_path, monkeypatch,
 
 
 def test_interrupted_coordinate_does_not_repeat_prerequisites_or_probe(
-    recovered, tmp_path, monkeypatch  # noqa: F811
+    recovered,  # noqa: F811
+    tmp_path,
+    monkeypatch,
 ):
     root, calls = new_nonlinear(recovered, tmp_path, monkeypatch)
     coordinate = campaign.prerequisites.qualify_coordinate

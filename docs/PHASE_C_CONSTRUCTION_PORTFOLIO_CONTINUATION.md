@@ -104,6 +104,17 @@ The full repository pytest suite was not run. Read-only production preparation
 authenticated all 23 historical terminals and selected exactly the five declared
 tasks, with a maximum reservation of 9,600 seconds.
 
+The packaged worker smoke exposed a JSON tuple/list mismatch in the precision
+receipt identity. Identity fields are now normalized before comparison; saved
+and in-memory receipts pass the same strict gate. The 119 tests covering this
+campaign and its new numerical helpers passed after that correction.
+
+A final end-to-end nonlinear smoke imported all three saved baselines without
+new solves. Model 14's shared Jacobian passed in 19.63 seconds overall, and one
+coordinate passed after six actual BDF probes in 50.07 seconds. The strict
+aggregate correctly withheld qualification because 28 directions remained
+unchecked. Source hashes were unchanged.
+
 ## Delta commands
 
 The launcher authenticates every terminal in `construction-portfolio-recovery-v1`

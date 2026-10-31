@@ -66,7 +66,9 @@ def _identity(oracle, parameters):
         "portfolio_audit_sha256": public.content_sha256(oracle.portfolio_audit),
         "parameters_sha256": public.content_sha256(parameters),
         "solver_settings_sha256": public.content_sha256(oracle.original.settings),
-        "affine_precision_policy": asdict(oracle.original.precision_policy),
+        "affine_precision_policy": public._jsonable(
+            asdict(oracle.original.precision_policy)
+        ),
         "derivative_policy": portfolio._policy().model_dump(mode="json"),
     }
 

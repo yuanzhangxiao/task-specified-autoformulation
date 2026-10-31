@@ -1,5 +1,6 @@
 """Only a complete, matching precision receipt can open warm shared continuation."""
 
+import json
 from copy import deepcopy
 
 import numpy as np
@@ -43,7 +44,12 @@ def test_qualification_replays_saved_anchor_original_ode_and_all_columns():
         oracle.start
     )
     search = polish.search(
-        oracle, oracle.start, 3, 8, lambda _: None, qualification=result
+        oracle,
+        oracle.start,
+        3,
+        8,
+        lambda _: None,
+        qualification=json.loads(json.dumps(result)),
     )
     assert search["original_incumbent_preserved"]
     assert search["optimizer_start"] == oracle.start
