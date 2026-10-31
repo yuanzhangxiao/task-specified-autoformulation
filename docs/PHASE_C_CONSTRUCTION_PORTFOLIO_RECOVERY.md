@@ -6,6 +6,12 @@ It preserves the 23 equations, their domains, the public training data, the
 eight-unit prefix, and every historical receipt. No shared parameters are
 refitted and no proposal, judge, validation or test call is made.
 
+Returned results: all 15 affine models now have all 16 prefix forecasts; three
+nonlinear starts pass independent replay but their derivative prerequisites time
+out, and five starts fail both implicit solvers. Shared fitting remains unresolved.
+See [the returned-results audit](../work/agent-comms/2026-10-30-construction-portfolio-recovery-results.md)
+for the initialization gap, repeated-prerequisite defect and next priorities.
+
 ## What changes
 
 The previous campaign used certified affine propagation for shared fitting,
