@@ -6,6 +6,14 @@ It is separate from the pending LLM-SR detention continuation and preserves all
 23 model/domain identities, the public data, and the eight-unit prefix contract.
 It makes no claim that the models have already been fitted successfully.
 
+Returned v2 results (30 October): all 23 tasks are recorded; 15 affine models
+entered fitting and eight nonlinear models were blocked during qualification.
+The best reconstruction NMSEs are 0.564509 and 0.564608, with optimization
+adequacy still unresolved. Prefix inference/forecasting still use a generic ODE
+route and fail on several stiff fitted endpoints. See the
+[returned-results audit and next milestone](../work/agent-comms/2026-10-30-construction-portfolio-fitting-results.md)
+before interpreting missing forecasts or sending function-form revision feedback.
+
 ## Worker launch correction after the first returned inspection
 
 The first returned archive contains the authenticated 23-model inputs and accepted
