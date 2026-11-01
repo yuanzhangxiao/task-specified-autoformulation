@@ -32,6 +32,7 @@ from autoformalism.research import construction_fit_qualification as journal
 from autoformalism.research import construction_portfolio_fitting as first
 from autoformalism.research import construction_portfolio_intake as intake
 from autoformalism.research import construction_portfolio_recovery as previous
+from autoformalism.research import continuation_report_cost as reporting
 from autoformalism.schemas.base import FiniteFloat, StrictSchema
 from autoformalism.schemas.prefix_initialization import PrefixFitProblem, PrefixPolicy
 from autoformalism.schemas.public_fitting import PublicSplit
@@ -448,7 +449,7 @@ def _assemble(identity: dict, data: dict, operations: dict) -> dict:
         "operation_receipts": {
             n: public.content_sha256(v) for n, v in operations.items()
         },
-        "cost": journal._cost(operations),
+        "cost": reporting.canonical_cost(operations),
         "test_data_opened": False,
         "live_llm_calls": 0,
         "automatic_revision": False,
@@ -477,9 +478,9 @@ def run_task(root: Path, index: int) -> dict:
         operations = _operations(folder, identity, allowances)
         if (folder / "result.json").exists():
             result = _assemble(identity, data, operations)
-            if result != read_seal(folder / "result.json"):
-                raise ValueError("continuation terminal differs from evidence")
-            return result
+            saved = read_seal(folder / "result.json")
+            reporting.reconcile(saved, result, operations)
+            return saved
         compiled = None
 
         def oracles():
@@ -714,6 +715,7 @@ def report(root: Path) -> dict:
     plan, data = verify(root, runtime=False)
     policy = Policy.model_validate(plan["policy"])
     rows = []
+    reconciliations = {}
     for task in plan["tasks"]:
         identity = {"plan_sha256": public.content_sha256(plan), "task": task}
         folder = root / "results" / task["task_id"]
@@ -722,8 +724,10 @@ def report(root: Path) -> dict:
         )
         value = _assemble(identity, data, operations)
         terminal = (folder / "result.json").exists()
-        if terminal and read_seal(folder / "result.json") != value:
-            raise ValueError("continuation report differs from terminal")
+        if terminal:
+            reconciliations[task["task_id"]] = reporting.reconcile(
+                read_seal(folder / "result.json"), value, operations
+            )
         rows.append(
             value
             | {
@@ -743,6 +747,7 @@ def report(root: Path) -> dict:
         "recorded": recorded,
         "rows": rows,
         "status_counts": dict(Counter(r["continuation_status"] for r in rows)),
+        "terminal_reconciliations": reconciliations,
         "test_data_opened": False,
         "live_llm_calls": 0,
         "limitations": [

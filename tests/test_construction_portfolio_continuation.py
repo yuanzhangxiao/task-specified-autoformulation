@@ -78,6 +78,48 @@ def test_terminal_resume_is_read_only(continued, monkeypatch):
     assert before == {p: p.read_bytes() for p in root.rglob("*.json")}
 
 
+def test_report_reconciles_only_legacy_time_roundoff_without_rewriting_terminals(
+    continued, tmp_path
+):
+    import math
+    import shutil
+
+    root = tmp_path / "copied"
+    shutil.copytree(continued[0], root)
+    path = root / "results/candidate-00/result.json"
+    saved = campaign.read_seal(path)
+    field = "callback_cpu_seconds_total"
+    saved["cost"][field] = math.nextafter(saved["cost"][field], math.inf)
+    path.unlink()
+    campaign.seal(path, saved)
+    before = {p: p.read_bytes() for p in (root / "results").rglob("*.json")}
+    summary = campaign.report(root)
+    assert summary["status"] == "complete"
+    audit = summary["terminal_reconciliations"]["candidate-00"]
+    assert audit["status"] == "derived_time_roundoff_only"
+    assert [row["path"] for row in audit["differences"]] == ["cost." + field]
+    assert audit["scientific_fields_exact"]
+    assert not audit["original_terminal_modified"]
+    assert before == {p: p.read_bytes() for p in (root / "results").rglob("*.json")}
+    assert campaign.report(root) == summary
+
+
+def test_report_rejects_scientific_difference_even_with_valid_terminal_seal(
+    continued, tmp_path
+):
+    import shutil
+
+    root = tmp_path / "copied"
+    shutil.copytree(continued[0], root)
+    path = root / "results/candidate-00/result.json"
+    saved = campaign.read_seal(path)
+    saved["training_reconstruction_nmse"] += 1e-12
+    path.unlink()
+    campaign.seal(path, saved)
+    with pytest.raises(ValueError, match="outside derived timing"):
+        campaign.report(root)
+
+
 def test_unqualified_or_worse_endpoint_never_replaces_source():
     def op(value):
         return {"status": "complete", "value": value}

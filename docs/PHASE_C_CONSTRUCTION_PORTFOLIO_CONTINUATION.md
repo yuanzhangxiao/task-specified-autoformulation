@@ -6,6 +6,12 @@ All source results remain immutable. Equations, parameter domains, training
 objective, normalization and eight-unit observation prefix remain unchanged.
 There are no LLM calls, GPUs, validation/test access or automatic model revisions.
 
+Returned results and the report-only timing repair are documented in
+[the 31 October review](../work/agent-comms/2026-10-31-construction-portfolio-continuation-results.md).
+Models 10/14 are now search-qualified; 03 has four inconclusive directions;
+12/15 show negligible improvement and remain unresolved. A corrected reader
+can report the existing campaign without rerunning any fitting operations.
+
 ## Shared numerical prerequisites
 
 The old coordinate checks repeatedly spent their allowance rebuilding a common
@@ -36,6 +42,13 @@ cost is included in the parent operation, never counted twice. Deleted, changed
 or orphaned receipts are rejected. A resume reuses completed prerequisites and
 coordinates; an interrupted reservation stays spent. It cannot renew a budget
 or silently retry an interrupted probe. New unattempted coordinates may proceed.
+
+The 31 October reader also makes derived time totals independent of operation
+directory order. It reconciles historical addition roundoff against authenticated
+timing operands and records the reconciliation in the summary. It does not
+change scientific values, operation receipts or original terminal files. For
+an already completed campaign, run only `inspect` from the new reader bundle;
+do not resubmit its fitting tasks or replace the old frozen source directory.
 
 ## Certified additive reductions and continuation
 
