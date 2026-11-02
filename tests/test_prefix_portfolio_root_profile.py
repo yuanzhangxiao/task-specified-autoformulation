@@ -1,5 +1,6 @@
 """Root-only projection preserves affine maps, data weights and original bounds."""
 
+import json
 from copy import deepcopy
 from time import monotonic
 
@@ -188,6 +189,7 @@ def test_search_profiles_every_root_and_retains_control_at_call_limit():
     assert not result["derivatives_used"]
     assert all(not n.startswith("trajectory:") for n in result["outer_coordinates"])
     assert records and result["independent_original_verification_required"]
+    assert "failure_diagnostics" not in result
 
 
 def test_fixed_shared_parameters_are_not_optimized():
@@ -291,3 +293,203 @@ def test_qualification_setup_failure_never_qualifies(monkeypatch):
     assert result["passed"] is False
     assert result["verification_calls_started"] == 0
     assert "uncertified setup" in result["error"]
+
+
+def boundary_oracle(lower=0):
+    """A canonical shared readout offset survives the timescale chart unchanged."""
+    source = coupled()
+    payload = source.problem.model_dump(mode="json")
+    payload["base_candidate"]["parameters"].append(
+        {
+            "name": "offset",
+            "scope": "global",
+            "role": "coefficient",
+            "bounds": {"lower": lower, "upper": 2},
+        }
+    )
+    payload["base_candidate"]["observation_mappings"][0]["expression"] = "x+z+offset"
+    payload["parameter_guesses"]["offset"] = 0.25
+    source = kernel.TrainingOracle(
+        PrefixFitProblem.model_validate(payload),
+        training(source),
+        kernel.NumericalPolicy(),
+    )
+    return wrapped(source)
+
+
+def test_zero_boundary_reprofiles_roots_without_selecting_or_moving_shared_parameters():
+    original, oracle = boundary_oracle()
+    before = deepcopy(oracle.start)
+    records = []
+    result = roots.root_boundary_control(oracle, before, "offset", 10, records.append)
+    assert result["passed"] and result["feasible"]
+    assert result["conditional_root_optimality_checked"]
+    assert (
+        result["parameters"]["offset"] == result["original_parameters"]["offset"] == 0
+    )
+    assert result["other_shared_coordinates_unchanged"]
+    assert result["other_original_shared_parameters_unchanged"]
+    assert result["independent_original_verification_required"]
+    assert (
+        not result["original_equations_verified"] and not result["candidate_selected"]
+    )
+    assert before == oracle.start
+    for name, value in before.items():
+        if name != "offset" and not name.startswith("trajectory:"):
+            assert result["parameters"][name] == value
+    residual, _ = original.evaluate(
+        original.vector(result["original_parameters"]),
+        monotonic() + 10,
+        jacobian=False,
+        method="Radau",
+    )
+    assert np.mean(residual**2) == pytest.approx(result["training_nmse"], abs=1e-9)
+    assert (
+        result["verification_calls_started"]
+        == result["verification_calls_completed"]
+        == 2
+    )
+    assert result["verification_calls_failed"] == 0
+    assert result["profile_execution"]["profile_calls_completed"] == 1
+    assert records[-1]["passed"]
+
+
+@pytest.mark.parametrize("name", ["missing", "trajectory:first:z", "timescale:x"])
+def test_boundary_rejects_unknown_root_and_noncanonical_chart_names(name):
+    _, oracle = boundary_oracle()
+    result = roots.root_boundary_control(oracle, oracle.start, name, 10, lambda _: None)
+    assert not result["passed"] and not result["feasible"]
+    assert result["verification_calls_started"] == 0
+    assert "original shared coordinate" in result["error"]
+
+
+def test_boundary_preserves_declared_domain_and_rejects_zero_outside_it():
+    _, oracle = boundary_oracle(lower=0.1)
+    result = roots.root_boundary_control(
+        oracle, oracle.start, "offset", 10, lambda _: None
+    )
+    assert not result["passed"] and not result["feasible"]
+    assert "outside the declared" in result["error"]
+    assert result["profile_execution"]["profile_calls_started"] == 0
+
+
+def test_boundary_failed_pairing_is_not_a_feasible_candidate(monkeypatch):
+    _, oracle = boundary_oracle()
+    original = oracle.evaluate
+
+    def wrong(*args, **kwargs):
+        residual, _ = original(*args, **kwargs)
+        return residual + 1, None
+
+    monkeypatch.setattr(oracle, "evaluate", wrong)
+    result = roots.root_boundary_control(
+        oracle, oracle.start, "offset", 10, lambda _: None
+    )
+    assert not result["passed"] and not result["feasible"]
+    assert not result["conditional_root_optimality_checked"]
+    assert result["verification_calls_completed"] == 2
+    sample = result["failure_diagnostics"]["representative_trials"][0]
+    assert sample["stage"] == "pairing"
+    assert sample["maximum_pairing_discrepancy"] == pytest.approx(1)
+
+
+def test_boundary_deadline_does_not_restart_or_claim_success(monkeypatch):
+    _, oracle = boundary_oracle()
+    calls = []
+
+    def timeout(self, parameters, deadline):
+        calls.append(parameters)
+        raise TimeoutError("injected boundary deadline")
+
+    monkeypatch.setattr(roots.RootProfile, "profile", timeout)
+    result = roots.root_boundary_control(
+        oracle, oracle.start, "offset", 10, lambda _: None
+    )
+    assert len(calls) == 1 and not result["passed"]
+    assert result["status"] == "incomplete"
+    assert "deadline" in result["error"]
+
+
+def test_search_failure_diagnostics_preserve_kkt_gate_and_best(monkeypatch):
+    _, oracle = wrapped()
+    project = roots.projection._project
+    calls = 0
+
+    def failing(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls <= 2:  # The initial point profiles both trajectories successfully.
+            return project(*args, **kwargs)
+        raise roots.projection.ProfileUnavailable(
+            "projection KKT residual unresolved",
+            {
+                "status": "kkt_unavailable",
+                "normalized_kkt_residual": 0.01,
+                "kkt_tolerance": 1e-10,
+                "active_mask": [0],
+                "normalized_gradient": [0.01],
+                "design_rank": 1,
+            },
+        )
+
+    monkeypatch.setattr(roots.projection, "_project", failing)
+    records = []
+    result = roots.root_profile_search(
+        oracle,
+        oracle.start,
+        10,
+        6,
+        records.append,
+        failure_diagnostics=True,
+    )
+    assert result["search_calls_completed"] == 1 and result["invalid_trials"] == 5
+    assert (
+        result["best"]["training_nmse"]
+        <= result["unoptimized_control"]["training_nmse"]
+    )
+    diagnostics = result["failure_diagnostics"]
+    assert sum(diagnostics["histogram"].values()) == 5
+    assert len(diagnostics["representative_trials"]) == 2
+    assert diagnostics["omitted_representatives"] == 3
+    sample = diagnostics["representative_trials"][0]
+    assert sample["stage"] == "inner_solve" and sample["trajectory_id"] == "first"
+    assert sample["inner_solve"]["normalized_kkt_residual"] == 0.01
+    assert sample["inner_solve"]["kkt_tolerance"] == 1e-10
+    assert all(not n.startswith("trajectory:") for n in sample["shared_parameters"])
+    assert records[-1]["failure_diagnostics"] == diagnostics
+
+
+def test_failure_receipt_stays_bounded_and_json_finite():
+    _, oracle = wrapped()
+    profiler = roots.RootProfile(oracle)
+    ledger = roots._failure_ledger()
+    for i in range(80):
+        error = roots.projection.ProfileUnavailable(
+            "x" * 2000,
+            {"status": f"failure-{i}", "normalized_gradient": [np.nan] * 100},
+        )
+        roots._record_failure(
+            ledger,
+            error,
+            attempt=i,
+            oracle=oracle,
+            indices=profiler.outer,
+            point=oracle.vector(oracle.start),
+        )
+    assert sum(ledger["histogram"].values()) == 80
+    assert len(ledger["histogram"]) <= 9
+    assert len(ledger["representative_trials"]) == 8
+    assert ledger["omitted_representatives"] == 72
+    assert len(json.dumps(ledger, allow_nan=False)) < 15000
+
+
+def test_opt_in_diagnostics_do_not_change_successful_search_result():
+    _, oracle = wrapped()
+    plain = roots.root_profile_search(oracle, oracle.start, 10, 5, lambda _: None)
+    diagnostic = roots.root_profile_search(
+        oracle, oracle.start, 10, 5, lambda _: None, failure_diagnostics=True
+    )
+    assert plain["best"] == diagnostic["best"]
+    assert plain["profile_execution"] == diagnostic["profile_execution"]
+    assert "failure_diagnostics" not in plain
+    assert diagnostic["failure_diagnostics"]["histogram"] == {}

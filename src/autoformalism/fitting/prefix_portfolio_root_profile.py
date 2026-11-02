@@ -29,6 +29,106 @@ from autoformalism.fitting.recovery_numerics import NumericalInvalidTrial
 from autoformalism.fitting.simulation import trajectory_forcing
 
 PROTOCOL = "portfolio-affine-initial-root-profile-1"
+FAILURE_PROTOCOL = "bounded-root-profile-failures-1"
+BOUNDARY_PROTOCOL = "portfolio-initial-root-zero-boundary-1"
+
+
+def _failure_ledger() -> dict:
+    """Bound diagnostic growth independently of the outer evaluation allowance."""
+    return {
+        "protocol": FAILURE_PROTOCOL,
+        "histogram": {},
+        "representative_trials": [],
+        "omitted_representatives": 0,
+        "limits": {
+            "named_failure_kinds": 8,
+            "overflow_bucket": "other",
+            "representatives": 8,
+            "per_kind": 2,
+        },
+        "scope": "invalid trials only; no tolerance changes or candidate acceptance",
+    }
+
+
+def _diagnostic_number(value):
+    """Keep receipts JSON-finite even when the rejected trial was nonfinite."""
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return float(value) if np.isfinite(value) else None
+    return None
+
+
+def _record_failure(ledger, error, *, attempt, oracle, indices, point) -> None:
+    """Record bounded representative shared points and original KKT diagnostics."""
+    audit = getattr(error, "audit", {})
+    audit = audit if isinstance(audit, Mapping) else {}
+    context = getattr(error, "root_profile_diagnostic", {})
+    context = context if isinstance(context, Mapping) else {}
+    kind = ":".join(
+        str(v)[:64]
+        for v in (
+            type(error).__name__,
+            context.get("stage", "trial"),
+            audit.get("status", ""),
+        )
+    )
+    histogram = ledger["histogram"]
+    if kind not in histogram and len(set(histogram) - {"other"}) >= 8:
+        kind = "other"
+    histogram[kind] = histogram.get(kind, 0) + 1
+    samples = ledger["representative_trials"]
+    if len(samples) >= 8 or sum(s["kind"] == kind for s in samples) >= 2:
+        ledger["omitted_representatives"] += 1
+        return
+    detail = {
+        "attempt": attempt,
+        "kind": kind,
+        "message": str(error)[:500],
+        "stage": str(context.get("stage", "trial"))[:64],
+        "shared_parameters": None,
+    }
+    if point is not None:
+        detail["shared_parameters"] = {
+            oracle.names[i][:160]: _diagnostic_number(point[i])
+            for i in list(indices)[:32]
+        }
+        detail["shared_parameters_truncated"] = len(indices) > 32
+    if "trajectory_id" in context:
+        detail["trajectory_id"] = str(context["trajectory_id"])[:160]
+    for name in (
+        "maximum_pairing_discrepancy",
+        "projected_training_nmse",
+        "training_nmse",
+    ):
+        if name in context:
+            detail[name] = _diagnostic_number(context[name])
+    detail["inner_solve"] = {
+        name: _diagnostic_number(audit[name])
+        for name in (
+            "design_rank",
+            "design_columns",
+            "normalized_kkt_residual",
+            "kkt_tolerance",
+            "optimality",
+            "training_nmse",
+            "iterations",
+            "bounds_satisfied",
+        )
+        if name in audit
+    }
+    for name in (
+        "normalized_gradient",
+        "active_mask",
+        "column_units",
+        "column_normalized_singular_values",
+    ):
+        if isinstance(audit.get(name), (list, tuple, np.ndarray)):
+            detail["inner_solve"][name] = [
+                _diagnostic_number(v) for v in audit[name][:16]
+            ]
+            detail["inner_solve"][f"{name}_truncated"] = len(audit[name]) > 16
+    samples.append(detail)
 
 
 def _check(deadline: float) -> None:
@@ -66,8 +166,9 @@ def _root_chart(oracle, names: tuple[str, ...]) -> None:
 class RootProfile:
     """Exact affine basis and bounded LS for independent training initial roots."""
 
-    def __init__(self, oracle):
+    def __init__(self, oracle, *, failure_diagnostics: bool = False):
         self.oracle, self.original = oracle, oracle.original
+        self.failure_diagnostics = failure_diagnostics
         original, system = self.original, self.original.system
         candidate = system.model.validated.candidate
         if candidate.constraints or original.problem.base_candidate.constraints:
@@ -222,8 +323,12 @@ class RootProfile:
         self.counts[f"{kind}_calls_started"] += 1
         try:
             value = function()
-        except BaseException:
+        except BaseException as error:
             self.counts[f"{kind}_calls_failed"] += 1
+            if self.failure_diagnostics and not hasattr(
+                error, "root_profile_diagnostic"
+            ):
+                error.root_profile_diagnostic = {"stage": kind}
             raise
         self.counts[f"{kind}_calls_completed"] += 1
         return value
@@ -243,15 +348,23 @@ class RootProfile:
             fixed = lower == upper
             fitted = lower.copy()
             if np.any(~fixed):
-                fitted[~fixed], residual, _, audit = projection._project(
-                    a[:, ~fixed],
-                    b + a[:, fixed] @ lower[fixed],
-                    None,
-                    None,
-                    lower[~fixed],
-                    upper[~fixed],
-                    deadline,
-                )
+                try:
+                    fitted[~fixed], residual, _, audit = projection._project(
+                        a[:, ~fixed],
+                        b + a[:, fixed] @ lower[fixed],
+                        None,
+                        None,
+                        lower[~fixed],
+                        upper[~fixed],
+                        deadline,
+                    )
+                except Exception as error:
+                    if self.failure_diagnostics:
+                        error.root_profile_diagnostic = {
+                            "stage": "inner_solve",
+                            "trajectory_id": block["trajectory_id"],
+                        }
+                    raise
             else:
                 residual = a @ fitted + b
                 audit = {"status": "all_roots_fixed", "bounds_satisfied": True}
@@ -275,7 +388,15 @@ class RootProfile:
             or discrepancy > portfolio.PAIRING_TOLERANCE
             or abs(predicted_loss - actual_loss) > max(1e-12, 1e-8 * actual_loss)
         ):
-            raise NumericalInvalidTrial("profile basis/full-rollout pairing differs")
+            error = NumericalInvalidTrial("profile basis/full-rollout pairing differs")
+            if self.failure_diagnostics:
+                error.root_profile_diagnostic = {
+                    "stage": "pairing",
+                    "maximum_pairing_discrepancy": discrepancy,
+                    "projected_training_nmse": predicted_loss,
+                    "training_nmse": actual_loss,
+                }
+            raise error
         return {
             "parameters": fitted_parameters,
             "original_parameters": continuation.to_original(
@@ -347,12 +468,14 @@ def root_profile_search(
     checkpoint: Callable[[dict], None],
     *,
     fixed: Mapping[str, float] | None = None,
+    failure_diagnostics: bool = False,
 ) -> dict:
     """Profile initial roots at each bounded Powell shared-parameter trial.
 
     The caller must journal this operation with a nonrenewable allowance. Each
     improved feasible checkpoint is saved immediately; interrupted work is not
     automatically replayed. Two different seeds receive independent equal limits.
+    Failure diagnostics are opt-in and do not relax numerical acceptance checks.
     """
     if (
         not 0 < seconds <= 3600
@@ -360,6 +483,8 @@ def root_profile_search(
         or not 1 <= maximum_calls <= 10000
     ):
         raise ValueError("root-profile search needs <=3600 seconds and <=10000 calls")
+    if type(failure_diagnostics) is not bool:
+        raise ValueError("failure_diagnostics must be boolean")
     budget = execution._budget(seconds, min(seconds + 120, 3600))
     result = {
         "protocol": PROTOCOL,
@@ -384,6 +509,8 @@ def root_profile_search(
         "accepted_shared_iteration_history": [],
         "outer_coordinates_varied": [],
     }
+    if failure_diagnostics:
+        result["failure_diagnostics"] = _failure_ledger()
     profiler, interrupted = None, None
 
     def save():
@@ -394,7 +521,11 @@ def root_profile_search(
         )
 
     try:
-        profiler = budget.numerical(lambda _: RootProfile(oracle))
+        profiler = budget.numerical(
+            lambda _: RootProfile(oracle, failure_diagnostics=True)
+            if failure_diagnostics
+            else RootProfile(oracle)
+        )
         result["root_profile_certificate"] = deepcopy(profiler.audit)
         fixed = dict(fixed or {})
         if set(fixed) - {oracle.names[i] for i in profiler.outer}:
@@ -496,6 +627,7 @@ def root_profile_search(
             result["outer_coordinates_varied"] = sorted(
                 set(result["outer_coordinates_varied"]) | varied
             )
+            point = None
             try:
                 point = point_for(q)
                 endpoint = budget.numerical(
@@ -506,6 +638,15 @@ def root_profile_search(
                 result["search_calls_failed"] += 1
                 result["invalid_trials"] += 1
                 result["last_invalid_trial"] = f"{type(error).__name__}: {error}"[-500:]
+                if failure_diagnostics:
+                    _record_failure(
+                        result["failure_diagnostics"],
+                        error,
+                        attempt=result["search_calls_started"],
+                        oracle=oracle,
+                        indices=profiler.outer,
+                        point=point,
+                    )
                 save()
                 return float("inf")
             except BaseException:
@@ -576,3 +717,127 @@ def root_profile_search(
     if profiler is not None:
         result["profile_execution"] = deepcopy(profiler.counts)
     return continuation._finish(result, budget, checkpoint, "search", interrupted)
+
+
+def root_boundary_control(
+    oracle,
+    parameters: Mapping[str, float],
+    name: str,
+    seconds: float,
+    checkpoint: Callable[[dict], None],
+) -> dict:
+    """Set one named original shared parameter to zero and reprofile only roots.
+
+    The caller chooses the parameter; its spelling has no scientific meaning to
+    this function. Zero must be valid in the existing chart and original model.
+    ``passed`` certifies feasibility and conditional root optimality only. The
+    campaign must independently replay the returned original equations before
+    considering this candidate for retention. This operation performs no outer
+    search and never selects its own candidate.
+    """
+    budget = execution._budget(seconds, min(seconds + 120, 3600))
+    profiler, interrupted, point = None, None, None
+    result = {
+        "protocol": BOUNDARY_PROTOCOL,
+        "passed": False,
+        "boundary_parameter": name,
+        "boundary_value": 0.0,
+        "source_parameters_sha256": content_sha256(parameters),
+        "feasible": False,
+        "conditional_root_optimality_checked": False,
+        "other_shared_coordinates_unchanged": False,
+        "other_original_shared_parameters_unchanged": False,
+        "original_equations_verified": False,
+        "candidate_selected": False,
+        "global_minimum_certified": False,
+        "independent_original_verification_required": True,
+        "verification_calls_attempted": 0,
+        "verification_calls_started": 0,
+        "verification_calls_completed": 0,
+        "verification_calls_failed": 0,
+        "failure_diagnostics": _failure_ledger(),
+    }
+    budget.callback(lambda: checkpoint(deepcopy(result)))
+    try:
+        profiler = budget.numerical(
+            lambda _: RootProfile(oracle, failure_diagnostics=True)
+        )
+        result["root_profile_certificate"] = deepcopy(profiler.audit)
+        if name not in oracle.original.names or name not in {
+            oracle.names[i] for i in profiler.outer
+        }:
+            raise ValueError(
+                "boundary parameter must be an existing original shared coordinate"
+            )
+        original_index = oracle.original.names.index(name)
+        chart_index = oracle.names.index(name)
+        if not (
+            oracle.lower[chart_index] <= 0 <= oracle.upper[chart_index]
+            and oracle.original.lower[original_index]
+            <= 0
+            <= oracle.original.upper[original_index]
+        ):
+            raise ValueError("zero lies outside the declared parameter domain")
+        source = oracle.vector(parameters)
+        original_source = continuation.to_original(oracle.original, oracle, parameters)
+        start = dict(parameters) | {name: 0.0}
+        point = oracle.vector(start)
+        lifted = continuation.to_original(oracle.original, oracle, start)
+        oracle.original.vector(lifted)
+        if lifted[name] != 0.0:
+            raise ValueError(
+                "zero chart coordinate does not lift to zero original parameter"
+            )
+        result["boundary_start_parameters_sha256"] = content_sha256(start)
+        budget.callback(lambda: checkpoint(deepcopy(result)))
+        endpoint = budget.numerical(lambda d: profiler.profile(start, d))
+        budget.check()
+        fitted = oracle.vector(endpoint["parameters"])
+        other = [i for i in profiler.outer if i != chart_index]
+        if (
+            fitted[chart_index] != 0.0
+            or endpoint["original_parameters"][name] != 0.0
+            or not np.array_equal(fitted[other], source[other])
+        ):
+            raise ValueError("boundary profiling changed another shared coordinate")
+        oracle.original.vector(endpoint["original_parameters"])
+        if any(
+            value != endpoint["original_parameters"][parameter]
+            for parameter, value in original_source.items()
+            if parameter != name and parameter not in profiler.root_names
+        ):
+            raise ValueError(
+                "boundary profiling changed another original shared parameter"
+            )
+        result.update(endpoint)
+        result.update(
+            feasible=True,
+            other_shared_coordinates_unchanged=True,
+            other_original_shared_parameters_unchanged=True,
+            passed=bool(endpoint["conditional_root_optimality_checked"]),
+        )
+    except Exception as error:
+        if profiler is not None:
+            _record_failure(
+                result["failure_diagnostics"],
+                error,
+                attempt=1,
+                oracle=oracle,
+                indices=profiler.outer,
+                point=point,
+            )
+        continuation._invalidate(result, error, "qualification")
+    except BaseException as error:
+        interrupted = error
+        continuation._invalidate(result, error, "qualification")
+    if profiler is not None:
+        result["profile_execution"] = deepcopy(profiler.counts)
+        for state in ("started", "completed", "failed"):
+            result[f"verification_calls_{state}"] = sum(
+                profiler.counts[f"{scope}_calls_{state}"]
+                for scope in ("basis", "pairing")
+            )
+        result["verification_calls_attempted"] = result["verification_calls_started"]
+    return continuation._finish(
+        result, budget, checkpoint, "qualification", interrupted
+    )
