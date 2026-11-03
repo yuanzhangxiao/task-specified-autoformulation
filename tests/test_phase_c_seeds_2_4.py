@@ -41,17 +41,17 @@ def _load(name: str) -> dict:
 
 
 @pytest.mark.parametrize(("seeds", "frozen", "reworded"), PAIRS)
-def test_a_seeds_plan_changes_only_the_seeds_and_their_description(
+def test_a_frozen_seeds_plan_changes_only_the_seeds_and_their_description(
     seeds, frozen, reworded
 ):
     plan, base = _load(seeds), _load(frozen)
     changed = {key for key in plan if plan[key] != base[key]}
-    assert changed == {"repetitions", "status"} | reworded
+    assert changed == {"repetitions"} | reworded
     if "budget" in reworded:
         budget, base_budget = plan["budget"], base["budget"]
         assert {k for k in budget if budget[k] != base_budget[k]} == {"rationale"}
-    assert plan["status"] == "proposed_pending_review"
-    assert base["status"].startswith("frozen_before")
+    assert plan["status"] == base["status"]
+    assert plan["status"].startswith("frozen_before")
     assert (base["repetitions"], plan["repetitions"]) == ([0, 1], [2, 3, 4])
     # Each description names the frozen plan whose seeds it continues.
     described = json.dumps({key: plan[key] for key in reworded})

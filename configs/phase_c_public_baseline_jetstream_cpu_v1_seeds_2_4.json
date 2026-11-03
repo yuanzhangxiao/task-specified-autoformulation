@@ -1,6 +1,6 @@
 {
   "schema_version": "phase-c-public-baseline-plan-1",
-  "status": "proposed_pending_review",
+  "status": "frozen_before_baseline_calls",
   "purpose": "Run SINDy and PySR on the eight Phase C roster cells with seeds 2, 3 and 4, which with the frozen plan's seeds 0 and 1 (phase_c_public_baseline_jetstream_cpu_v1) make five, development data only, using the Phase B full-matrix settings unchanged, on a Jetstream2 CPU VM instead of Delta. SINDy ignores the seed, so its runs should repeat seed 0's results; they are kept so that only the seeds differ from the frozen plan",
   "development_only": true,
   "release_protocol": "phase-c-development-2",

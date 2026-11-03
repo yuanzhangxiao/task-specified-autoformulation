@@ -9,9 +9,11 @@ waits until there is a GPU allocation.
 ## Plans
 
 Each plan is a frozen seeds 0 and 1 plan with seeds 2, 3 and 4.
-`tests/test_phase_c_seeds_2_4.py` checks that the only other differences are
-the status and the wording that describes the seeds (and, within a budget,
-only its rationale). All five are proposed, pending review.
+`tests/test_phase_c_seeds_2_4.py` checks that the only other difference is
+the wording that describes the seeds (and, within a budget, only its
+rationale). All five were proposed in `a40df71` and frozen on 2026-11-03 on
+the user's sign-off, with SINDy and PySR to run on js2 first; no setting
+changed.
 
 | Plan (`configs/…_seeds_2_4.json`) | Seeds 0 and 1 ran from | Tasks | At most |
 |---|---|---|---|

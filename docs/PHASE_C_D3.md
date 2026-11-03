@@ -58,7 +58,7 @@ The sealed plan records these departures.
 - `configs/phase_c_d3_smoke_v2.json`: two generations on one cell, so both requests are exercised. It makes 3 requests. Frozen; not a result.
 - `configs/phase_c_d3_hosted_120b_v2.json`: 8 roster cells × 2 seeds. Frozen on 2026-10-08, after smoke v2 passed and the user signed off.
 - `configs/phase_c_d3_smoke_vm_20b_v2.json`: the smoke plan, served on the GPU VM.
-- `configs/phase_c_d3_hosted_120b_v2_seeds_2_4.json`: seeds 2, 3 and 4, which with the frozen plan's seeds 0 and 1 make five, as the user asked on 2026-10-27 (all methods: [PHASE_C_SEEDS_2_4.md](PHASE_C_SEEDS_2_4.md)). Only the seeds, the status and the purpose's wording differ from the frozen plan, which a test checks: 24 tasks and at most 936 requests. D3's code is unchanged since `25814f3`, where seeds 0 and 1 ran; of what it imports, only the model-list check has changed, and only in how it names an endpoint that cannot answer. Proposed, pending review.
+- `configs/phase_c_d3_hosted_120b_v2_seeds_2_4.json`: seeds 2, 3 and 4, which with the frozen plan's seeds 0 and 1 make five, as the user asked on 2026-10-27 (all methods: [PHASE_C_SEEDS_2_4.md](PHASE_C_SEEDS_2_4.md)). Only the seeds, the status and the purpose's wording differ from the frozen plan, which a test checks: 24 tasks and at most 936 requests. D3's code is unchanged since `25814f3`, where seeds 0 and 1 ran; of what it imports, only the model-list check has changed, and only in how it names an endpoint that cannot answer. Frozen on 2026-11-03 on the user's sign-off; no setting changed.
 
 Run from a clean checkout on the VM:
 
@@ -66,7 +66,7 @@ Run from a clean checkout on the VM:
 bash scripts/jetstream/run_phase_c_hosted.sh d3 configs/phase_c_d3_smoke_v2.json phase-c-d3-smoke-v2
 PYTHONPATH=src ~/af/venv/bin/python scripts/phase_c_d3.py report --root ~/af/runs/phase-c-d3-smoke-v2
 bash scripts/jetstream/run_phase_c_hosted.sh d3 configs/phase_c_d3_hosted_120b_v2.json phase-c-d3-hosted-120b-v2 4
-# Seeds 2 to 4, once frozen.
+# Seeds 2 to 4.
 bash scripts/jetstream/run_phase_c_hosted.sh d3 configs/phase_c_d3_hosted_120b_v2_seeds_2_4.json phase-c-d3-hosted-120b-v2-seeds-2-4 4
 ```
 

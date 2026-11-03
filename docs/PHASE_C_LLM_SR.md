@@ -452,7 +452,7 @@ Plans:
   a search, with outages; the expression form's seeds 2 to 4 ran about twice
   as fast as its seeds 0 and 1, so with the island resets on a four-hour
   clock, these searches may see fewer resets than seeds 0 and 1 did.
-  Proposed, pending review.
+  Frozen on 2026-11-03 on the user's sign-off; no setting changed.
 
 ```bash
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_smoke_v1.json phase-c-llm-sr-expression-smoke-v1-rerun 3
@@ -468,7 +468,7 @@ bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expre
 old=~/af/runs/phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4 new=~/af/runs/phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4-reseal
 for i in $(seq 0 23); do mkdir -p $new/results/$i; cp -al $old/results/$i/llmsr-* $new/results/$i/; done
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1_seeds_2_4.json phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4-reseal 4
-# The program form's seeds 2 to 4, once frozen: all 33 searches at once.
+# The program form's seeds 2 to 4: all 33 searches at once.
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_hosted_120b_v1_seeds_2_4.json phase-c-llm-sr-hosted-120b-v1-seeds-2-4 33
 ```
 
