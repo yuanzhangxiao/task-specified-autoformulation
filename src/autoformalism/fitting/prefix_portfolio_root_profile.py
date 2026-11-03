@@ -20,6 +20,7 @@ from scipy.optimize import minimize
 from autoformalism.fitting import prefix_affine as affine
 from autoformalism.fitting import prefix_continuation as continuation
 from autoformalism.fitting import prefix_execution as execution
+from autoformalism.fitting import prefix_meal_coordinates as meal_coordinates
 from autoformalism.fitting import prefix_multioutput_profile as projection
 from autoformalism.fitting import prefix_portfolio as portfolio
 from autoformalism.fitting import prefix_portfolio_timescale as timescale
@@ -474,6 +475,7 @@ def root_profile_search(
     fixed: Mapping[str, float] | None = None,
     failure_diagnostics: bool = False,
     checkpoint_policy: SearchCheckpointPolicy | None = None,
+    coordinate_chart: meal_coordinates.MealCoordinates | None = None,
 ) -> dict:
     """Profile initial roots at each bounded Powell shared-parameter trial.
 
@@ -494,6 +496,10 @@ def root_profile_search(
         checkpoint_policy, SearchCheckpointPolicy
     ):
         raise TypeError("typed SearchCheckpointPolicy required")
+    if coordinate_chart is not None and not isinstance(
+        coordinate_chart, meal_coordinates.MealCoordinates
+    ):
+        raise TypeError("certified MealCoordinates required")
     budget = execution._budget(seconds, min(seconds + 120, 3600))
     result = {
         "protocol": PROTOCOL,
@@ -551,6 +557,17 @@ def root_profile_search(
             raise ValueError("fixed coordinates must be existing shared coordinates")
         start = dict(parameters) | fixed
         initial = oracle.vector(start)
+        chart_initial = initial
+        chart_names = oracle.names
+        chart_units = oracle.units
+        chart_lower, chart_upper = oracle.lower, oracle.upper
+        if coordinate_chart is not None:
+            coordinate_chart.validate_use(oracle, fixed)
+            chart_initial = coordinate_chart.encode(start)
+            chart_names = coordinate_chart.names
+            chart_units = coordinate_chart.units(start)
+            chart_lower, chart_upper = coordinate_chart.lower, coordinate_chart.upper
+            result["shared_coordinate_certificate"] = deepcopy(coordinate_chart.audit)
         free = np.asarray(
             [
                 i
@@ -559,50 +576,59 @@ def root_profile_search(
             ],
             int,
         )
-        units = np.maximum(abs(initial), oracle.units)[free]
+        units = np.maximum(abs(chart_initial), chart_units)[free]
         taus = {b.tau for b in getattr(oracle.reduction, "blocks", ())}
-        logarithmic = np.asarray([oracle.names[i] in taus for i in free], bool)
+        if coordinate_chart is not None:
+            taus.add(coordinate_chart.rate)
+        logarithmic = np.asarray([chart_names[i] in taus for i in free], bool)
         bounds = []
         for j, i in enumerate(free):
             if logarithmic[j]:
-                lo, hi = oracle.lower[i], oracle.upper[i]
+                lo, hi = chart_lower[i], chart_upper[i]
                 bounds.append(
                     (
-                        np.log(lo) - np.log(initial[i]) if lo > 0 else -np.inf,
-                        np.log(hi) - np.log(initial[i]) if np.isfinite(hi) else np.inf,
+                        np.log(lo) - np.log(chart_initial[i]) if lo > 0 else -np.inf,
+                        np.log(hi) - np.log(chart_initial[i])
+                        if np.isfinite(hi)
+                        else np.inf,
                     )
                 )
             else:
                 bounds.append(
                     (
-                        (oracle.lower[i] - initial[i]) / units[j],
-                        (oracle.upper[i] - initial[i]) / units[j],
+                        (chart_lower[i] - chart_initial[i]) / units[j],
+                        (chart_upper[i] - chart_initial[i]) / units[j],
                     )
                 )
 
         def point_for(q):
-            point = initial.copy()
+            point = chart_initial.copy()
             q = np.asarray(q)
             with np.errstate(over="ignore", under="ignore", invalid="ignore"):
                 for j, i in enumerate(free):
                     point[i] = (
-                        np.exp(np.log(initial[i]) + q[j])
+                        np.exp(np.log(chart_initial[i]) + q[j])
                         if logarithmic[j]
-                        else initial[i] + q[j] * units[j]
+                        else chart_initial[i] + q[j] * units[j]
                     )
             # The exact seed is retained without an exp(log(tau)) round-trip.
-            point[free[q == 0]] = initial[free[q == 0]]
+            point[free[q == 0]] = chart_initial[free[q == 0]]
             if not np.isfinite(point).all() or np.any(point[free[logarithmic]] <= 0):
                 raise NumericalInvalidTrial("nonrepresentable logarithmic timescale")
+            if coordinate_chart is not None:
+                # Changing k changes q=g/k even if g itself is unchanged.
+                point = coordinate_chart.decode(point)
+                if np.all(q == 0):
+                    point = initial.copy()
             return point
 
         result.update(
             optimizer_start=start,
             fixed_coordinates=fixed,
-            outer_coordinates=[oracle.names[i] for i in free],
+            outer_coordinates=[chart_names[i] for i in free],
             outer_coordinate_chart={
                 "log_timescales": [
-                    oracle.names[i] for j, i in enumerate(free) if logarithmic[j]
+                    chart_names[i] for j, i in enumerate(free) if logarithmic[j]
                 ],
                 "rule": ("log(tau/tau_seed); other coordinates scaled at frozen seed"),
                 "units": units.tolist(),
@@ -610,6 +636,12 @@ def root_profile_search(
                 "initial_sweep": "each available coordinate at +/-1 before Powell",
             },
         )
+        if coordinate_chart is not None:
+            result["outer_coordinate_chart"].update(
+                meal_flux_coordinates=True,
+                rule="log(tau/tau_seed), log(k/k_seed); g=k*q scaled at seed",
+                original_root_profiler_unchanged=True,
+            )
         result["control_calls_started"] += 1
         save()
         try:
@@ -642,7 +674,7 @@ def root_profile_search(
             result["search_calls_attempted"] += 1
             result["search_calls_started"] += 1
             save()
-            varied = {oracle.names[i] for j, i in enumerate(free) if q[j] != 0}
+            varied = {chart_names[i] for j, i in enumerate(free) if q[j] != 0}
             result["outer_coordinates_varied"] = sorted(
                 set(result["outer_coordinates_varied"]) | varied
             )
@@ -652,6 +684,13 @@ def root_profile_search(
                 endpoint = budget.numerical(
                     lambda d: profiler.profile(oracle.parameters(point), d)
                 )
+                if coordinate_chart is not None:
+                    endpoint["scaled_meal_initials"] = coordinate_chart.scaled_initials(
+                        endpoint["parameters"]
+                    )
+                    endpoint["shared_coordinate_sha256"] = coordinate_chart.audit[
+                        "sha256"
+                    ]
                 budget.check()
             except (ValueError, NumericalInvalidTrial) as error:
                 result["search_calls_failed"] += 1

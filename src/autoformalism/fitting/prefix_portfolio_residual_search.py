@@ -217,6 +217,7 @@ def search(
     maximum_calls: int,
     checkpoint: Checkpoint,
     *,
+    fixed: Mapping[str, float] | None = None,
     checkpoint_policy: SearchCheckpointPolicy | None = None,
 ) -> dict:
     """One bounded Powell control, with a balanced frozen-seed coordinate sweep.
@@ -224,6 +225,10 @@ def search(
     The call limit counts every objective request, including invalid chart trials and
     oracle cache hits. Actual backend entries are reported separately. No artificial
     physical bounds, finite replacements for infinities or renewed allowances occur.
+    Explicitly held coordinates are overlaid on the seed and excluded from every
+    search direction. Their original domains and the complete lifted point remain
+    subject to the existing certificate; a conditional search is not a profile
+    minimum or a parameter-confidence statement.
     """
     if (
         isinstance(seconds, bool)
@@ -237,6 +242,8 @@ def search(
         checkpoint_policy, SearchCheckpointPolicy
     ):
         raise TypeError("typed SearchCheckpointPolicy required")
+    if fixed is not None and not isinstance(fixed, Mapping):
+        raise TypeError("fixed coordinates must be a mapping")
     budget = execution._budget(seconds, seconds + 120)
     result = _claims() | {
         "optimizer": "Powell over fixed seed-scaled certified coordinates",
@@ -308,8 +315,27 @@ def search(
         return float("inf")
 
     try:
-        initial, _, certificate = _certificate(oracle.original, oracle, parameters)
-        free = np.flatnonzero(oracle.lower < oracle.upper)
+        held = dict(fixed or {})
+        if set(held) - set(oracle.names):
+            raise ValueError("fixed coordinates must exist in the certified chart")
+        if any(
+            isinstance(value, (bool, np.bool_))
+            or not isinstance(value, (int, float, np.integer, np.floating))
+            or not np.isfinite(value)
+            for value in held.values()
+        ):
+            raise ValueError("fixed coordinates require finite numeric values")
+        held = {name: float(value) for name, value in held.items()}
+        start = dict(parameters) | held
+        initial, _, certificate = _certificate(oracle.original, oracle, start)
+        free = np.asarray(
+            [
+                i
+                for i, name in enumerate(oracle.names)
+                if name not in held and oracle.lower[i] < oracle.upper[i]
+            ],
+            int,
+        )
         units = np.maximum(np.abs(initial), np.asarray(oracle.units, float))[free]
         if not np.isfinite(units).all() or np.any(units <= 0):
             raise ValueError("finite positive seed scales required")
@@ -318,7 +344,8 @@ def search(
         bounds = list(zip(lower, upper, strict=True))
         result.update(
             certificate=certificate,
-            optimizer_start=dict(parameters),
+            optimizer_start=start,
+            fixed_coordinates=held,
             free_coordinates=[oracle.names[i] for i in free],
             coordinate_chart={
                 "rule": "theta=seed+q*max(abs(seed),declared_unit)",

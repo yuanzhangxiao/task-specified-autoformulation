@@ -203,6 +203,85 @@ def test_original_finite_bounds_are_respected_by_every_trial(monkeypatch):
     assert all(np.all(x >= oracle.lower) and np.all(x <= oracle.upper) for x in seen)
 
 
+def test_fixed_coordinate_is_overlaid_and_excluded_from_all_search_directions(
+    monkeypatch,
+):
+    _, oracle, seed, _, seen = quadratic(monkeypatch)
+    name = oracle.names[0]
+    held = {name: 0.0}
+    original_start = deepcopy(oracle.start)
+    result = p.search(oracle, oracle.start, 10, 500, lambda _: None, fixed=held)
+    assert result["fixed_coordinates"] == held
+    assert result["optimizer_start"] == original_start | held
+    assert all(point[0] == 0 for point in seen)
+    assert result["best"]["parameters"][name] == 0
+    assert result["initial_sweep_completed"]
+    for key in (
+        "free_coordinates",
+        "coordinates_varied",
+        "initial_sweep_coordinates_completed",
+    ):
+        assert name not in result[key]
+    assert all(row["parameters"][name] == 0 for row in result["accepted_history"])
+    assert oracle.start == original_start
+    assert oracle.vector(oracle.start) == pytest.approx(seed)
+    assert held == {name: 0.0}
+
+
+def test_all_fixed_coordinates_evaluate_once_without_calling_optimizer(monkeypatch):
+    _, oracle, _, _, seen = quadratic(monkeypatch)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("no optimizer needed when every coordinate is fixed")
+
+    monkeypatch.setattr(p, "minimize", unexpected)
+    held = dict.fromkeys(oracle.names, 0.0)
+    result = p.search(oracle, oracle.start, 10, 10, lambda _: None, fixed=held)
+    assert result["stop_reason"] == "no_free_coordinates"
+    assert result["optimizer_success"]
+    assert not result["convergence_certified"]
+    assert result["search_calls_attempted"] == len(seen) == 1
+    assert result["best"]["parameters"] == held
+    assert result["free_coordinates"] == []
+    assert result["coordinates_varied"] == []
+
+
+@pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf, True, "0"])
+def test_invalid_fixed_values_fail_before_numerical_work(monkeypatch, value):
+    _, oracle, _, _, seen = quadratic(monkeypatch)
+    result = p.search(
+        oracle, oracle.start, 10, 10, lambda _: None,
+        fixed={oracle.names[0]: value},
+    )
+    assert "finite numeric" in result["error"]
+    assert result["best"] is None and not seen
+    assert result["search_calls_attempted"] == 0
+
+
+def test_unknown_fixed_coordinate_fails_before_numerical_work(monkeypatch):
+    _, oracle, _, _, seen = quadratic(monkeypatch)
+    result = p.search(
+        oracle, oracle.start, 10, 10, lambda _: None, fixed={"unknown": 1.0}
+    )
+    assert "must exist" in result["error"]
+    assert result["best"] is None and not seen
+
+
+def test_fixed_value_outside_original_domain_is_not_clipped(monkeypatch):
+    source = case(amplitude={"bounds": {"lower": -2, "upper": 2}})
+    _, oracle, _, _, seen = quadratic(monkeypatch, source=source)
+    result = p.search(
+        oracle, oracle.start, 10, 10, lambda _: None, fixed={"a": 3.0}
+    )
+    assert "domain" in result["error"]
+    assert result["best"] is None and not seen
+
+
+def test_fixed_coordinates_require_mapping():
+    with pytest.raises(TypeError, match="must be a mapping"):
+        p.search(None, {}, 10, 10, lambda _: None, fixed=[("a", 1.0)])
+
+
 def test_invalid_numerical_trials_are_bounded_and_do_not_erase_best(monkeypatch):
     _, oracle, seed, _, _ = quadratic(monkeypatch)
     actual = oracle.evaluate

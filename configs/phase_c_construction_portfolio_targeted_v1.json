@@ -1,0 +1,8 @@
+{
+  "population": "scaled-readout-4",
+  "checkpoint_interval_seconds": 30,
+  "search_seconds": 1800,
+  "maximum_calls": 2000,
+  "diagnostic_seconds": 600,
+  "diagnostic_calls": 250
+}
