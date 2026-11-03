@@ -166,6 +166,7 @@ The sealed plan records each, and a report states them.
 - `configs/phase_c_llm_ode_published_prompt_smoke_v1.json`: the same smoke with the prompt as published. Frozen; not a result. Ran beside it on 2026-10-18 and passed: all eight tasks sealed complete in 19 minutes; 880 requests, no cache hits, no failed requests; 7 replies reached the limit.
 - `configs/phase_c_llm_ode_hosted_120b_v1.json`: the main campaign, 8 roster cells × 2 seeds at 200 iterations. Frozen on 2026-10-21, after both smokes passed and the user signed off. No setting changed; the budget's rationale now gives the smokes' measurements.
 - `configs/phase_c_llm_ode_published_prompt_hosted_120b_v1.json`: the second campaign, the same with the prompt as published. Frozen with it.
+- `configs/phase_c_llm_ode_hosted_120b_v1_seeds_2_4.json` and `configs/phase_c_llm_ode_published_prompt_hosted_120b_v1_seeds_2_4.json`: seeds 2, 3 and 4 of each campaign, which with the frozen plans' seeds 0 and 1 make five, as the user asked on 2026-10-27 (all methods: [PHASE_C_SEEDS_2_4.md](PHASE_C_SEEDS_2_4.md)). Only the seeds, the status and the budget and scope descriptions differ from the frozen plans, which a test checks. A dry prepare on the Mac gives 24 tasks each, 33 searches and 26,400 requests each, and every row is the frozen plan's apart from its seed. LLM-ODE's code is unchanged since `7cb7088`, where seeds 0 and 1 ran. As there, the repetitions are labels: upstream sets no seed. Proposed, pending review.
 
 Run from a clean checkout that no other run is using:
 
@@ -174,6 +175,9 @@ bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_smo
 bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_published_prompt_smoke_v1.json phase-c-llm-ode-published-prompt-smoke-v1 8
 bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_hosted_120b_v1.json phase-c-llm-ode-hosted-120b-v1 8
 bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_published_prompt_hosted_120b_v1.json phase-c-llm-ode-published-prompt-hosted-120b-v1 8
+# Seeds 2 to 4, once frozen, side by side as seeds 0 and 1 ran.
+bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_hosted_120b_v1_seeds_2_4.json phase-c-llm-ode-hosted-120b-v1-seeds-2-4 8
+bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_published_prompt_hosted_120b_v1_seeds_2_4.json phase-c-llm-ode-published-prompt-hosted-120b-v1-seeds-2-4 8
 ```
 
 The last argument is how many tasks run at once. The two full campaigns run

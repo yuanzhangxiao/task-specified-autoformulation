@@ -406,6 +406,53 @@ Plans:
     the reason recorded so far, so the other 23 tasks would seal as they did.
     The hosted launcher now seals no more tasks at once than the VM has CPUs,
     as the GPU launcher does; this run sealed its 24 at once on 16 CPUs.
+  - **Resealed on js2 on 2026-11-03, 18:10Z to 18:21Z, from checkout
+    `127d4f4`,** in a new root,
+    `phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4-reseal`. The 33
+    finished searches were hard-linked in, so no search ran again and no
+    request was sent. The 23 tasks sealed before sealed identically: every
+    result and selection record matches, apart from the hashes that bind the
+    plan. Task 9 sealed `rollout_failed`, naming val_000, val_001, val_002 and
+    val_003, each "(over 60 s)". All 24 tasks now have final outcomes: 17
+    complete and 7 `rollout_failed`, none stopped by the service; one complete
+    task (T1 hard seed 2) has a failed training rollout. The reseal root is
+    the run's record from here on; the first root is kept as it was.
+  - The reseal sealed one task at a time, not four: the launcher exports
+    `OMP_NUM_THREADS=1`, and GNU `nproc` reports that limit, not the CPUs. It
+    now counts them with `getconf _NPROCESSORS_ONLN`. One at a time only gives
+    each seal more room under its limits; the 23 identical seals show it
+    changed nothing here.
+  - Task 9's pick fails on training too. Timed read-only on js2 on 2026-10-29
+    at the seal's 60 s limit, 13 of its 16 training trajectories run past it,
+    train_011 fails at once, and only train_014 and train_015 complete (errors
+    0.17 and 0.70). The seal stops at the failed validation rollout, so its
+    record does not list these.
+  - Over the five seeds (the reseal roots of seeds 0 and 1 and of seeds 2 to
+    4), 28 of 40 tasks are complete. Each case's median over its seeds,
+    failures at +infinity: 0.00014 (detention, independent), 0.064
+    (detention, coupled), 6.3 (alien), 1.3e21 (CSTR), 1.5e105 (T1 easy), and
+    +infinity for T1 hard, T2 easy and T2 hard, each with three or more failed
+    seeds. The median over the eight cases is the mean of the middle two,
+    1.3e21 and 1.5e105: about 7.6e104.
+- `configs/phase_c_llm_sr_hosted_120b_v1_seeds_2_4.json`: seeds 2, 3 and 4 of
+  the program form, which with the frozen plan's seeds 0 and 1 make five, as
+  the user asked on 2026-10-27; the other methods' seeds 2 to 4 are in
+  [PHASE_C_SEEDS_2_4.md](PHASE_C_SEEDS_2_4.md). Only the seeds, the status and
+  the budget and scope descriptions differ from the frozen plan, which a test
+  checks. A dry prepare on the Mac gives 24 tasks, 33 searches and at most
+  330,000 samples (about 82,500 requests); every row is the frozen plan's
+  apart from its seed. The search is the one seeds 0 and 1 ran: the 33
+  specifications LLM-SR is given are byte for byte those of `231a97f`, and
+  since then the search code has gained only the expression form's switch,
+  off in this plan. The sealing is the current one, as in the expression
+  form's reseals. A pick that reads the history is run as the program it is
+  at the seal, and needs a new transcription, and its review, before it is
+  scored on test. All 33 searches run at once, as
+  `phase-c-llm-sr-hosted-120b-v1-seeds-2-4`. Seeds 0 and 1 took 1.5 to 4 days
+  a search, with outages; the expression form's seeds 2 to 4 ran about twice
+  as fast as its seeds 0 and 1, so with the island resets on a four-hour
+  clock, these searches may see fewer resets than seeds 0 and 1 did.
+  Proposed, pending review.
 
 ```bash
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_smoke_v1.json phase-c-llm-sr-expression-smoke-v1-rerun 3
@@ -416,11 +463,13 @@ for i in $(seq 0 15); do mkdir -p $new/results/$i; cp -a $old/results/$i/llmsr-*
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1.json phase-c-llm-sr-expression-hosted-120b-v1-reseal 4
 # Seeds 2 to 4, all 33 searches at once.
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1_seeds_2_4.json phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4 33
-# Its reseal, proposed, from a checkout with the fix: the finished searches,
-# hard-linked as the seal only reads them, then every seal.
+# Its reseal, from a checkout at 127d4f4: the finished searches, hard-linked
+# as the seal only reads them, then every seal.
 old=~/af/runs/phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4 new=~/af/runs/phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4-reseal
 for i in $(seq 0 23); do mkdir -p $new/results/$i; cp -al $old/results/$i/llmsr-* $new/results/$i/; done
 bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_expression_hosted_120b_v1_seeds_2_4.json phase-c-llm-sr-expression-hosted-120b-v1-seeds-2-4-reseal 4
+# The program form's seeds 2 to 4, once frozen: all 33 searches at once.
+bash scripts/jetstream/run_phase_c_hosted.sh llm_sr configs/phase_c_llm_sr_hosted_120b_v1_seeds_2_4.json phase-c-llm-sr-hosted-120b-v1-seeds-2-4 33
 ```
 
 ## Settings

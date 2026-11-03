@@ -34,6 +34,10 @@ usage() {
   exit 2
 }
 
+cpus() {  # this VM's CPUs; nproc would report OMP_NUM_THREADS, which is 1 here
+  getconf _NPROCESSORS_ONLN
+}
+
 searches() {  # plan: one "index target" line per LLM-SR target search
   "${py}" -c 'import json, sys
 for row in json.load(open(sys.argv[1]))["rows"]:
@@ -50,7 +54,7 @@ worker() {  # root, method, count, tasks: runs in the foreground
       '"$1" scripts/phase_c_llm_sr.py run --root "$2" --index "$3" --target "$4" >>"$2/logs/task-$3-$4.log" 2>&1 || echo "task $3 target $4 exited with status $?"' \
       _ "${py}" "${root}"
     # A seal rolls its pick out under time limits, so no two share a CPU.
-    at_once="$((tasks < $(nproc) ? tasks : $(nproc)))"
+    at_once="$((tasks < $(cpus) ? tasks : $(cpus)))"
     echo "target searches ended $(date -u +%FT%TZ); sealing each task, ${at_once} at a time"
   fi
   seq 0 $((count - 1)) | xargs -P "${at_once}" -I{} bash -c \

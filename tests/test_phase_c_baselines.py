@@ -232,6 +232,16 @@ def test_freeze_refuses_a_different_prompt(tmp_path):
         plan_module.freeze_phase_c_baseline_plan(config, tmp_path / "frozen", release)
 
 
+def test_freeze_refuses_a_plan_pending_review(tmp_path):
+    release = _release(tmp_path / "release")
+    payload = _plan_payload(release, status="proposed_pending_review")
+    config = _write_plan(tmp_path / "plan.json", payload)
+    plan_module.load_phase_c_baseline_plan(config)  # it can be read and reviewed
+    with pytest.raises(ValueError, match="pending review"):
+        plan_module.freeze_phase_c_baseline_plan(config, tmp_path / "frozen", release)
+    assert not (tmp_path / "frozen").exists()
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [

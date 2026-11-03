@@ -8,6 +8,7 @@ shell entry points refuse bad arguments before touching anything.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -201,3 +202,19 @@ def test_bad_arguments_are_refused_before_anything_runs(
     assert result.returncode == 2
     assert message in result.stdout + result.stderr
     assert not (tmp_path / "af").exists()
+
+
+def test_the_hosted_launcher_counts_cpus_despite_its_thread_limit() -> None:
+    """It exports OMP_NUM_THREADS=1, which GNU nproc would report as one CPU."""
+    script = (JETSTREAM / "run_phase_c_hosted.sh").read_text()
+    start = script.index("cpus() {")
+    body = script[start : script.index("\n}\n", start) + 3]
+    result = subprocess.run(
+        ["bash", "-c", body + "cpus"],
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "OMP_NUM_THREADS": "1"},
+        check=True,
+    )
+    assert int(result.stdout) == os.cpu_count()
+    assert "$(nproc)" not in script

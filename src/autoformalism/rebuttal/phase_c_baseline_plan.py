@@ -64,7 +64,8 @@ class PhaseCBaselinePlan(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: Literal["phase-c-public-baseline-plan-1"]
-    status: Literal["frozen_before_baseline_calls"]
+    #: A proposed plan can be read and reviewed, but only a frozen one runs.
+    status: Literal["proposed_pending_review", "frozen_before_baseline_calls"]
     purpose: str = Field(min_length=1)
     development_only: Literal[True]
     release_protocol: Literal["phase-c-development-2"]
@@ -160,9 +161,12 @@ def freeze_phase_c_baseline_plan(
     """Verify the release against the plan, then write the immutable task ledger.
 
     The receipt digest and every cell's published prompt must match the plan,
-    so a job can only ever run on the release the plan was written for.
+    so a job can only ever run on the release the plan was written for. A plan
+    still pending review is refused before anything is written.
     """
     plan = load_phase_c_baseline_plan(config_path)
+    if plan.status != "frozen_before_baseline_calls":
+        raise ValueError("this plan is pending review; only a frozen plan runs")
     release = release.expanduser().resolve()
     names = tuple(cell.benchmark_id for cell in plan.cells)
     receipt = verify_release(release, names)
