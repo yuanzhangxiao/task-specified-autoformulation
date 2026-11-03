@@ -3,6 +3,7 @@
 import json
 from copy import deepcopy
 from time import monotonic
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -13,6 +14,7 @@ from autoformalism.fitting import prefix_portfolio_timescale as timescale
 from autoformalism.fitting.recovery_numerics import NumericalInvalidTrial
 from autoformalism.schemas.prefix_initialization import PrefixFitProblem
 from autoformalism.schemas.public_fitting import PublicSplit
+from tests.test_compact_search_checkpoint import fake_clock
 from tests.test_prefix_portfolio_timescale import coupled, wrapped
 from tests.test_prefix_structural_reduction import training
 
@@ -250,6 +252,125 @@ def test_nonrepresentable_log_trial_is_rejected_without_losing_best(monkeypatch)
 def test_invalid_search_allowances_rejected(seconds, calls):
     with pytest.raises(ValueError, match="search needs"):
         roots.root_profile_search(None, {}, seconds, calls, lambda _: None)
+
+
+@pytest.mark.parametrize("seconds", [5, 1800])
+def test_compact_slow_sink_preserves_profile_sequence_and_best(monkeypatch, seconds):
+    def repeat_point(objective, q, *, callback, **kwargs):
+        for _ in range(100):
+            objective(q)
+        callback(q)
+        return SimpleNamespace(success=True, message="synthetic stop", nit=1)
+
+    monkeypatch.setattr(roots, "minimize", repeat_point)
+    outcomes = []
+    for compact in (False, True):
+        clock = fake_clock(monkeypatch)
+        _, oracle = wrapped()
+        trace, snapshots = [], []
+
+        def control(point, deadline, **kwargs):
+            return np.asarray([5.0]), None
+
+        def profile(self, parameters, deadline, trace=trace, oracle=oracle):
+            trace.append(dict(parameters))
+            point = oracle.vector(parameters)
+            self.counts["profile_calls_started"] += 1
+            self.counts["profile_calls_completed"] += 1
+            loss = float(np.mean((point[list(self.outer)] - 0.3) ** 2))
+            return {
+                "parameters": dict(parameters),
+                "training_nmse": loss,
+                "conditional_root_optimality_checked": True,
+                "root_solve": [{"conditional_optimum": True}],
+            }
+
+        monkeypatch.setattr(oracle, "evaluate", control)
+        monkeypatch.setattr(roots.RootProfile, "profile", profile)
+
+        def slow_sink(snapshot, snapshots=snapshots, clock=clock):
+            snapshots.append(deepcopy(snapshot))
+            clock.advance(0.7)
+
+        kwargs = (
+            {"checkpoint_policy": roots.SearchCheckpointPolicy()} if compact else {}
+        )
+        result = roots.root_profile_search(
+            oracle, oracle.start, seconds, 500, slow_sink, **kwargs
+        )
+        outcomes.append((result, snapshots, trace))
+    baseline, compact = outcomes
+    assert compact[0]["best"] == baseline[0]["best"]
+    assert compact[2][: len(baseline[2])] == baseline[2]
+    if seconds == 1800:
+        assert compact[0]["search_calls_completed"] == (
+            baseline[0]["search_calls_completed"]
+        )
+    else:
+        assert baseline[0]["timing"]["timeout_reason"] == "overall_wall_limit"
+        assert compact[0]["timing"]["timeout_reason"] is None
+        assert compact[0]["search_calls_completed"] > (
+            baseline[0]["search_calls_completed"]
+        )
+        assert compact[0]["optimizer_success"]
+    assert len(compact[1]) < len(baseline[1]) / 5
+    assert compact[1][-1]["best"] == compact[0]["best"]
+    assert compact[0]["timing"]["callback_wall_seconds"] < (
+        baseline[0]["timing"]["callback_wall_seconds"] / 5
+    )
+    assert "root_profile_certificate" in compact[0]
+    assert "root_profile_certificate" not in compact[1][-1]
+    assert "initial_root_profile" in compact[0]
+    assert "initial_root_profile" not in compact[1][-1]
+    assert compact[0]["checkpoint_persistence"]["writes_completed"] == len(compact[1])
+
+
+def test_compact_profile_interrupt_keeps_complete_best(monkeypatch):
+    _, oracle = wrapped()
+    real = roots.RootProfile.profile
+    calls, snapshots = 0, []
+
+    def interrupted(self, parameters, deadline):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt
+        return real(self, parameters, deadline)
+
+    monkeypatch.setattr(roots.RootProfile, "profile", interrupted)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        roots.root_profile_search(
+            oracle, oracle.start, 10, 100, snapshots.append,
+            checkpoint_policy=roots.SearchCheckpointPolicy(),
+        )
+    result = caught.value.execution_receipt
+    assert result["search_calls_started"] == 2
+    assert snapshots[-1]["best"] == result["best"]
+    assert result["best"]["conditional_root_optimality_checked"]
+    assert result["best"]["root_solve"]
+
+
+def test_compact_profile_failed_checkpoint_prohibits_more_profiles(monkeypatch):
+    _, oracle = wrapped()
+    real = roots.RootProfile.profile
+    profiles = []
+
+    def checked(self, parameters, deadline):
+        profiles.append(parameters)
+        return real(self, parameters, deadline)
+
+    def unavailable(snapshot):
+        if (snapshot.get("best") or {}).get("conditional_root_optimality_checked"):
+            raise OSError("disk unavailable")
+
+    monkeypatch.setattr(roots.RootProfile, "profile", checked)
+    result = roots.root_profile_search(
+        oracle, oracle.start, 10, 100, unavailable,
+        checkpoint_policy=roots.SearchCheckpointPolicy(),
+    )
+    assert len(profiles) == 1 and result["best"]["conditional_root_optimality_checked"]
+    assert result["checkpoint_persistence"]["writes_failed"] == 1
+    assert result["status"] == "incomplete"
 
 
 def test_shared_initial_values_are_not_per_trajectory_roots():

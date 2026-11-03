@@ -24,6 +24,10 @@ from autoformalism.fitting import prefix_multioutput_profile as projection
 from autoformalism.fitting import prefix_portfolio as portfolio
 from autoformalism.fitting import prefix_portfolio_timescale as timescale
 from autoformalism.fitting.affine_precision import TransitionEvaluator
+from autoformalism.fitting.compact_search_checkpoint import (
+    SearchCheckpointPolicy,
+    SearchProgress,
+)
 from autoformalism.fitting.public_fitting import content_sha256
 from autoformalism.fitting.recovery_numerics import NumericalInvalidTrial
 from autoformalism.fitting.simulation import trajectory_forcing
@@ -469,6 +473,7 @@ def root_profile_search(
     *,
     fixed: Mapping[str, float] | None = None,
     failure_diagnostics: bool = False,
+    checkpoint_policy: SearchCheckpointPolicy | None = None,
 ) -> dict:
     """Profile initial roots at each bounded Powell shared-parameter trial.
 
@@ -485,6 +490,10 @@ def root_profile_search(
         raise ValueError("root-profile search needs <=3600 seconds and <=10000 calls")
     if type(failure_diagnostics) is not bool:
         raise ValueError("failure_diagnostics must be boolean")
+    if checkpoint_policy is not None and not isinstance(
+        checkpoint_policy, SearchCheckpointPolicy
+    ):
+        raise TypeError("typed SearchCheckpointPolicy required")
     budget = execution._budget(seconds, min(seconds + 120, 3600))
     result = {
         "protocol": PROTOCOL,
@@ -512,10 +521,20 @@ def root_profile_search(
     if failure_diagnostics:
         result["failure_diagnostics"] = _failure_ledger()
     profiler, interrupted = None, None
+    progress = (
+        SearchProgress(checkpoint_policy, checkpoint)
+        if checkpoint_policy is not None
+        else None
+    )
+    if progress is not None:
+        progress.attach(result)
 
-    def save():
+    def save(*, force=False, event="progress"):
         if profiler is not None:
             result["profile_execution"] = deepcopy(profiler.counts)
+        if progress is not None:
+            progress.save(result, budget, force=force, event=event)
+            return
         budget.callback(
             lambda: checkpoint(deepcopy(result) | {"timing": budget.snapshot()})
         )
@@ -611,7 +630,7 @@ def root_profile_search(
             "training_nmse": control_loss,
         }
         result["best"] = deepcopy(result["unoptimized_control"])
-        save()
+        save(force=True, event="incumbent")
 
         best_q = np.zeros(len(free))
 
@@ -656,10 +675,11 @@ def root_profile_search(
             result["search_calls_completed"] += 1
             if result["initial_root_profile"] is None:
                 result["initial_root_profile"] = deepcopy(endpoint)
-            if endpoint["training_nmse"] < result["best"]["training_nmse"]:
+            improved = endpoint["training_nmse"] < result["best"]["training_nmse"]
+            if improved:
                 result["best"] = deepcopy(endpoint)
                 best_q = np.asarray(q).copy()
-            save()
+            save(force=improved, event="incumbent" if improved else "progress")
             return endpoint["training_nmse"]
 
         if not np.isfinite(objective(np.zeros(len(free)))):
@@ -672,7 +692,7 @@ def root_profile_search(
                     if q[j] != 0:
                         objective(q)
             result["initial_sweep_completed"] = True
-            save()
+            save(force=True, event="initial_sweep_complete")
 
             def accepted(q):
                 point = point_for(q)
@@ -684,7 +704,7 @@ def root_profile_search(
                         "scope": "shared coordinates only; no root/stationarity claim",
                     }
                 )
-                save()
+                save(force=True, event="accepted_iteration")
 
             fit = minimize(
                 objective,
@@ -716,7 +736,13 @@ def root_profile_search(
         continuation._invalidate(result, error, "search")
     if profiler is not None:
         result["profile_execution"] = deepcopy(profiler.counts)
-    return continuation._finish(result, budget, checkpoint, "search", interrupted)
+    return continuation._finish(
+        result,
+        budget,
+        progress.final if progress is not None else checkpoint,
+        "search",
+        interrupted,
+    )
 
 
 def root_boundary_control(

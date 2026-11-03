@@ -466,6 +466,24 @@ class _Run(previous._Run):
         save(value)
         return value
 
+    def search(self, save):
+        """Dispatch historical search; continuations may opt in separately."""
+        from autoformalism.fitting import prefix_portfolio_residual_search as residual
+
+        p = self.policy
+        if self.task["kind"] == "root_profile":
+            return roots.root_profile_search(
+                self.oracle,
+                self.start,
+                p.search_seconds,
+                p.maximum_calls,
+                save,
+                failure_diagnostics=True,
+            )
+        return residual.search(
+            self.oracle, self.start, p.search_seconds, p.maximum_calls, save
+        )
+
     def fit(self):
         from autoformalism.fitting import prefix_portfolio_residual_search as residual
 
@@ -498,21 +516,7 @@ class _Run(previous._Run):
             )
             if not first._verified(self.ops.get("profiled_start_verification")):
                 return
-        self.perform(
-            "search",
-            lambda save: roots.root_profile_search(
-                self.oracle,
-                self.start,
-                p.search_seconds,
-                p.maximum_calls,
-                save,
-                failure_diagnostics=True,
-            )
-            if is_root
-            else residual.search(
-                self.oracle, self.start, p.search_seconds, p.maximum_calls, save
-            ),
-        )
+        self.perform("search", self.search)
         search = first._value(self.ops.get("search"), partial=True)
         if search.get("best"):
             self.verify_endpoint(

@@ -8,6 +8,7 @@ import pytest
 
 from autoformalism.fitting import prefix_portfolio_residual_search as p
 from autoformalism.fitting.recovery_numerics import NumericalInvalidTrial
+from tests.test_compact_search_checkpoint import fake_clock
 from tests.test_prefix_portfolio_nonlinear_reduction import build, case
 
 
@@ -328,3 +329,91 @@ def test_failed_checkpoint_blocks_further_numerical_work(monkeypatch):
 def test_invalid_allowances_rejected(seconds, calls):
     with pytest.raises(ValueError, match="residual search requires"):
         p.search(None, {}, seconds, calls, lambda _: None)
+
+
+@pytest.mark.parametrize("seconds", [5, 1800])
+def test_compact_slow_sink_preserves_objective_sequence_and_best(monkeypatch, seconds):
+    def repeat_point(objective, q, *, callback, **kwargs):
+        for _ in range(100):
+            objective(q)
+        callback(q)
+        return SimpleNamespace(success=True, message="synthetic stop", nit=1)
+
+    monkeypatch.setattr(p, "minimize", repeat_point)
+    outcomes = []
+    for compact in (False, True):
+        clock = fake_clock(monkeypatch)
+        _, oracle, _, _, seen = quadratic(monkeypatch)
+        snapshots = []
+
+        def slow_sink(snapshot, snapshots=snapshots, clock=clock):
+            snapshots.append(deepcopy(snapshot))
+            clock.advance(0.7)
+
+        kwargs = {"checkpoint_policy": p.SearchCheckpointPolicy()} if compact else {}
+        result = p.search(oracle, oracle.start, seconds, 500, slow_sink, **kwargs)
+        outcomes.append((result, snapshots, seen))
+    baseline, compact = outcomes
+    assert compact[0]["best"] == baseline[0]["best"]
+    assert np.asarray(compact[2][: len(baseline[2])]) == pytest.approx(
+        np.asarray(baseline[2])
+    )
+    if seconds == 1800:
+        assert compact[0]["search_calls_completed"] == (
+            baseline[0]["search_calls_completed"]
+        )
+    else:
+        assert baseline[0]["timing"]["timeout_reason"] == "overall_wall_limit"
+        assert compact[0]["timing"]["timeout_reason"] is None
+        assert compact[0]["search_calls_completed"] > (
+            baseline[0]["search_calls_completed"]
+        )
+        assert compact[0]["optimizer_success"]
+    assert len(compact[1]) < len(baseline[1]) / 5
+    assert compact[1][-1]["best"] == compact[0]["best"]
+    assert compact[0]["timing"]["callback_wall_seconds"] < (
+        baseline[0]["timing"]["callback_wall_seconds"] / 5
+    )
+    assert compact[0]["checkpoint_persistence"]["writes_completed"] == len(compact[1])
+    assert "certificate" in compact[0] and "certificate" not in compact[1][-1]
+
+
+def test_compact_interruption_keeps_best_in_durable_progress(monkeypatch):
+    _, oracle, seed, _, _ = quadratic(monkeypatch)
+    actual = oracle.evaluate
+    calls, snapshots = 0, []
+
+    def interrupted(point, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt
+        return actual(point, *args, **kwargs)
+
+    monkeypatch.setattr(oracle, "evaluate", interrupted)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        p.search(
+            oracle, oracle.start, 10, 100, snapshots.append,
+            checkpoint_policy=p.SearchCheckpointPolicy(),
+        )
+    result = caught.value.execution_receipt
+    assert result["search_calls_started"] == 2
+    assert snapshots[-1]["best"] == result["best"]
+    assert oracle.vector(result["best"]["parameters"]) == pytest.approx(seed)
+    assert snapshots[-1]["compact_progress"]["event"] == "accepted_iteration"
+
+
+def test_compact_failed_checkpoint_prevents_next_numerical_call(monkeypatch):
+    _, oracle, _, _, seen = quadratic(monkeypatch)
+
+    def fail_after_best(snapshot):
+        if snapshot["best"] is not None:
+            raise OSError("disk unavailable")
+
+    result = p.search(
+        oracle, oracle.start, 10, 100, fail_after_best,
+        checkpoint_policy=p.SearchCheckpointPolicy(),
+    )
+    assert len(seen) == 1 and result["best"] is not None
+    assert result["checkpoint_persistence"]["writes_failed"] == 1
+    assert result["status"] == "incomplete"

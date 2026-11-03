@@ -18,6 +18,10 @@ from autoformalism.fitting import prefix_continuation as continuation
 from autoformalism.fitting import prefix_execution as execution
 from autoformalism.fitting import prefix_portfolio as portfolio
 from autoformalism.fitting import prefix_portfolio_nonlinear_reduction as reduction
+from autoformalism.fitting.compact_search_checkpoint import (
+    SearchCheckpointPolicy,
+    SearchProgress,
+)
 from autoformalism.fitting.public_fitting import content_sha256
 from autoformalism.fitting.recovery_numerics import NumericalInvalidTrial
 
@@ -207,7 +211,13 @@ def qualify_residual(
 
 
 def search(
-    oracle, parameters, seconds: float, maximum_calls: int, checkpoint: Checkpoint
+    oracle,
+    parameters,
+    seconds: float,
+    maximum_calls: int,
+    checkpoint: Checkpoint,
+    *,
+    checkpoint_policy: SearchCheckpointPolicy | None = None,
 ) -> dict:
     """One bounded Powell control, with a balanced frozen-seed coordinate sweep.
 
@@ -223,6 +233,10 @@ def search(
         or not 1 <= maximum_calls <= 2000
     ):
         raise ValueError("residual search requires <=1800 seconds and <=2000 calls")
+    if checkpoint_policy is not None and not isinstance(
+        checkpoint_policy, SearchCheckpointPolicy
+    ):
+        raise TypeError("typed SearchCheckpointPolicy required")
     budget = execution._budget(seconds, seconds + 120)
     result = _claims() | {
         "optimizer": "Powell over fixed seed-scaled certified coordinates",
@@ -251,9 +265,19 @@ def search(
     before = deepcopy(oracle.counts)
     interrupted = None
     completed = {}
+    progress = (
+        SearchProgress(checkpoint_policy, checkpoint)
+        if checkpoint_policy is not None
+        else None
+    )
+    if progress is not None:
+        progress.attach(result)
 
-    def save():
+    def save(*, force=False, event="progress"):
         _account(result, oracle, before)
+        if progress is not None:
+            progress.save(result, budget, force=force, event=event)
+            return
         budget.callback(
             lambda: checkpoint(deepcopy(result) | {"timing": budget.snapshot()})
         )
@@ -367,10 +391,13 @@ def search(
                 "reduced_vector": point.tolist(),
             }
             completed[point.tobytes()] = endpoint
-            if result["best"] is None or loss < result["best"]["training_nmse"]:
+            improved = (
+                result["best"] is None or loss < result["best"]["training_nmse"]
+            )
+            if improved:
                 result["best"] = deepcopy(endpoint)
                 best_q = np.asarray(q, float).copy()
-            save()
+            save(force=improved, event="incumbent" if improved else "progress")
             return loss
 
         def accepted(q, phase="powell_iteration"):
@@ -388,7 +415,7 @@ def search(
                     "scope": "derivative-free accepted point; no stationarity claim",
                 }
             )
-            save()
+            save(force=True, event="accepted_iteration")
 
         zero = np.zeros(len(free))
         if not np.isfinite(objective(zero)):
@@ -403,7 +430,7 @@ def search(
             result["initial_sweep_coordinates_completed"].append(oracle.names[free[j]])
             save()
         result["initial_sweep_completed"] = True
-        save()
+        save(force=True, event="initial_sweep_complete")
         if len(free):
             remaining = maximum_calls - result["search_calls_attempted"]
             if remaining <= 0:
@@ -435,4 +462,10 @@ def search(
         continuation._invalidate(result, error, "search", preserve_diagnostic=True)
         result["stop_reason"] = "interrupted"
     _account(result, oracle, before)
-    return continuation._finish(result, budget, checkpoint, "search", interrupted)
+    return continuation._finish(
+        result,
+        budget,
+        progress.final if progress is not None else checkpoint,
+        "search",
+        interrupted,
+    )
