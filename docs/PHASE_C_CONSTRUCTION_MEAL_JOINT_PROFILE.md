@@ -6,6 +6,14 @@ arms use the same five verified model-15 starts from
 `construction-meal-scale-recovery-1`, the same equations, parameter domains,
 training data, and outer numerical allowances. It does not revise the model.
 
+Returned results (4 November): all ten tasks and original-equation checks pass.
+Root-only and joint profiling reach numerically tied endpoints in all five pairs;
+the best training NMSE remains about 0.423866885. Joint profiling removes the tiny
+drift-bound artifact but supplies no material accuracy or runtime gain here.
+All endpoint probes complete; their step-resolution warnings are consistent
+with ordinary curvature near small gradients, not failed evaluations. See the
+[results, costs and next reliability milestone](../work/agent-comms/2026-11-04-construction-meal-joint-profile-results.md).
+
 ## What is being compared
 
 For the certified positive meal branch, write `B=k*A` and `g=k*q`, where
