@@ -73,12 +73,39 @@ bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_hos
 bash scripts/jetstream/run_phase_c_hosted.sh llm_ode configs/phase_c_llm_ode_published_prompt_hosted_120b_v1_seeds_2_4.json phase-c-llm-ode-published-prompt-hosted-120b-v1-seeds-2-4 8
 ```
 
+## Results
+
+### SINDy and PySR
+
+`phase-c-classical-seeds-2-4` ran from `0665000` on js2 from 2026-11-03
+21:06Z to 2026-11-04 02:25Z: 5.3 hours, one task at a time on 16 CPUs, after
+the one-time setup.
+
+| | Seeds 2 to 4 | Seeds 0 and 1 | Five seeds |
+|---|---:|---:|---:|
+| SINDy, complete | 21/24 | 14/16 | 35/40 |
+| PySR, complete | 21/24 | 13/16 | 34/40 |
+
+- **SINDy** repeats seed 0 in every cell: each task's output files equal seed
+  0's apart from the seed and the timings. CSTR fails for seeds 2, 3 and 4
+  with the same error as for seeds 0 and 1: at all twelve thresholds the
+  rollout fails on the same nine training and three validation trajectories.
+- **PySR** reached the plan's 3,600 s limit (`timed_out`) on T2 easy seeds 2
+  and 4 and T2 hard seed 2. Seeds 0 and 1 reached it on T2 easy seed 1, T2
+  hard seed 1 and coupled detention seed 0. The limit is the plan's, not an
+  outage, so these are kept as recorded, as seeds 0 and 1's were.
+- **Environment.** The package pins are unchanged since `d74a223`, and js2's
+  runtime record matches js2b's: PySR 1.5.9, Julia 1.11.9, Python 3.12.3.
+  js2b's full package list was not kept, so the versions left unpinned cannot
+  be compared. On js2, PySR's `~1.11.0` pin resolved SymbolicRegression.jl to
+  1.11.3.
+
 ## Limitations
 
 - **A different CPU VM for SINDy and PySR.** Seeds 0 and 1 ran on js2b, an
-  m3.2xl since deleted. js2 is an m3.xl with the same 16 CPUs per task, and
-  their environment is built on it anew. Its setup records the package and
-  Julia versions; any difference from js2b's record is reported.
+  m3.2xl since deleted. js2 is an m3.large, whose 16 CPUs match each task's
+  16 on js2b, and their environment is built on it anew. Its setup records
+  the package and Julia versions, compared with js2b's under Results.
 - **SINDy ignores the seed.** Its three new runs should repeat seed 0's results.
   They are kept so the plan differs from the frozen one only in its seeds, and
   they take about an hour.
