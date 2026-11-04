@@ -15,7 +15,10 @@ from autoformalism.schemas.prefix_initialization import PrefixFitProblem
 from autoformalism.schemas.public_fitting import PublicSplit
 
 
-def fixture(*, reservoir="q*r-k*A", output="r-x+k*A", observation="2*x", bounded=False):
+def fixture(
+    *, reservoir="q*r-k*A", output="r-x+k*A", observation="2*x",
+    bounded=False, rate=0.1, input_gain=2.0,
+):
     problem = PrefixFitProblem.model_validate(
         {
             "base_candidate": {
@@ -65,7 +68,7 @@ def fixture(*, reservoir="q*r-k*A", output="r-x+k*A", observation="2*x", bounded
                     },
                 }
             },
-            "parameter_guesses": {"k": 0.1, "q": 2.0},
+            "parameter_guesses": {"k": rate, "q": input_gain},
         }
     )
     time = np.linspace(0, 2, 9)
@@ -131,6 +134,105 @@ def test_changed_rate_recomputes_input_gain_even_when_flux_coordinate_unchanged(
     assert restored["q"] == pytest.approx(oracle.start["q"] / 2)
     for name in chart.root_names:
         assert restored[name] == oracle.start[name]
+
+
+@pytest.mark.parametrize("new_rate", [1e-6, 1e-4, 0.01, 1.0])
+def test_source_flux_unit_is_invariant_under_rate_reseeding(new_rate):
+    """A stale billion-unit q scale must not inflate physically identical g."""
+    _, oracle = fixture(rate=1e-10, input_gain=1e9)
+    chart = certified(oracle)
+    index = oracle.names.index("q")
+    source_units = chart.units(oracle.start)
+    changed = chart.reseed(oracle.start, new_rate)
+    assert chart.encode(changed)[index] == pytest.approx(0.1)
+    assert chart.units(changed) == pytest.approx(source_units)
+    assert source_units[index] == pytest.approx(0.1)
+    record = chart.audit["optimizer_gain_scale"]
+    assert record["source_input_gain_unit"] == 1e9
+    assert record["source_rate"] == 1e-10
+    assert record["source_flux_gain"] == pytest.approx(0.1)
+    assert record["rule"] == "source_flux_gain"
+    assert not record["zero_gain_fallback_used"]
+    assert record["reseed_invariant"]
+
+
+def test_positive_gain_scale_does_not_follow_stale_original_gain_units():
+    _, oracle = fixture()
+    oracle.units[oracle.names.index("q")] = 1e15
+    chart = certified(oracle)
+    assert chart.flux_gain_unit == pytest.approx(0.2)
+    oracle.units[oracle.names.index("q")] = 1e20
+    assert chart.units(oracle.start)[oracle.names.index("q")] == pytest.approx(0.2)
+
+
+def test_zero_gain_fallback_is_finite_frozen_and_can_leave_the_boundary():
+    _, oracle = fixture(input_gain=0.0)
+    chart = certified(oracle)
+    index = oracle.names.index("q")
+    record = chart.audit["optimizer_gain_scale"]
+    assert record["zero_gain_fallback_used"]
+    assert record["source_flux_gain"] == 0.0
+    assert record["rule"] == "source_rate_times_input_gain_unit"
+    assert record["unit"] == pytest.approx(0.1)
+    for rate in (1e-6, 0.1, 2.0):
+        start = chart.reseed(oracle.start, rate)
+        units = chart.units(start)
+        assert units[index] == pytest.approx(0.1)
+        probe = chart.encode(start)
+        probe[index] += units[index]
+        lifted = oracle.parameters(chart.decode(probe))
+        assert lifted["q"] > 0
+        assert lifted["k"] * lifted["q"] == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize("bad_unit", [0.0, -1.0, np.nan, np.inf])
+def test_invalid_source_gain_units_fail_closed(bad_unit):
+    _, oracle = fixture(input_gain=0.0)
+    oracle.units[oracle.names.index("q")] = bad_unit
+    with pytest.raises(NumericalInvalidTrial, match="source meal gain unit"):
+        certified(oracle)
+
+
+def test_zero_gain_fallback_rejects_nonrepresentable_product():
+    _, oracle = fixture(input_gain=0.0)
+    oracle.units[oracle.names.index("q")] = 1e-100
+    with pytest.raises(NumericalInvalidTrial, match="source meal flux unit"):
+        meal.certify(
+            oracle, oracle.start | {"k": 1e-300}, state="A", rate="k",
+            input_gain="q", input_name="r", output_state="x",
+        )
+
+
+@pytest.mark.parametrize("direction", [-1.0, 1.0])
+def test_reseeded_characteristic_gain_probes_profile_and_replay(direction):
+    """Explicit gain probes cover the direction missed by short preflights."""
+    original, oracle = fixture(rate=1e-10, input_gain=1e9)
+    chart = certified(oracle)
+    start = chart.reseed(oracle.start, 0.01)
+    index = oracle.names.index("q")
+    point = chart.encode(start)
+    unit = max(abs(point[index]), chart.units(start)[index])
+    point[index] += direction * unit
+    changed = oracle.parameters(chart.decode(point))
+    assert changed["q"] == pytest.approx(0.0 if direction < 0 else 20.0)
+    assert changed["k"] == start["k"]
+    endpoint = roots.RootProfile(oracle).profile(changed, monotonic() + 10)
+    residual, _ = original.evaluate(
+        original.vector(endpoint["original_parameters"]), monotonic() + 10,
+        jacobian=False, method="Radau",
+    )
+    assert np.isfinite(endpoint["training_nmse"])
+    assert endpoint["training_nmse"] == pytest.approx(np.mean(residual**2), abs=1e-8)
+
+
+def test_units_validate_the_reseeded_point_and_source_identity():
+    _, oracle = fixture()
+    chart = certified(oracle)
+    with pytest.raises(NumericalInvalidTrial, match="zero rate"):
+        chart.units(oracle.start | {"k": 0})
+    chart.audit["problem_sha256"] = "changed"
+    with pytest.raises(ValueError, match="identity changed"):
+        chart.units(oracle.start)
 
 
 def test_same_start_profile_objective_and_original_rollout_agree():
@@ -299,7 +401,7 @@ def test_positive_fixed_rate_rejects_invalid_boundary(value):
 
 
 def test_fixed_positive_rate_profiles_gain_without_changing_rate(monkeypatch):
-    _, oracle = fixture()
+    _, oracle = fixture(rate=1e-10, input_gain=1e9)
     chart = certified(oracle)
     start = chart.reseed(oracle.start, 0.05)
     original = roots.RootProfile.profile
@@ -319,6 +421,10 @@ def test_fixed_positive_rate_profiles_gain_without_changing_rate(monkeypatch):
     assert "k" not in result["outer_coordinates"]
     assert "meal_flux_gain:A" in result["outer_coordinates"]
     assert any(p["q"] != start["q"] for p in attempts)
+    assert result["initial_sweep_completed"]
+    assert result["outer_coordinate_chart"]["units"] == pytest.approx([0.1])
+    assert any(p["q"] == pytest.approx(0.0) for p in attempts)
+    assert any(p["q"] == pytest.approx(2 * start["q"]) for p in attempts)
     assert result["best"]["parameters"]["k"] == 0.05
 
 

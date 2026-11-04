@@ -477,6 +477,7 @@ def root_profile_search(
     failure_diagnostics: bool = False,
     checkpoint_policy: SearchCheckpointPolicy | None = None,
     coordinate_chart: meal_coordinates.MealCoordinates | None = None,
+    overall_wall_seconds: float | None = None,
 ) -> dict:
     """Profile initial roots at each bounded Powell shared-parameter trial.
 
@@ -484,6 +485,8 @@ def root_profile_search(
     improved feasible checkpoint is saved immediately; interrupted work is not
     automatically replayed. Two different seeds receive independent equal limits.
     Failure diagnostics are opt-in and do not relax numerical acceptance checks.
+    Explicit wall headroom accommodates persistence without increasing numerical
+    time or suppressing durable improvements; callers must reserve the full cap.
     """
     if (
         not 0 < seconds <= 3600
@@ -501,7 +504,21 @@ def root_profile_search(
         coordinate_chart, meal_coordinates.MealCoordinates
     ):
         raise TypeError("certified MealCoordinates required")
-    budget = execution._budget(seconds, min(seconds + 120, 3600))
+    overall = min(seconds + 120, 3600)
+    if overall_wall_seconds is not None:
+        if (
+            isinstance(overall_wall_seconds, (bool, np.bool_))
+            or not isinstance(
+                overall_wall_seconds, (int, float, np.integer, np.floating)
+            )
+            or not np.isfinite(overall_wall_seconds)
+            or not seconds <= overall_wall_seconds <= 3600
+        ):
+            raise ValueError(
+                "overall wall allowance must cover numerical time and be <=3600"
+            )
+        overall = float(overall_wall_seconds)
+    budget = execution._budget(seconds, overall)
     result = {
         "protocol": PROTOCOL,
         "best": None,
@@ -519,6 +536,12 @@ def root_profile_search(
         "stop_reason": "not_started",
         "derivatives_used": False,
         "optimizer": "Powell over shared coordinates; bounded LS over roots",
+        "execution_allowance": {
+            "numerical_seconds": seconds,
+            "overall_wall_seconds": overall,
+            "objective_attempts": maximum_calls,
+            "strict_improvements_saved_immediately": True,
+        },
         "global_minimum_certified": False,
         "independent_original_verification_required": True,
         "initial_sweep_completed": False,

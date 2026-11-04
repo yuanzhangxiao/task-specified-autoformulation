@@ -1,0 +1,7 @@
+{
+  "population": "scaled-readout-meal-scale-1",
+  "checkpoint_interval_seconds": 30,
+  "search_seconds": 1800,
+  "maximum_calls": 2000,
+  "persistence_headroom_seconds": 900
+}

@@ -1,5 +1,18 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Meal gain-scale recovery
+
+Returned meal continuation reached training NMSE 0.423867303091 with finite
+memory, while four fixed-rate controls inherited excessive transformed gain
+scales. The corrected chart freezes the effective gain scale at certification,
+with an explicit zero-gain fallback. A separate five-task CPU campaign continues
+the warm fit and each fixed rate's verified trial, retaining the global incumbent
+independently. An explicit 900-second persistence headroom preserves every strict
+improvement without enlarging the 1800-second numerical allowance. Historical
+receipts, equations and training boundaries are unchanged; profile minima and
+intervention performance remain unestablished. See
+[the protocol and Delta commands](PHASE_C_CONSTRUCTION_MEAL_SCALE_RECOVERY.md).
+
 ## Verified meal-coordinate continuation
 
 The returned targeted portfolio campaign improved model 15's training

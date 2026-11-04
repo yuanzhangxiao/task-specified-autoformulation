@@ -20,7 +20,8 @@ from autoformalism.fitting import prefix_structural_reduction as structural
 from autoformalism.fitting.public_fitting import content_sha256
 from autoformalism.fitting.recovery_numerics import NumericalInvalidTrial
 
-PROTOCOL = "positive-meal-flux-coordinates-1"
+PROTOCOL = "positive-meal-flux-coordinates-2"
+GAIN_SCALE_PROTOCOL = "certified-source-meal-flux-unit-1"
 
 
 def _monomial(*names):
@@ -38,6 +39,42 @@ def _nonnegative_unbounded(oracle, names):
         index = oracle.names.index(name)
         if oracle.lower[index] != 0 or oracle.upper[index] != np.inf:
             raise ValueError("meal chart requires nonnegative unbounded domains")
+
+
+def _source_gain_scale(oracle, parameters, rate: str, input_gain: str) -> dict:
+    """Freeze a characteristic flux unit before any positive-rate reseeding.
+
+    A nonzero source gain supplies its own physical scale. At zero, where that
+    scale vanishes, use the source rate times the existing original-gain unit.
+    Both rules are fixed at certification; a later rate change must not multiply
+    a stale original-gain unit by the new rate.
+    """
+    oracle.vector(parameters)
+    k, q = float(parameters[rate]), float(parameters[input_gain])
+    if k <= 0:
+        raise NumericalInvalidTrial("positive meal chart excludes zero rate")
+    q_unit = float(oracle.units[oracle.names.index(input_gain)])
+    if not np.isfinite(q_unit) or q_unit <= 0:
+        raise NumericalInvalidTrial("nonrepresentable source meal gain unit")
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        g = float(k * q)
+        unit = g if q > 0 else float(k * q_unit)
+    if not np.isfinite(g) or (q > 0 and g == 0):
+        raise NumericalInvalidTrial("nonrepresentable meal flux product")
+    if not np.isfinite(unit) or unit <= 0:
+        raise NumericalInvalidTrial("nonrepresentable source meal flux unit")
+    return {
+        "protocol": GAIN_SCALE_PROTOCOL,
+        "source_rate": k,
+        "source_input_gain": q,
+        "source_flux_gain": g,
+        "source_input_gain_unit": q_unit,
+        "unit": unit,
+        "rule": "source_flux_gain" if q > 0 else "source_rate_times_input_gain_unit",
+        "zero_gain_fallback_used": q == 0,
+        "reseed_invariant": True,
+        "scope": "frozen characteristic optimizer unit; no parameter-domain change",
+    }
 
 
 def _proof(oracle, state, rate, input_gain, input_name, output_state):
@@ -125,6 +162,7 @@ class MealCoordinates:
     input_name: str
     output_state: str
     root_names: tuple[str, ...]
+    flux_gain_unit: float
     audit: dict
 
     @property
@@ -201,10 +239,12 @@ class MealCoordinates:
         return self.oracle.vector(values)
 
     def units(self, parameters):
-        """Scale g by the transformed original gain unit at the frozen seed."""
+        """Return the certified source flux unit, invariant under rate reseeding."""
+        self._validate_source(self.oracle)
+        self.encode(parameters)
         units = self.oracle.units.copy()
         index = self.oracle.names.index(self.input_gain)
-        units[index] *= parameters[self.rate]
+        units[index] = self.flux_gain_unit
         if not np.isfinite(units).all() or units[index] <= 0:
             raise NumericalInvalidTrial("nonrepresentable meal coordinate units")
         return units
@@ -309,6 +349,7 @@ def certify(
 ) -> MealCoordinates:
     """Certify exact restricted algebra, exclusive uses and all original domains."""
     roots = _proof(oracle, state, rate, input_gain, input_name, output_state)
+    gain_scale = _source_gain_scale(oracle, parameters, rate, input_gain)
     record = {
         "protocol": PROTOCOL,
         "problem_sha256": content_sha256(oracle.original.problem),
@@ -319,6 +360,7 @@ def certify(
         "input": input_name,
         "output_state": output_state,
         "root_names": list(roots),
+        "optimizer_gain_scale": gain_scale,
         "proof": "exact isolated q*r-k*A reservoir and +k*A output contribution",
         "coordinate": f"meal_flux_gain:{state}",
         "positive_branch": "k>0; g=k*q; B0_i=k*A0_i",
@@ -339,6 +381,7 @@ def certify(
         input_name,
         output_state,
         roots,
+        gain_scale["unit"],
         record | {"sha256": content_sha256(record)},
     )
     chart.decode(chart.encode(parameters))

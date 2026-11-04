@@ -254,6 +254,72 @@ def test_invalid_search_allowances_rejected(seconds, calls):
         roots.root_profile_search(None, {}, seconds, calls, lambda _: None)
 
 
+@pytest.mark.parametrize("overall", [True, "300", 0, 4, 3601, np.inf, np.nan])
+def test_invalid_overall_allowance_fails_before_numerical_work(overall):
+    with pytest.raises(ValueError, match="overall wall allowance"):
+        roots.root_profile_search(
+            None, {}, 5, 1, lambda _: None, overall_wall_seconds=overall
+        )
+
+
+def test_explicit_persistence_headroom_keeps_every_improvement(monkeypatch):
+    """A larger wall cap changes neither numerical allowance nor write policy."""
+    def repeated(objective, q, *, callback, **kwargs):
+        for _ in range(100):
+            loss = objective(q)
+        callback(q)
+        return SimpleNamespace(
+            success=True, message="stop", nit=1, x=q.copy(), fun=loss
+        )
+
+    monkeypatch.setattr(roots, "minimize", repeated)
+    outcomes = []
+    for seconds, overall, step in ((5, None, 0.01), (5, 600, 0.01), (1, 600, 0.1)):
+        clock = fake_clock(monkeypatch)
+        _, oracle = wrapped()
+        losses, saved = [], []
+
+        def control(point, deadline, **kwargs):
+            return np.asarray([5.0]), None
+
+        def profile(self, parameters, deadline, clock=clock, step=step, losses=losses):
+            clock.advance(step)
+            loss = 1 / (len(losses) + 1)
+            losses.append(loss)
+            return {
+                "parameters": dict(parameters), "training_nmse": loss,
+                "conditional_root_optimality_checked": True,
+                "root_solve": [{"conditional_optimum": True}],
+            }
+
+        def slow_sink(snapshot, saved=saved, clock=clock):
+            saved.append(deepcopy(snapshot))
+            clock.advance(1.5)
+
+        monkeypatch.setattr(oracle, "evaluate", control)
+        monkeypatch.setattr(roots.RootProfile, "profile", profile)
+        result = roots.root_profile_search(
+            oracle, oracle.start, seconds, 500, slow_sink,
+            overall_wall_seconds=overall,
+            checkpoint_policy=roots.SearchCheckpointPolicy(),
+        )
+        outcomes.append((result, losses, saved))
+    short, extended, numerical = outcomes
+    assert short[0]["timing"]["timeout_reason"] == "overall_wall_limit"
+    assert extended[0]["timing"]["timeout_reason"] is None
+    assert extended[0]["optimizer_success"]
+    assert len(extended[1]) > len(short[1])
+    assert short[1] == extended[1][:len(short[1])]
+    assert extended[0]["execution_allowance"]["numerical_seconds"] == 5
+    assert extended[0]["execution_allowance"]["overall_wall_seconds"] == 600
+    persisted = {
+        item["best"]["training_nmse"] for item in extended[2] if item.get("best")
+    }
+    assert set(extended[1]) <= persisted
+    assert numerical[0]["timing"]["timeout_reason"] == "numerical_active_wall_limit"
+    assert len(numerical[1]) < len(extended[1])
+
+
 @pytest.mark.parametrize("seconds", [5, 1800])
 def test_compact_slow_sink_preserves_profile_sequence_and_best(monkeypatch, seconds):
     def repeat_point(objective, q, *, callback, **kwargs):
