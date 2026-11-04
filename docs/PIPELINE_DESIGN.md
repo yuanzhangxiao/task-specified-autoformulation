@@ -1,5 +1,23 @@
 # Phase 1 Pipeline Design
 
+## Evaluated optimizer termination and meal-rate controls
+
+Root-profile search records raw optimizer status separately from a qualified
+finite terminal point. Terminal coordinates and objective must match a completed
+feasible objective evaluation; callbacks without such a receipt remain explicitly
+unqualified. The check consumes no extra numerical calls and never replaces the
+verified best endpoint with the optimizer's final point. Feasible termination
+does not certify stationarity or identifiability.
+
+The opt-in `construction-meal-continuation-1` campaign starts from one pinned
+verified model-15 endpoint. Its certified positive meal coordinates permit a
+fixed positive absorption rate while fitting the effective gain. Exact zero
+uses the original equations and a separately certified observed-output-equivalent
+representative, with no nonzero meal flux smuggled through a singular inverse.
+The inner initial-root profiler remains unchanged. Trial scores stay separate
+from incumbent retention; historical reservations cannot be renewed. See
+`PHASE_C_CONSTRUCTION_MEAL_CONTINUATION.md` for scope and resource bounds.
+
 ## Shared-scale initial readout proof
 
 The opt-in `shared-scaled-initial-readout-1` proof recognizes exact readouts

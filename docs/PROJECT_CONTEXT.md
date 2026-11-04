@@ -1,5 +1,20 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Verified meal-coordinate continuation
+
+The returned targeted portfolio campaign improved model 15's training
+reconstruction NMSE from 0.43846 to 0.42665, but its almost non-decaying meal
+state and unfinished search do not establish physiological parameter recovery.
+The next six-task CPU campaign continues that exact verified endpoint, compares
+four fixed positive decay rates with effective gain/initial contribution
+preserved in their starts, and retains exact zero as a distinct control.
+At zero, exclusive-use algebra certifies that the meal gain can be fixed to
+zero without changing observed outputs; hidden reservoir trajectories need not
+be preserved. Raw optimizer success is separated from finite evaluated-terminal
+qualification, and unpaired callbacks cannot masquerade as accepted endpoints.
+No equation revision or held-out claim follows. See
+[the protocol and Delta commands](PHASE_C_CONSTRUCTION_MEAL_CONTINUATION.md).
+
 ## Scaled-readout proof and numerical handoff
 
 The opt-in scaled-initial-readout proof closes the remaining saved 120B gap:

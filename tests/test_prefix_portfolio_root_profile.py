@@ -258,9 +258,11 @@ def test_invalid_search_allowances_rejected(seconds, calls):
 def test_compact_slow_sink_preserves_profile_sequence_and_best(monkeypatch, seconds):
     def repeat_point(objective, q, *, callback, **kwargs):
         for _ in range(100):
-            objective(q)
+            loss = objective(q)
         callback(q)
-        return SimpleNamespace(success=True, message="synthetic stop", nit=1)
+        return SimpleNamespace(
+            success=True, message="synthetic stop", nit=1, x=q.copy(), fun=loss
+        )
 
     monkeypatch.setattr(roots, "minimize", repeat_point)
     outcomes = []

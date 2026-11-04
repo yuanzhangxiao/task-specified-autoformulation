@@ -36,6 +36,7 @@ from autoformalism.fitting.simulation import trajectory_forcing
 PROTOCOL = "portfolio-affine-initial-root-profile-1"
 FAILURE_PROTOCOL = "bounded-root-profile-failures-1"
 BOUNDARY_PROTOCOL = "portfolio-initial-root-zero-boundary-1"
+TERMINATION_PROTOCOL = "root-profile-evaluated-termination-1"
 
 
 def _failure_ledger() -> dict:
@@ -523,6 +524,17 @@ def root_profile_search(
         "initial_sweep_completed": False,
         "accepted_shared_iteration_history": [],
         "outer_coordinates_varied": [],
+        "optimizer_success": False,
+        "optimizer_raw_success": None,
+        "optimizer_terminal": None,
+        "optimizer_callback_audit": {
+            "protocol": TERMINATION_PROTOCOL,
+            "verified": 0,
+            "unqualified": 0,
+            "unqualified_examples": [],
+            "omitted_examples": 0,
+            "scope": "Callback feasibility only; no convergence or stationarity claim",
+        },
     }
     if failure_diagnostics:
         result["failure_diagnostics"] = _failure_ledger()
@@ -603,7 +615,9 @@ def root_profile_search(
 
         def point_for(q):
             point = chart_initial.copy()
-            q = np.asarray(q)
+            q = np.asarray(q, dtype=float)
+            if q.shape != (len(free),) or not np.isfinite(q).all():
+                raise NumericalInvalidTrial("invalid shared optimizer coordinates")
             with np.errstate(over="ignore", under="ignore", invalid="ignore"):
                 for j, i in enumerate(free):
                     point[i] = (
@@ -665,6 +679,58 @@ def root_profile_search(
         save(force=True, event="incumbent")
 
         best_q = np.zeros(len(free))
+        # At most maximum_calls entries: retain scalar receipts, not full roots.
+        # A later rejection at the same point supersedes its earlier evaluation.
+        evaluated = {}
+
+        def key_for(q):
+            values = np.asarray(q, dtype=float)
+            if values.shape != (len(free),) or not np.isfinite(values).all():
+                return None
+            return tuple(float(v) for v in values)
+
+        def evaluated_point(q):
+            """Pair optimizer telemetry to a completed call without new numerics."""
+            audit = {
+                "protocol": TERMINATION_PROTOCOL,
+                "status": "invalid_coordinates",
+                "optimizer_coordinates": None,
+                "shared_parameters": None,
+                "evaluation_attempt": None,
+                "evaluated_training_nmse": None,
+                "feasible_evaluation_verified": False,
+                "stationarity_certified": False,
+                "extra_profile_calls": 0,
+            }
+            try:
+                values = np.asarray(q, dtype=float)
+                if values.ndim == 1 and len(values) == len(free):
+                    audit["optimizer_coordinates"] = [
+                        _diagnostic_number(v) for v in values
+                    ]
+                key = key_for(values)
+                if key is None:
+                    return audit
+                point = point_for(values)
+                # Domain validation must include the original coordinate lift.
+                oracle.vector(oracle.parameters(point))
+                audit["shared_parameters"] = {
+                    oracle.names[i]: float(point[i]) for i in free
+                }
+            except (
+                ValueError, TypeError, OverflowError, NumericalInvalidTrial
+            ) as error:
+                audit["error"] = f"{type(error).__name__}: {error}"[:500]
+                return audit
+            receipt = evaluated.get(key)
+            if receipt is None:
+                audit["status"] = "not_evaluated"
+            else:
+                audit.update(receipt)
+                audit["feasible_evaluation_verified"] = (
+                    receipt["status"] == "verified"
+                )
+            return audit
 
         def objective(q):
             nonlocal best_q
@@ -673,6 +739,13 @@ def root_profile_search(
                 raise TimeoutError("root-profile call allowance exhausted")
             result["search_calls_attempted"] += 1
             result["search_calls_started"] += 1
+            key = key_for(q)
+            if key is not None:
+                evaluated[key] = {
+                    "status": "evaluation_unfinished",
+                    "evaluation_attempt": result["search_calls_started"],
+                    "evaluated_training_nmse": None,
+                }
             save()
             varied = {chart_names[i] for j, i in enumerate(free) if q[j] != 0}
             result["outer_coordinates_varied"] = sorted(
@@ -684,6 +757,8 @@ def root_profile_search(
                 endpoint = budget.numerical(
                     lambda d: profiler.profile(oracle.parameters(point), d)
                 )
+                if not np.isfinite(endpoint["training_nmse"]):
+                    raise NumericalInvalidTrial("nonfinite profiled objective")
                 if coordinate_chart is not None:
                     endpoint["scaled_meal_initials"] = coordinate_chart.scaled_initials(
                         endpoint["parameters"]
@@ -696,6 +771,8 @@ def root_profile_search(
                 result["search_calls_failed"] += 1
                 result["invalid_trials"] += 1
                 result["last_invalid_trial"] = f"{type(error).__name__}: {error}"[-500:]
+                if key is not None:
+                    evaluated[key]["status"] = "rejected_evaluation"
                 if failure_diagnostics:
                     _record_failure(
                         result["failure_diagnostics"],
@@ -712,6 +789,11 @@ def root_profile_search(
                 save()
                 raise
             result["search_calls_completed"] += 1
+            evaluated[key] = {
+                "status": "verified",
+                "evaluation_attempt": result["search_calls_started"],
+                "evaluated_training_nmse": float(endpoint["training_nmse"]),
+            }
             if result["initial_root_profile"] is None:
                 result["initial_root_profile"] = deepcopy(endpoint)
             improved = endpoint["training_nmse"] < result["best"]["training_nmse"]
@@ -734,16 +816,21 @@ def root_profile_search(
             save(force=True, event="initial_sweep_complete")
 
             def accepted(q):
-                point = point_for(q)
-                result["accepted_shared_iteration_history"].append(
-                    {
-                        "shared_parameters": {
-                            oracle.names[i]: float(point[i]) for i in free
-                        },
-                        "scope": "shared coordinates only; no root/stationarity claim",
-                    }
-                )
-                save(force=True, event="accepted_iteration")
+                audit = evaluated_point(q)
+                callbacks = result["optimizer_callback_audit"]
+                if audit["feasible_evaluation_verified"]:
+                    callbacks["verified"] += 1
+                    result["accepted_shared_iteration_history"].append(
+                        audit
+                        | {"scope": "Evaluated shared point; no stationarity claim"}
+                    )
+                else:
+                    callbacks["unqualified"] += 1
+                    if len(callbacks["unqualified_examples"]) < 8:
+                        callbacks["unqualified_examples"].append(audit)
+                    else:
+                        callbacks["omitted_examples"] += 1
+                save(force=True, event="optimizer_callback_qualification")
 
             fit = minimize(
                 objective,
@@ -757,16 +844,44 @@ def root_profile_search(
                     "ftol": 1e-10,
                 },
             )
+            terminal = evaluated_point(getattr(fit, "x", None))
+            reported_loss = _diagnostic_number(getattr(fit, "fun", None))
+            terminal["reported_training_nmse"] = reported_loss
+            terminal["raw_success"] = bool(fit.success)
+            if reported_loss is None:
+                terminal.update(
+                    status="missing_or_nonfinite_objective",
+                    feasible_evaluation_verified=False,
+                )
+            elif terminal["feasible_evaluation_verified"] and (
+                reported_loss != terminal["evaluated_training_nmse"]
+            ):
+                terminal.update(
+                    status="objective_receipt_mismatch",
+                    feasible_evaluation_verified=False,
+                )
             result.update(
-                stop_reason="optimizer_stopped",
-                optimizer_success=bool(fit.success),
+                stop_reason=(
+                    "optimizer_stopped"
+                    if terminal["feasible_evaluation_verified"]
+                    else "optimizer_terminal_unqualified"
+                ),
+                optimizer_success=(
+                    bool(fit.success) and terminal["feasible_evaluation_verified"]
+                ),
+                optimizer_raw_success=bool(fit.success),
+                optimizer_terminal=terminal,
                 optimizer_message=str(fit.message),
                 optimizer_iterations=int(fit.nit),
                 budget_exhausted=bool(result["search_calls_started"] >= maximum_calls),
             )
         else:
+            terminal = evaluated_point(np.zeros(0))
+            terminal["scope"] = "All shared coordinates fixed; optimizer not called"
             result.update(
-                stop_reason="no_free_shared_coordinates", optimizer_success=True
+                stop_reason="no_free_shared_coordinates",
+                optimizer_success=terminal["feasible_evaluation_verified"],
+                optimizer_terminal=terminal,
             )
     except Exception as error:
         continuation._invalidate(result, error, "search")

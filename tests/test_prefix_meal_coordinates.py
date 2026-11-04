@@ -208,6 +208,21 @@ def test_initializer_dependence_and_negative_root_domain_are_rejected():
             certified(oracle)
 
 
+def test_certificate_rejects_initializer_root_in_output_balance(monkeypatch):
+    """The zero representative requires exclusive use even after scope lowering."""
+    original, oracle = fixture()
+    trees = meal.gains._expressions(original)
+    root = original.roots[0]
+    trees["rhs:x"] = meal.gains.RestrictedParser().parse(
+        f"r-x+k*A+{root}", location="rhs:x"
+    ).tree.body
+    # Inspect the certificate's executable-expression boundary independently
+    # of the proposer schema, which currently disallows generated root names.
+    monkeypatch.setattr(meal.gains, "_expressions", lambda _: trees)
+    with pytest.raises(ValueError, match="overlapping uses"):
+        certified(oracle)
+
+
 def test_nonfinite_inverse_and_underflow_are_rejected():
     _, oracle = fixture()
     chart = certified(oracle)
@@ -274,3 +289,74 @@ def test_search_rejects_fixed_overlap_and_foreign_chart():
     )
     assert result["search_calls_started"] == 0
     assert result["best"] is None
+
+
+@pytest.mark.parametrize("value", [0, -0.1, np.inf, np.nan, True])
+def test_positive_fixed_rate_rejects_invalid_boundary(value):
+    _, oracle = fixture()
+    with pytest.raises(ValueError, match="finite positive"):
+        certified(oracle).validate_use(oracle, {"k": value})
+
+
+def test_fixed_positive_rate_profiles_gain_without_changing_rate(monkeypatch):
+    _, oracle = fixture()
+    chart = certified(oracle)
+    start = chart.reseed(oracle.start, 0.05)
+    original = roots.RootProfile.profile
+    attempts = []
+
+    def capture(self, parameters, deadline):
+        attempts.append(dict(parameters))
+        return original(self, parameters, deadline)
+
+    monkeypatch.setattr(roots.RootProfile, "profile", capture)
+    result = roots.root_profile_search(
+        oracle, start, 10, 5, lambda _: None,
+        coordinate_chart=chart, fixed={"k": 0.05},
+    )
+    assert result["search_calls_started"] == 5
+    assert all(p["k"] == 0.05 for p in attempts)
+    assert "k" not in result["outer_coordinates"]
+    assert "meal_flux_gain:A" in result["outer_coordinates"]
+    assert any(p["q"] != start["q"] for p in attempts)
+    assert result["best"]["parameters"]["k"] == 0.05
+
+
+def test_zero_representative_preserves_outputs_and_removes_flat_gain_search():
+    original, oracle = fixture()
+    chart = certified(oracle)
+    start = oracle.start | {"k": 0.0, "q": 1234.0}
+    start.update(dict.fromkeys(chart.root_names, 5000.0))
+    reduced = chart.zero_representative(start)
+    certificate = reduced["certificate"]
+    assert certificate["fixed_shared_coordinates"] == {"k": 0.0, "q": 0.0}
+    assert not certificate["hidden_state_trajectories_preserved"]
+    canonical = reduced["parameters"]
+    assert all(canonical[n] == 0 for n in ("q", *chart.root_names))
+    deadline = monotonic() + 10
+    before, _ = oracle.evaluate(oracle.vector(start), deadline, jacobian=False)
+    after, _ = oracle.evaluate(oracle.vector(canonical), deadline, jacobian=False)
+    assert after == pytest.approx(before, abs=1e-10)
+    independent, _ = original.evaluate(
+        original.vector(reduced["original_parameters"]),
+        deadline, jacobian=False, method="Radau",
+    )
+    assert independent == pytest.approx(before, abs=1e-8)
+    result = roots.root_profile_search(
+        oracle, canonical, 10, 5, lambda _: None,
+        fixed=certificate["fixed_shared_coordinates"],
+    )
+    assert result["outer_coordinates"] == []
+    assert result["best"]["parameters"]["q"] == 0
+    assert result["best"]["training_nmse"] == pytest.approx(np.mean(before**2))
+    assert start["q"] == 1234.0
+
+
+def test_zero_representative_rejects_positive_rate_or_changed_source():
+    _, oracle = fixture()
+    chart = certified(oracle)
+    with pytest.raises(ValueError, match="exactly zero"):
+        chart.zero_representative(oracle.start)
+    chart.audit["problem_sha256"] = "changed"
+    with pytest.raises(ValueError, match="identity changed"):
+        chart.zero_representative(oracle.start | {"k": 0.0})

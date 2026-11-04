@@ -101,7 +101,7 @@ def _proof(oracle, state, rate, input_gain, input_name, output_state):
                 raise ValueError("meal output balance must contain exactly +k*A")
             remainder = dict(polynomial)
             remainder.pop(_monomial(rate, state))
-            if _mentions(remainder, (state, rate, input_gain)):
+            if _mentions(remainder, (state, rate, input_gain, root)):
                 raise ValueError("meal output balance has overlapping uses")
             consumers.append(location)
         elif location == f"initial:{state}":
@@ -147,7 +147,22 @@ class MealCoordinates:
         return self.oracle.upper.copy()
 
     def validate_use(self, oracle, fixed: Mapping[str, float]):
-        """Bind the chart to its certified oracle and reject overlapping fixes."""
+        """Allow fixed positive k while rejecting fixes to its transformed gain."""
+        self._validate_source(oracle)
+        if set(fixed) & {self.input_gain, self.flux_gain}:
+            raise ValueError("fixed coordinates overlap the meal coordinate chart")
+        if self.rate in fixed:
+            value = fixed[self.rate]
+            if (
+                isinstance(value, (bool, np.bool_))
+                or not isinstance(value, (int, float, np.integer, np.floating))
+                or not np.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError("fixed rate overlap requires a finite positive rate")
+
+    def _validate_source(self, oracle):
+        """Reject certificates transplanted to a different problem or reduction."""
         if oracle is not self.oracle:
             raise ValueError("meal chart belongs to a different oracle")
         if (
@@ -155,8 +170,6 @@ class MealCoordinates:
             or oracle.reduction.receipt["sha256"] != self.audit["reduction_sha256"]
         ):
             raise ValueError("meal chart source identity changed")
-        if set(fixed) & {self.rate, self.input_gain, self.flux_gain}:
-            raise ValueError("fixed coordinates overlap the meal coordinate chart")
 
     def encode(self, parameters: Mapping[str, float]):
         """Convert a complete feasible effective endpoint into k,g coordinates."""
@@ -213,6 +226,7 @@ class MealCoordinates:
 
     def zero_stratum(self, parameters):
         """Certify the original k=0 stratum without inventing a closure inverse."""
+        self._validate_source(self.oracle)
         self.oracle.vector(parameters)
         original = continuation.to_original(
             self.oracle.original, self.oracle, parameters
@@ -227,6 +241,42 @@ class MealCoordinates:
             "original_parameters": original,
             "inverse_unique": False,
             "nonzero_flux_at_zero_rate_permitted": False,
+        }
+
+    def zero_representative(self, parameters: Mapping[str, float]) -> dict:
+        """Choose q=A0=0 on k=0, preserving outputs but not the isolated state.
+
+        The exclusive-use certificate proves that q and A enter other balances
+        only through k*A. At exact zero this contribution vanishes for every
+        finite original q/A0, under any declared input schedule. Consequently a
+        zero representative removes a flat shared direction without imposing
+        a physiological bound or extending the positive branch to its closure.
+        """
+        self.zero_stratum(parameters)
+        canonical = dict(parameters) | dict.fromkeys(
+            (self.input_gain, *self.root_names), 0.0
+        )
+        self.oracle.vector(canonical)
+        original = continuation.to_original(
+            self.oracle.original, self.oracle, canonical
+        )
+        certificate = {
+            "protocol": "zero-meal-output-equivalence-1",
+            "positive_chart_sha256": self.audit["sha256"],
+            "problem_sha256": self.audit["problem_sha256"],
+            "reduction_sha256": self.audit["reduction_sha256"],
+            "fixed_shared_coordinates": {self.rate: 0.0, self.input_gain: 0.0},
+            "canonical_initial_roots": dict.fromkeys(self.root_names, 0.0),
+            "proof": "exclusive q*r-k*A reservoir; sole output path +k*A; k=0",
+            "scope": "observed outputs for any declared input schedule",
+            "hidden_state_trajectories_preserved": False,
+            "initial_root_profiler_unchanged": True,
+            "nonzero_flux_at_zero_rate_permitted": False,
+        }
+        return {
+            "parameters": canonical,
+            "original_parameters": original,
+            "certificate": certificate | {"sha256": content_sha256(certificate)},
         }
 
     def reseed(self, parameters, new_rate: float):
