@@ -1,9 +1,10 @@
 """Certified affine initial-root profiling with bounded shared-parameter search.
 
-Only trajectory roots are projected. Shared parameters remain outer coordinates;
-the original initialization DAG, readouts, sample weights and parameter domains
-are preserved. Conditional least-squares optimality does not certify outer
-optimization, uniqueness, biological validity or held-out forecasting accuracy.
+The default projects only trajectory roots. An explicit certified profiler
+factory may enlarge the inner block; its outer coordinate list then determines
+the search. The original initialization DAG, readouts, sample weights and
+parameter domains are preserved. Conditional least-squares optimality does not
+certify outer optimization, uniqueness, biology or held-out forecasting accuracy.
 """
 
 from __future__ import annotations
@@ -424,6 +425,8 @@ def root_profile_qualification(
     parameters: Mapping[str, float],
     seconds: float,
     checkpoint: Callable[[dict], None],
+    *,
+    profiler_factory: Callable | None = None,
 ) -> dict:
     """Bound certification, conditional solve and paired rollout in one receipt."""
     budget = execution._budget(seconds, min(seconds + 120, 3600))
@@ -441,7 +444,8 @@ def root_profile_qualification(
     }
     budget.callback(lambda: checkpoint(deepcopy(result)))
     try:
-        profiler = budget.numerical(lambda _: RootProfile(oracle))
+        factory = profiler_factory or RootProfile
+        profiler = budget.numerical(lambda _: factory(oracle))
         result["root_profile_certificate"] = deepcopy(profiler.audit)
         budget.callback(lambda: checkpoint(deepcopy(result)))
         endpoint = budget.numerical(lambda d: profiler.profile(parameters, d))
@@ -478,6 +482,7 @@ def root_profile_search(
     checkpoint_policy: SearchCheckpointPolicy | None = None,
     coordinate_chart: meal_coordinates.MealCoordinates | None = None,
     overall_wall_seconds: float | None = None,
+    profiler_factory: Callable | None = None,
 ) -> dict:
     """Profile initial roots at each bounded Powell shared-parameter trial.
 
@@ -581,12 +586,18 @@ def root_profile_search(
         )
 
     try:
+        factory = profiler_factory or RootProfile
         profiler = budget.numerical(
-            lambda _: RootProfile(oracle, failure_diagnostics=True)
+            lambda _: factory(oracle, failure_diagnostics=True)
             if failure_diagnostics
-            else RootProfile(oracle)
+            else factory(oracle)
         )
         result["root_profile_certificate"] = deepcopy(profiler.audit)
+        if profiler.audit.get("shared_count", 0):
+            result["optimizer"] = (
+                "Powell over remaining shared coordinates; global bounded LS "
+                "over selected shared coefficients and trajectory roots"
+            )
         fixed = dict(fixed or {})
         if set(fixed) - {oracle.names[i] for i in profiler.outer}:
             raise ValueError("fixed coordinates must be existing shared coordinates")
@@ -677,7 +688,9 @@ def root_profile_search(
             result["outer_coordinate_chart"].update(
                 meal_flux_coordinates=True,
                 rule="log(tau/tau_seed), log(k/k_seed); g=k*q scaled at seed",
-                original_root_profiler_unchanged=True,
+                original_root_profiler_unchanged=not bool(
+                    profiler.audit.get("shared_count", 0)
+                ),
             )
         result["control_calls_started"] += 1
         save()

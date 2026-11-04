@@ -1,5 +1,25 @@
 # Phase 1 Pipeline Design
 
+## Conditional shared-forcing projection
+
+`shared-meal-drift-root-profile-1` extends the opt-in initial-root profiler only
+after certifying that selected shared coefficients enter affine forcing, never
+the state matrix, readouts or initializers. A single weighted design has two
+global columns (positive-branch meal gain and auxiliary drift) and separate
+trajectory-root blocks. Column-scaled bounded least squares checks KKT and
+original-domain lifts; each candidate is paired against full propagation.
+The positive meal transformation retains a finite original representative;
+the zero-rate stratum remains separate. Existing root-only defaults are unchanged.
+
+`construction-meal-joint-profile-1` authenticates five saved starts, compares both
+profilers with matched search budgets, and independently replays original
+equations before retention. A separate, nonrenewable endpoint diagnostic samples
+small feasible directions at two step sizes after re-solving the same inner
+problem. Frozen and profiled coordinates are excluded from outer probes. Results
+distinguish observed descent, step/numerical uncertainty and no resolved descent;
+none establishes joint stationarity, coefficient confidence or a necessary model
+revision. See [the milestone runbook](PHASE_C_CONSTRUCTION_MEAL_JOINT_PROFILE.md).
+
 ## Meal gain-scale recovery
 
 Returned meal continuation reached training NMSE 0.423867303091 with finite

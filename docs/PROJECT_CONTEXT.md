@@ -1,5 +1,18 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Joint shared-forcing and initial-root profiling
+
+The returned meal-scale campaign removes the invalid gain steps but leaves the
+best warm fit near training NMSE 0.423867. The next opt-in CPU milestone profiles
+the shared meal gain, shared auxiliary drift, and 32 training initial roots in
+one certified bounded linear solve. Five saved endpoints pass full-rank/KKT and
+independent original-equation checks; immediate improvements are tiny. Ten
+matched Delta tasks compare root-only and joint profiling with equal search
+allowances, separate diagnostic costs, and retained global/fixed-rate incumbents.
+Small feasible endpoint probes can reveal remaining descent but cannot certify
+stationarity or equation inadequacy. No held-out data, model changes or LLM calls.
+See [the protocol and commands](PHASE_C_CONSTRUCTION_MEAL_JOINT_PROFILE.md).
+
 ## Meal gain-scale recovery
 
 Returned meal continuation reached training NMSE 0.423867303091 with finite
