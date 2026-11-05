@@ -1,5 +1,14 @@
 # Construction meal fitting reliability
 
+**Returned 5 November 2026.** All five tasks completed. Each of the four
+released-rate restarts improved its own fit and reproduced the warm training
+NMSE of 0.4238668851. A training replay across three 90 g meal schedules
+localized the largest remaining discrepancy to the insulin response, whose
+fitted peak preceded the observed peak by 91 minutes in every case. The
+results handoff gives the numerical checks, per-start scores and one controlled
+proposal for revising the insulin equation.
+[Results and feedback for construction](../work/agent-comms/2026-11-05-construction-meal-reliability-results.md)
+
 4 November 2026. This training-only CPU milestone follows the completed
 `construction-meal-joint-profile-1` campaign. Root-only and joint profiling
 reached numerically tied endpoints in all five comparisons. The small-step
