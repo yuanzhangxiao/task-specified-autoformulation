@@ -1,5 +1,25 @@
 # Phase 1 Pipeline Design
 
+## Curvature-aware local reliability
+
+The opt-in curvature audit re-solves the certified bounded inner problem at
+each probe. It separates centered gradients, actual mixed loss curvature and
+the profiled residual Jacobian's Gauss–Newton approximation. Two small scales,
+feasible bound directions, active-set stability and explicit numerical resolution
+qualify the local interpretation. Proposed coupled steps are tested against the
+actual objective; they are not treated as derivative checks at large distances.
+Incomplete probes and active-set changes withhold stronger smooth conclusions.
+Every potentially useful point requires separate original-equation replay before
+campaign retention. Existing production and historical diagnostic behavior remain
+unchanged.
+
+`construction-meal-reliability-1` authenticates only the five joint-arm endpoints,
+audits the warm fit, and releases the four former fixed rates for new searches.
+Search, audit and verification have separate nonrenewable reservations and
+preserve both each trial and the common warm incumbent. No test data, new LLM
+call or automatic construction feedback is used. See
+[the milestone runbook](PHASE_C_CONSTRUCTION_MEAL_RELIABILITY.md).
+
 ## Conditional shared-forcing projection
 
 `shared-meal-drift-root-profile-1` extends the opt-in initial-root profiler only

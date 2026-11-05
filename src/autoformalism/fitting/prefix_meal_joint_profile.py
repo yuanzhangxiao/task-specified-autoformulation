@@ -194,6 +194,9 @@ class JointMealProfile(roots.RootProfile):
         }
 
     def _profile(self, parameters: Mapping[str, float], deadline: float) -> dict:
+        # Ephemeral paired residual for bounded local diagnostics. Never include
+        # this potentially large array in endpoint receipts or checkpoints.
+        self.last_residual = None
         block = self._call("basis", lambda: self.design(parameters, deadline))
         roots._check(deadline)
         a, b, lower, upper = (
@@ -247,6 +250,7 @@ class JointMealProfile(roots.RootProfile):
                     "training_nmse": actual_loss,
                 }
             raise error
+        self.last_residual = np.asarray(actual, dtype=float).copy()
         return {
             "parameters": fitted_parameters,
             "original_parameters": original_parameters,

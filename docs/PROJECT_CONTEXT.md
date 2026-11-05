@@ -1,5 +1,18 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Curvature diagnostics and released meal-rate starts
+
+The returned joint-profile experiment found no resolved advantage over root-only
+profiling at its five saved endpoints. One-sided finite-difference slopes near
+a minimum can change with step size because of ordinary curvature. The next
+opt-in CPU campaign uses centered, bound-aware diagnostics, two-scale mixed
+loss curvature, active-set checks and actual coupled probes. It audits the warm
+fit without another search and releases the meal rate at four predetermined
+fixed-rate endpoints for unrestricted restarts. All candidates require original
+equation replay before retention; source and global incumbents survive failures.
+No finite local audit establishes global optimality, coefficient confidence or
+equation inadequacy. See [the protocol and commands](PHASE_C_CONSTRUCTION_MEAL_RELIABILITY.md).
+
 ## Joint shared-forcing and initial-root profiling
 
 The returned meal-scale campaign removes the invalid gain steps but leaves the

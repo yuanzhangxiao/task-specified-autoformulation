@@ -1,0 +1,9 @@
+{
+  "population": "scaled-readout-meal-reliability-1",
+  "checkpoint_interval_seconds": 30,
+  "search_seconds": 1800,
+  "maximum_calls": 2000,
+  "persistence_headroom_seconds": 900,
+  "curvature_seconds": 360,
+  "curvature_maximum_calls": 220
+}
