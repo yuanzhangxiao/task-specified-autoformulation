@@ -122,6 +122,7 @@ class Relaxation:
     decay: Coefficient
     drivers: tuple[Coefficient, ...]
     fixed_terms: tuple[tuple[str, str], ...]
+    physical_forcing: tuple[Coefficient, ...] = ()
 
     @property
     def tau(self):
@@ -131,7 +132,7 @@ class Relaxation:
         return f"equilibrium_gain:{self.state}:{driver.driver}"
 
 
-def _blocks(original, reduction, states):
+def _blocks(original, reduction, states, physical_forcing=()):
     trees = gains._expressions(original)
     processes = {
         k.removeprefix("process:"): v
@@ -160,7 +161,7 @@ def _blocks(original, reduction, states):
             coefficients[driver] = structural._sum(
                 coefficients.get(driver, {}), {params: value}
             )
-        declared, fixed = {}, []
+        declared, fixed, unscaled = {}, [], []
         for driver, poly in coefficients.items():
             variable = {key: value for key, value in poly.items() if key}
             if not variable:
@@ -173,6 +174,22 @@ def _blocks(original, reduction, states):
                 raise ValueError("coefficient depends nonlinearly on parameters")
             name = powers[0][0]
             index = reduction.names.index(name)
+            coordinate = Coefficient(
+                name, multiplier, poly.get((), Fraction(0)), driver
+            )
+            if name in physical_forcing:
+                if (
+                    driver not in original.problem.context.external_inputs
+                    or name in used
+                    or multiplier != 1
+                    or coordinate.offset != 0
+                ):
+                    raise ValueError(
+                        "physical forcing requires a pure external-input gain"
+                    )
+                used.add(name)
+                unscaled.append(coordinate)
+                continue
             if (reduction.lower[index], reduction.upper[index]) != (-np.inf, np.inf):
                 raise ValueError(
                     "timescale pilot requires unrestricted coefficient domains"
@@ -180,23 +197,29 @@ def _blocks(original, reduction, states):
             if name in used:
                 raise ValueError("overlapping timescale coefficient coordinates")
             used.add(name)
-            declared[driver] = Coefficient(
-                name, multiplier, poly.get((), Fraction(0)), driver
-            )
+            declared[driver] = coordinate
         if state not in declared:
             raise ValueError("no variable self-relaxation coefficient")
         decay = declared.pop(state)
-        blocks.append(Relaxation(state, decay, tuple(declared.values()), tuple(fixed)))
+        blocks.append(
+            Relaxation(
+                state, decay, tuple(declared.values()), tuple(fixed), tuple(unscaled)
+            )
+        )
+    if set(physical_forcing) != {
+        d.coordinate for b in blocks for d in b.physical_forcing
+    }:
+        raise ValueError("missing physical forcing coordinate")
     return tuple(blocks)
 
 
 class TimescaleReduction:
     """Invertible timescale/gain chart on the negative-self-coefficient stratum."""
 
-    def __init__(self, original, base, states):
+    def __init__(self, original, base, states, *, physical_forcing=()):
         if not states or len(set(states)) != len(states):
             raise ValueError("distinct nonempty timescale states required")
-        self.base, self.blocks = base, _blocks(original, base, states)
+        self.base, self.blocks = base, _blocks(original, base, states, physical_forcing)
         self.renamed = {}
         for block in self.blocks:
             self.renamed[block.decay.coordinate] = block.tau
@@ -239,6 +262,15 @@ class TimescaleReduction:
                         for d in b.drivers
                     ],
                     "unchanged_fixed_forcing_terms": dict(b.fixed_terms),
+                    **(
+                        {
+                            "physical_forcing_coordinates": {
+                                d.driver: d.coordinate for d in b.physical_forcing
+                            }
+                        }
+                        if b.physical_forcing
+                        else {}
+                    ),
                 }
                 for b in self.blocks
             ],
@@ -307,9 +339,9 @@ class TimescaleReduction:
                 values[block.decay.coordinate] = (
                     -1 / tau - float(block.decay.offset)
                 ) / slope
-                realized_self = float(block.decay.offset) + slope * values[
-                    block.decay.coordinate
-                ]
+                realized_self = (
+                    float(block.decay.offset) + slope * values[block.decay.coordinate]
+                )
                 if not realized_self < 0:
                     raise NumericalInvalidTrial(
                         "timescale reciprocal lost at original coefficient resolution"
@@ -342,9 +374,11 @@ class TimescaleReduction:
 class _TimescaleOracle:
     """Compose the exact chart with the certified original-equation affine oracle."""
 
-    def __init__(self, base, states):
+    def __init__(self, base, states, *, physical_forcing=()):
         self.base_oracle, self.original = base, base.original
-        self.reduction = TimescaleReduction(self.original, base.reduction, states)
+        self.reduction = TimescaleReduction(
+            self.original, base.reduction, states, physical_forcing=physical_forcing
+        )
         self.names = self.reduction.names
         self.lower, self.upper = self.reduction.lower, self.reduction.upper
         self.incumbent_original_parameters = deepcopy(
@@ -387,10 +421,20 @@ class _TimescaleOracle:
         return residual, derivative @ chain if jacobian else None
 
 
-def make_oracle(problem, training, numerical, retained, *, states=DEFAULT_STATES):
+def make_oracle(
+    problem,
+    training,
+    numerical,
+    retained,
+    *,
+    states=DEFAULT_STATES,
+    physical_forcing=(),
+):
     """Create a diagnostic chart after existing certified gain/additive reductions."""
     original, base = polish.make_oracle(problem, training, numerical, retained)
-    chart = _TimescaleOracle(base.oracle, tuple(states))
+    chart = _TimescaleOracle(
+        base.oracle, tuple(states), physical_forcing=physical_forcing
+    )
     audit = base.portfolio_audit | {
         "protocol": PROTOCOL,
         "reduction": chart.reduction.receipt,

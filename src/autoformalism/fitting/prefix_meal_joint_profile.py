@@ -36,6 +36,7 @@ class JointMealProfile(roots.RootProfile):
         failure_diagnostics: bool = False,
         drift: str = DEFAULT_DRIFT,
         meal_options: Mapping[str, str] | None = None,
+        additional_forcing: str | None = None,
     ):
         super().__init__(oracle, failure_diagnostics=failure_diagnostics)
         self.meal = meal.certify(oracle, oracle.start, **dict(meal_options or {}))
@@ -46,13 +47,20 @@ class JointMealProfile(roots.RootProfile):
         }:
             raise ValueError("joint drift must be a distinct shared coordinate")
         self.drift = drift
-        self.shared_names = (self.meal.input_gain, drift)
+        extra = () if additional_forcing is None else (additional_forcing,)
+        self.shared_names = (self.meal.input_gain, drift, *extra)
+        if additional_forcing is not None and (
+            additional_forcing not in oracle.names
+            or additional_forcing
+            in {self.meal.rate, self.meal.input_gain, drift, *self.root_names}
+        ):
+            raise ValueError("additional forcing must be a distinct shared coordinate")
         roots._root_chart(oracle, self.shared_names)
         self.inner = tuple(
             oracle.names.index(n) for n in (*self.shared_names, *self.root_names)
         )
         self.outer = tuple(i for i in range(len(oracle.names)) if i not in self.inner)
-        self.inner_names = (self.meal.flux_gain, drift, *self.root_names)
+        self.inner_names = (self.meal.flux_gain, drift, *extra, *self.root_names)
         for name in self.shared_names:
             old = self.original.names.index(name)
             new = oracle.names.index(name)
@@ -82,7 +90,7 @@ class JointMealProfile(roots.RootProfile):
         for row in self.original.rows:
             if ca.depends_on(system.initial_symbolic(row, theta), shared):
                 raise ValueError("joint coefficients must not occur in initializers")
-        baseline = ca.substitute(forcing, shared, ca.SX.zeros(2))
+        baseline = ca.substitute(forcing, shared, ca.SX.zeros(len(self.shared_names)))
         self.forcing_basis = ca.Function(
             "joint_forcing_basis", [t, theta, u], [ca.horzcat(baseline, columns)]
         )
@@ -95,15 +103,21 @@ class JointMealProfile(roots.RootProfile):
         self.joint_generator = ca.Function("joint_generator", [theta], [generator])
         record = {
             **self.audit,
-            "protocol": PROTOCOL,
+            "protocol": PROTOCOL
+            if not extra
+            else "shared-meal-drift-forcing-root-profile-1",
             "root_profile_certificate_sha256": self.audit["sha256"],
             "positive_meal_certificate": self.meal.audit,
             "shared_original_names": list(self.shared_names),
             "inner_names": list(self.inner_names),
             "outer_names": [oracle.names[i] for i in self.outer],
-            "shared_count": 2,
+            "shared_count": len(self.shared_names),
             "trajectory_root_count": len(self.root_names),
-            "scope": "one shared gain and drift across all training trajectories",
+            "scope": (
+                "one shared gain and drift across all training trajectories"
+                if not extra
+                else "three common forcing coefficients across training trajectories"
+            ),
             "forcing_jointly_affine": True,
             "dynamics_matrix_independent_of_profiled_shared_coefficients": True,
             "readout_and_initializers_independent_of_shared_coefficients": True,
@@ -115,7 +129,7 @@ class JointMealProfile(roots.RootProfile):
         self.audit = record | {"sha256": content_sha256(record)}
 
     def design(self, parameters: Mapping[str, float], deadline: float) -> dict:
-        """Assemble a weighted global residual affine in two shared gains and roots."""
+        """Assemble one shared forcing block and independent trajectory-root blocks."""
         roots._check(deadline)
         encoded = self.meal.encode(parameters)
         k = float(parameters[self.meal.rate])
@@ -123,7 +137,8 @@ class JointMealProfile(roots.RootProfile):
         self.original.vector(self.original.parameters(vector))
         original, system = self.original, self.original.system
         n, nr, m = system.state_count, len(original.roots), len(system.inputs)
-        columns = 3 + nr
+        ns = len(self.shared_names)
+        columns = 1 + ns + nr
         scales = np.asarray([original.scales[c] for c in system.channels])
         design_rows, offsets, cache = [], [], {}
         for row_index, (row, initializer) in enumerate(
@@ -134,7 +149,7 @@ class JointMealProfile(roots.RootProfile):
             generator = roots._finite(self.joint_generator(local), "joint generator")
             initial = roots._finite(initializer(local), "joint initial basis")
             state = np.zeros((n, columns))
-            state[:, 0], state[:, 3:] = initial[:, 0], initial[:, 1:]
+            state[:, 0], state[:, 1 + ns :] = initial[:, 0], initial[:, 1:]
             forcing = trajectory_forcing(system.model, row)
             inputs = np.asarray(
                 [[forcing.value(name, t) for name in system.inputs] for t in row.time]
@@ -159,8 +174,8 @@ class JointMealProfile(roots.RootProfile):
                         cache[key] = self.transitions(generator * dt, [], deadline)[0]
                     extended = np.zeros((3 * n, columns))
                     extended[:n] = state
-                    extended[n : 2 * n, :3] = force[i - 1]
-                    extended[2 * n :, :3] = (force[i] - force[i - 1]) / dt
+                    extended[n : 2 * n, : 1 + ns] = force[i - 1]
+                    extended[2 * n :, : 1 + ns] = (force[i] - force[i - 1]) / dt
                     state = roots._finite((cache[key] @ extended)[:n], "joint basis")
                 h, offset = self.readout(time, local, inputs[i])
                 values = roots._finite(np.asarray(h) @ state, "joint readout basis")
@@ -169,12 +184,12 @@ class JointMealProfile(roots.RootProfile):
             values = roots._finite(outputs, "joint weighted outputs")
             observed = np.column_stack([row.targets[c] for c in system.channels])
             local_design = (values[:, :, 1:] / scales[None, :, None]).reshape(
-                -1, 2 + nr
+                -1, ns + nr
             )
             global_design = np.zeros((len(local_design), len(self.inner)))
-            global_design[:, :2] = local_design[:, :2]
-            j = 2 + row_index * nr
-            global_design[:, j : j + nr] = local_design[:, 2:]
+            global_design[:, :ns] = local_design[:, :ns]
+            j = ns + row_index * nr
+            global_design[:, j : j + nr] = local_design[:, ns:]
             design_rows.append(global_design)
             offsets.append(((values[:, :, 0] - observed) / scales).ravel())
         roots._check(deadline)

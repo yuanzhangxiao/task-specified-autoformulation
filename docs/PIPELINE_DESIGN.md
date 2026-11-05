@@ -1,5 +1,16 @@
 # Phase 1 Pipeline Design
 
+## One-coefficient insulin control with conditional revision
+
+`candidate-15-insulin-meal-control-1` binds a parent and one nested child to
+the same retained endpoint and training data. The extra physical forcing gain
+has a separate, shared column in the certified bounded linear solve. Both arms
+use matched outer search allowances and independently replay the original
+equations. A second, explicit construction step consumes verified child training
+witnesses only after both fits qualify. It admits a single insulin-law revision
+through the existing structural and training-consistency checks and exports
+the model with its fitting contract. See [the experiment](PHASE_C_INSULIN_MEAL_CONTROL.md).
+
 ## Curvature-aware local reliability
 
 The opt-in curvature audit re-solves the certified bounded inner problem at

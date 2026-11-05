@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Candidate 15 insulin response after ingestion
+
+Orion’s four released-rate restarts recover the warm training loss of 0.42387.
+The fitted plasma insulin peaks 91 minutes early on three shifted 90 g meals.
+The new matched CPU experiment frees a shared coefficient on direct ingestion
+in the insulin equation. It reports timing, height, channel errors and no-meal
+controls. A persistent early peak across all three verified child trajectories
+enables a separate one-call construction revision. See
+[the runbook, local preflight and numerical handoff](PHASE_C_INSULIN_MEAL_CONTROL.md).
+
 ## Curvature diagnostics and released meal-rate starts
 
 The returned joint-profile experiment found no resolved advantage over root-only
