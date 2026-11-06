@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Fitting the admitted insulin feedback revision
+
+The admitted candidate-15 revision adds a real-valued X-to-I coupling while
+retaining the previous family at zero. A separate three-task CPU campaign
+compares the nested start with two labelled signed-start robustness controls.
+Certified gain reduction and conditional forcing/root profiling retain an
+original-equation replay guard. Peak timing, dose/no-meal behavior, positivity
+and conditional stability are reported alongside NMSE; physiology and prefix
+forecasting remain unestablished. See [the fitting runbook](PHASE_C_INSULIN_REVISION_FITTING.md).
+
 ## Candidate 15 construction revision from qualified fits
 
 The returned direct-meal control improves training NMSE to 0.261011 while the three shifted insulin peaks remain 91 minutes early. The separate one-call 120B ACES job consumes a pinned reviewed intake, applies deterministic admission, and exports any eligible revision for Orion. No fitting is launched by this job. See [the launch and scope](PHASE_C_INSULIN_REVISION_ACES.md).

@@ -1,5 +1,16 @@
 # Phase 1 Pipeline Design
 
+## Signed feedback fitting after construction admission
+
+The insulin-revision campaign authenticates the admitted full initialization
+graph and 52-coordinate warm start. A certified shared-gain quotient preserves
+the represented family, including its zero case. Exact affine propagation
+supports conditional forcing/root fitting, while the new state-matrix coupling
+remains an outer search variable with its declared signed domain. Nested and
+signed-start tasks have separate durable reservations; the verified nested
+reference survives all failures. Original-equation replay precedes retention
+and descriptive response comparison. See [the numerical work order](PHASE_C_INSULIN_REVISION_FITTING.md).
+
 ## Portable reviewed evidence for the insulin revision
 
 The construction intake pins a projection of the verified historical fit receipts and creates a fresh plan for the current proposer implementation. ACES serving assets and launcher identities are sealed separately. One generation reservation survives interruption, and admission/reports preserve unresolved scientific checks. Normalized parent declarations do not count as disconnected additions. See [the protocol and runbook](PHASE_C_INSULIN_REVISION_ACES.md).

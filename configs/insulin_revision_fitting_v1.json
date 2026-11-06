@@ -1,0 +1,11 @@
+{
+  "population": "admitted-candidate-15",
+  "search_seconds": 1800.0,
+  "maximum_calls": 2000,
+  "qualification_seconds": 300.0,
+  "verification_seconds": 300.0,
+  "checkpoint_interval_seconds": 30.0,
+  "persistence_headroom_seconds": 900.0,
+  "improvement_absolute_tolerance": 1e-10,
+  "improvement_relative_tolerance": 1e-8
+}
