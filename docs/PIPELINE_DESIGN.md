@@ -1,5 +1,19 @@
 # Phase 1 Pipeline Design
 
+## Bounded fitting across the remaining construction portfolio
+
+`construction-remaining-portfolio-1` authenticates a compact training-only intake
+for all 22 original parents other than candidate 15. Each task freezes its route,
+predetermined starts and independent stage reservations. Certified affine models
+profile their training roots at each shared-coefficient evaluation. Nonlinear
+models qualify repeatable state-only residuals before derivative-free block
+search and full-coordinate release. Recovery candidates must first produce a
+verified starting rollout. Original-equation replay guards every retained update,
+and source incumbents survive failed or interrupted work. Descriptive training
+feedback uses a separately budgeted replay of the frozen retained endpoint.
+It does not prescribe revisions, certify global fitting adequacy, or substitute
+for fresh prefix inference. See [the runbook](PHASE_C_REMAINING_PORTFOLIO_FITTING.md).
+
 ## One-coefficient insulin control with conditional revision
 
 `candidate-15-insulin-meal-control-1` binds a parent and one nested child to

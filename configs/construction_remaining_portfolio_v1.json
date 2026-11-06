@@ -1,0 +1,14 @@
+{
+  "population": "scaled-readout-remaining-22",
+  "qualification_seconds": 120.0,
+  "search_seconds": 900.0,
+  "recovery_search_seconds": 1800.0,
+  "maximum_calls": 1200,
+  "verification_seconds": 180.0,
+  "feedback_seconds": 180.0,
+  "persistence_headroom_seconds": 900.0,
+  "nonlinear_rtol": 1e-11,
+  "nonlinear_atol": 1e-13,
+  "improvement_absolute_tolerance": 1e-10,
+  "improvement_relative_tolerance": 1e-8
+}

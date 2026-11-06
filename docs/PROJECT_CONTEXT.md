@@ -1,5 +1,16 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Broader construction fitting for the other 22 parents
+
+The opt-in remaining-portfolio campaign continues all parents except candidate
+15 while its construction revision proceeds separately. Fourteen affine models
+use conditional initial-root profiling, three nonlinear models use qualified
+residual-only block fitting and full release, and five failed starts receive
+bounded domain-legal recovery probes. Verified source and intermediate fits
+survive unsuccessful later phases. Reports include descriptive trajectory and
+input-phase mismatches, with optimization adequacy and prefix forecasting still
+separate questions. See [the Delta campaign](PHASE_C_REMAINING_PORTFOLIO_FITTING.md).
+
 ## Candidate 15 insulin response after ingestion
 
 Orion’s four released-rate restarts recover the warm training loss of 0.42387.
