@@ -151,3 +151,23 @@ qualified for those equations. After an independently verified refit,
 `compare_refit_replay` scores its residual array against the first child under
 the same training scales, dose panel and no-meal controls. Held-out forecasting
 remains a separate experiment under the saved eight-unit prefix.
+
+## Returned comparison, November 5
+
+Delta array `23575634` completed both qualified searches and original-equation
+verification. The child fits `c_I=3.11416` and lowers the training objective from
+0.423867 to 0.261011. Across the 16 trajectories, median NMSE [unscaled MAD]
+falls from 0.303295 [0.258858] to 0.185688 [0.166996]. All three channel objectives
+improve, although no-meal glucose median error rises slightly.
+
+The three shifted 90 g insulin peaks remain 91 minutes early, while their peak
+heights now nearly match observations. The predeclared `persistent_early_peak`
+criterion passes. The actual fitted-child request is prepared locally under
+`output/insulin-meal-control-analysis-20261105/proposer`, and its readable preview
+is `output/insulin-meal-control-analysis-20261105/PROMPTS.html`. No LLM call ran
+in the CPU campaign or offline review. Continue with the separate proposer
+commands above using the original frozen code bundle. The checkout has since
+advanced, so do not use a different source tree to load that campaign.
+
+See [the results and numerical work order for Orion](
+../work/agent-comms/2026-11-05-insulin-meal-control-results.md).
