@@ -5,6 +5,12 @@ early on all three shifted 90 g meals. This job asks GPT-OSS-120B for one insuli
 law revision and applies deterministic admission. It runs no optimization,
 validation/test evaluation, automatic follow-up, or model promotion.
 
+The returned ACES job 2310039 admitted a revision adding the existing insulin
+memory state to production. Its new coefficient remains unfitted. A fixed
+zero-coupling replay recovers the prior NMSE to 1.23e-12; the default guess of
+one creates a growing mode with the other inherited coefficients fixed.
+See [the equation audit and Orion fitting handoff](../work/agent-comms/2026-11-06-insulin-revision-results-and-refit.md).
+
 The numerical evidence and Orion work order are in
 [the returned-fit handoff](../work/agent-comms/2026-11-05-insulin-meal-control-results.md).
 
