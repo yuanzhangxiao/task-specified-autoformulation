@@ -96,6 +96,8 @@ training initials.
 
 ## One conditional proposer call
 
+For the completed November 5 fits, use [the packaged ACES launch](PHASE_C_INSULIN_REVISION_ACES.md). The manual workflow below documents the original frozen bundle and is retained for reproduction.
+
 We predeclare the follow-up rule as a diagnostic choice. Both arms must finish
 qualified searches with verified endpoints and measured residuals. On each of
 `train_003`, `train_006` and `train_007`, the child must have a unique sampled

@@ -327,3 +327,133 @@ def test_refit_helper_compares_original_equation_residual_and_requires_identity(
         cli.compare_refit_replay(tmp_path, **(args | {"problem_sha256": "wrong"}))
     with pytest.raises(ValueError, match="verified training NMSE"):
         cli.compare_refit_replay(tmp_path, **(args | {"verified_training_nmse": 0.5}))
+
+
+def test_normalized_existing_process_is_not_a_disconnected_addition(tmp_path):
+    from autoformalism.schemas.prefix_initialization import PrefixFitProblem
+
+    data = source()
+    payload = data["fitted_problem"].model_dump(mode="json")
+    payload["base_candidate"]["processes"].append(
+        {"name": "unused_law", "expression": "a*Gp"}
+    )
+    data["fitted_problem"] = PrefixFitProblem.model_validate(payload)
+    cli.prepare(tmp_path, **data)
+    _, inputs = cli._load(tmp_path)
+    ordinary = cli.assess(inputs, patch())
+    repeated = cli.assess(
+        inputs,
+        patch(
+            new_processes=[
+                {
+                    "name": "unused_law",
+                    "description": "unchanged declaration",
+                    "expression": "a*Gp",
+                    "sources": ["Gp"],
+                }
+            ]
+        ),
+    )
+    assert ordinary["status"] == repeated["status"] == "eligible_for_refit"
+    assert repeated["audit"]["new_processes"] == []
+    assert (
+        cli.family_identity(data["fitted_problem"], ordinary["problem"])["sha256"]
+        == cli.family_identity(data["fitted_problem"], repeated["problem"])["sha256"]
+    )
+
+
+def test_portable_intake_is_pinned_and_resume_does_not_rebind(tmp_path, monkeypatch):
+    from autoformalism.benchmarks.audited_release import seal
+
+    data = source()
+    data["fitted_problem"] = data["fitted_problem"].model_dump(mode="json")
+    data["public_brief"] = data["public_brief"].model_dump(mode="json")
+    intake = {"protocol": cli.INTAKE_PROTOCOL, "arguments": data}
+    monkeypatch.setattr(cli, "REVIEWED_INTAKE_SHA256", cli.content_sha256(intake))
+    path, root = tmp_path / "intake.json", tmp_path / "campaign"
+    seal(path, intake)
+    first = cli.prepare_source(root, path)
+    assert cli.prepare_source(root, path) == first
+    assert cli.status(root)["status"] == "pending"
+    # Even a resealed edit to the intake is rejected by the reviewed content pin.
+    changed = deepcopy(intake)
+    changed["arguments"]["result_identity"]["frozen"] = "wrong endpoint"
+    seal(tmp_path / "wrong.json", changed)
+    with pytest.raises(ValueError, match="reviewed"):
+        cli.prepare_source(tmp_path / "wrong-root", tmp_path / "wrong.json")
+
+
+def test_report_and_inspect_are_provider_free_and_preserve_cost(prepared, monkeypatch):
+    import tarfile
+
+    first = cli.run(
+        prepared,
+        "http://127.0.0.1",
+        token_transport=tokenizer,
+        transport=lambda *a: reply(patch()),
+    )
+    monkeypatch.setattr(cli, "_server", forbidden)
+    monkeypatch.setattr(cli, "run", forbidden)
+    summary = cli.status(prepared)
+    assert summary["terminal_available"]
+    assert summary["physical_requests_started"] == 1
+    assert summary["observed_total_tokens"] == 31
+    assert summary["usage_complete"]
+    assert summary["training_consistency"] == first["training_consistency"]["status"]
+    inspected = cli.inspect(prepared)
+    archive = prepared / "inspection.tar.gz"
+    before = archive.read_bytes()
+    assert cli.inspect(prepared) == inspected
+    assert archive.read_bytes() == before
+    with tarfile.open(archive) as bundle:
+        assert {
+            "result.json",
+            "plan.json",
+            "inputs.json",
+            "REPORT.html",
+            "PROMPT.html",
+        } <= set(bundle.getnames())
+        assert ".lock" not in bundle.getnames()
+    assert "Full user message" in (prepared / "PROMPT.html").read_text()
+    assert "Model after revision" in (prepared / "REPORT.html").read_text()
+
+
+def test_status_retains_uncertain_reservation_and_rejects_call_drift(prepared):
+    plan, _ = cli._load(prepared)
+    sealed_write(
+        prepared / "attempt.json",
+        {"plan_sha256": plan["artifact_sha256"], "serving": {}},
+    )
+    assert cli.status(prepared)["unrecorded_request_outcome_possible"]
+    cli.run(
+        prepared, "http://127.0.0.1", transport=forbidden, token_transport=forbidden
+    )
+    summary = cli.status(prepared)
+    assert summary["status"] == "interrupted_after_reservation"
+    assert summary["unrecorded_request_outcome_possible"]
+    assert not summary["usage_complete"]
+    (prepared / "calls").mkdir(exist_ok=True)
+    (prepared / "calls/extra.json").write_text("{}")
+    with pytest.raises(ValueError, match="calls differ"):
+        cli.status(prepared)
+
+
+def test_inspection_rejects_external_symlink(prepared, tmp_path):
+    external = tmp_path / "external.txt"
+    external.write_text("not campaign evidence")
+    (prepared / "logs").mkdir(exist_ok=True)
+    (prepared / "logs/out.log").symlink_to(external)
+    with pytest.raises(ValueError, match="symlink"):
+        cli.inspect(prepared)
+
+
+def test_prompt_explains_complete_replacement_and_initializer_scope(prepared):
+    _, inputs = cli._load(prepared)
+    prompt = json.loads(inputs["user"])
+    assert "replaces the whole named RHS" in inputs["system"]
+    assert "initializer-local" in inputs["system"]
+    assert prompt["initialization_contract"]["fixed_prefix_policy"]["duration"] == 8
+    assert (
+        "never the full target history"
+        in prompt["initialization_contract"]["trajectory"]
+    )

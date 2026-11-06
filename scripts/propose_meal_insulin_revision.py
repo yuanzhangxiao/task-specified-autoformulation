@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
+import io
 import json
 import math
+import tarfile
 from html import escape
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -49,6 +52,10 @@ from autoformalism.staged_topology import content_hash
 from scripts import structural_revision_campaign as structural
 
 PROTOCOL = "candidate-15-postmeal-revision-1"
+INTAKE_PROTOCOL = "candidate-15-reviewed-revision-intake-1"
+REVIEWED_INTAKE_SHA256 = (
+    "fc5372e439b37f4ff7f0a93dce071f0480013e3b612fa00c4045d93c95bddbfe"
+)
 SYSTEM = """Revise one law in the post-meal glucose and insulin model.
 The direct ingestion coefficient in the insulin balance has already been freed and
 refitted. Use the fitted child's training residuals to motivate your change.
@@ -62,7 +69,17 @@ Use only current supplied inputs/auxiliaries and generated model state in the
 dynamics. The observations and conditional replay, when present, are evidence.
 Return the complete law and its sources using the response schema. Return empty
 lists for unnecessary supporting declarations. The estimated parameters shown
-describe the fitted model and can be refitted during a later comparison."""
+describe the fitted model and can be refitted during a later comparison.
+edit.expression replaces the whole named RHS; keep every contribution you intend
+to retain. Write only the RHS using + - * / **, parentheses, and the supported
+functions abs, exp, log, max, min, sigmoid, sin, softplus, sqrt, tanh.
+sources lists variable names, not coefficient names. Declare new dynamics
+coefficients in new_parameters and preserve existing parameter names and roles.
+New states and processes need distinct names. Initial maps use explicit aliases
+for public time-zero readings or other state initials; their parameters are
+initializer-local, separate from dynamics parameters with the same spelling.
+For a fixed initial constant, use mode=map, a numeric expression and empty lists.
+Initialization scopes and the permitted observation prefix are shown below."""
 
 
 class InsulinRevision(StrictSchema):
@@ -238,6 +255,16 @@ def prepare(
         comparison, {t.trajectory_id for t in evidence.trajectories}
     )
     request = prompt_payload(problem, brief, scientific_aliases, feedback)
+    request["initialization_contract"] = {
+        "shared_training": "One learned initial constant shared across trajectories.",
+        "trajectory": "Independent training roots may be estimated from training "
+        "trajectories. At validation/test, shared dynamics are frozen and these "
+        "roots may use only the fixed observation prefix, never the full "
+        "target history.",
+        "map": "An explicit causal map of available time-zero readings and state "
+        "initials. Initializer-local parameters are shared across trajectories.",
+        "fixed_prefix_policy": fitting_contract["prefix_policy"],
+    }
     if (
         fitting_contract["training_sha256"]
         != comparison["child_metrics"]["training_sha256"]
@@ -273,12 +300,29 @@ def prepare(
             root / "plan.json",
             {
                 "protocol": PROTOCOL,
+                "model_size": model_size,
                 "source": _source(),
                 "inputs_sha256": inputs["artifact_sha256"],
                 "settings": settings.model_dump(mode="json"),
                 "seed": 0,
+                "optimizer_calls": 0,
+                "test_data_opened": False,
+                "automatic_followup": False,
             },
         )
+
+
+def prepare_source(root: Path, source: Path, model_size="120b") -> dict:
+    """Bind reviewed fit evidence to this launcher without rewriting old receipts."""
+    from autoformalism.benchmarks.audited_release import read_seal
+
+    intake = read_seal(source)
+    if (
+        intake.get("protocol") != INTAKE_PROTOCOL
+        or content_sha256(intake) != REVIEWED_INTAKE_SHA256
+    ):
+        raise ValueError("expected the reviewed candidate-15 fitting intake")
+    return prepare(root, model_size=model_size, **intake["arguments"])
 
 
 def _load(root: Path):
@@ -333,7 +377,7 @@ def assess(inputs: dict, raw: dict) -> dict:
         if symbol not in active:
             active.add(symbol)
             pending.extend(dependencies.get(symbol, []))
-    if {s.name for s in (*response.new_states, *response.new_processes)} - active:
+    if (set(audit["new_states"]) | set(audit["new_processes"])) - active:
         raise ValueError("new components must contribute to the insulin balance")
     old_id = family_identity(problem, problem).get("sha256")
     if old_id and old_id == family_identity(problem, child).get("sha256"):
@@ -457,12 +501,7 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None) -> d
         terminal = root / "result.json"
         directory = root / "calls"
         if terminal.exists():
-            result = sealed_read(terminal)
-            if result["plan_sha256"] != key or result["call_files"] != _calls(
-                directory
-            ):
-                raise ValueError("cached result or calls differ from the plan")
-            return result
+            return _terminal(root, plan)
         record = _one_call(
             root, plan, inputs, endpoint.rstrip("/"), transport, token_transport
         )
@@ -558,11 +597,186 @@ def _calls(directory: Path) -> dict:
     }
 
 
+def _terminal(root: Path, plan: dict) -> dict:
+    """Read a terminal only if its source plan and exact call files still match."""
+    result = sealed_read(root / "result.json")
+    if result["plan_sha256"] != plan["artifact_sha256"] or result[
+        "call_files"
+    ] != _calls(root / "calls"):
+        raise ValueError("cached result or calls differ from the plan")
+    return result
+
+
+def status(root: Path) -> dict:
+    """Report cached outcomes without contacting a server or reserving a call."""
+    plan, _ = _load(root)
+    terminal = _terminal(root, plan) if (root / "result.json").exists() else None
+    records = [
+        json.loads(p.read_text()) for p in sorted((root / "calls").glob("*.json"))
+    ]
+    if len(records) > plan["settings"]["maximum_requests"]:
+        raise ValueError("one-call budget exceeded")
+    observed, missing = 0, 0
+    for record in records:
+        tokens = record.get("observed_total_tokens")
+        if type(tokens) is int and tokens >= 0:
+            observed += tokens
+        else:
+            missing += 1
+    uncertain = (
+        (root / "attempt.json").exists()
+        and not records
+        and (terminal is None or terminal["status"] == "interrupted_after_reservation")
+    )
+    return {
+        "protocol": PROTOCOL,
+        "plan_sha256": plan["artifact_sha256"],
+        "status": terminal["status"]
+        if terminal
+        else (
+            "reserved_without_terminal"
+            if (root / "attempt.json").exists()
+            else "pending"
+        ),
+        "terminal_available": terminal is not None,
+        "physical_requests_started": len(records),
+        "unrecorded_request_outcome_possible": uncertain,
+        "observed_total_tokens": observed,
+        "usage_missing_events": missing,
+        "usage_complete": missing == 0 and not uncertain,
+        "static_eligibility": (terminal or {})
+        .get("audit", {})
+        .get("static_eligibility"),
+        "training_consistency": (terminal or {})
+        .get("training_consistency", {})
+        .get("status"),
+        "error": (terminal or {}).get("error"),
+        "optimizer_calls": 0,
+        "test_data_opened": False,
+        "automatic_followup": False,
+    }
+
+
+def report(root: Path) -> dict:
+    """Render the complete reply and equation changes alongside admission evidence."""
+    from autoformalism.llm.staged_topology import atomic_json
+
+    summary = status(root)
+    plan, inputs = _load(root)
+    terminal = _terminal(root, plan) if summary["terminal_available"] else None
+    before = model_view(
+        PrefixFitProblem.model_validate(inputs["problem"]),
+        scientific_aliases=inputs["aliases"],
+    )
+    sections = [
+        ("Completion and cost", summary),
+        ("Fitted model before revision", before),
+    ]
+    if terminal:
+        sections.append(("Revision and deterministic assessment", terminal))
+        if terminal.get("problem"):
+            sections.append(
+                (
+                    "Model after revision",
+                    model_view(
+                        PrefixFitProblem.model_validate(terminal["problem"]),
+                        scientific_aliases=inputs["aliases"],
+                    ),
+                )
+            )
+    for path in sorted((root / "calls").glob("*.json")):
+        record = json.loads(path.read_text())
+        sections.append(
+            ("Complete recorded provider response", record.get("raw_response", record))
+        )
+    body = "".join(
+        "<details open><summary>"
+        + escape(title)
+        + "</summary><pre>"
+        + escape(json.dumps(value, indent=2))
+        + "</pre></details>"
+        for title, value in sections
+    )
+    with _lock(root / "report"):
+        atomic_json(root / "summary.json", summary)
+        (root / "SUMMARY.md").write_text(
+            "# Candidate 15 insulin revision\n\n"
+            f"Status: {summary['status']}. Generation attempts recorded: "
+            f"{summary['physical_requests_started']}. Observed tokens: "
+            f"{summary['observed_total_tokens']}.\n\n"
+            "Admission means the current deterministic checks passed, with unresolved "
+            "checks retained. Peak improvement and scientific adequacy require an "
+            "independently verified refit. No fitting or test evaluation runs here.\n\n"
+            "See REPORT.html for the reply, equations and assessment, PROMPT.html for "
+            "the complete request, and result.json for any typed model and Orion refit "
+            "handoff.\n"
+        )
+        (root / "REPORT.html").write_text(
+            '<!doctype html><meta charset="utf-8">'
+            "<title>Insulin revision result</title>"
+            "<style>body{font:16px/1.5 system-ui;max-width:1100px;margin:2rem auto}"
+            "pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f5f6;padding:1rem}"
+            "summary{font-weight:bold;cursor:pointer}</style>"
+            "<h1>Candidate 15 insulin revision</h1><p>One bounded proposal followed by "
+            "deterministic admission. An admitted model still needs fitting.</p>" + body
+        )
+        write_prompt_html(root / "PROMPT.html", json.loads(inputs["user"]))
+    return summary
+
+
+def inspect(root: Path) -> dict:
+    """Package only this campaign's regular evidence files, never following links."""
+    summary = report(root)
+    paths = [
+        root / name
+        for name in (
+            "plan.json",
+            "inputs.json",
+            "attempt.json",
+            "result.json",
+            "execution.json",
+        "serving_runtime.json",
+            "summary.json",
+            "SUMMARY.md",
+            "REPORT.html",
+            "PROMPT.html",
+        )
+    ]
+    for name in ("calls", "submission", "logs", "runtime"):
+        folder = root / name
+        if folder.is_symlink():
+            raise ValueError("inspection cannot include a symlink directory")
+        paths.extend(p for p in folder.rglob("*") if p.is_file())
+    entries = []
+    for path in paths:
+        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+            raise ValueError("inspection cannot include external files or symlinks")
+        if path.is_file() and not path.name.startswith("."):
+            entries.append(path)
+    target, temporary = root / "inspection.tar.gz", root / "inspection.tar.gz.tmp"
+    with _lock(root / "report"), temporary.open("wb") as stream:
+        with (
+            gzip.GzipFile(filename="", mode="wb", fileobj=stream, mtime=0) as zipped,
+            tarfile.open(fileobj=zipped, mode="w") as archive,
+        ):
+            for path in sorted(entries):
+                value = path.read_bytes()
+                info = tarfile.TarInfo(path.relative_to(root).as_posix())
+                info.size, info.mode, info.mtime = len(value), 0o644, 0
+                archive.addfile(info, io.BytesIO(value))
+        temporary.replace(target)
+    return {**summary, "inspection_archive": str(target)}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare", "preview", "run"))
+    parser.add_argument(
+        "action", choices=("prepare", "preview", "run", "status", "inspect")
+    )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--campaign", type=Path)
+    parser.add_argument("--source", type=Path, help="pinned reviewed fitting intake")
+    parser.add_argument("--runtime-record", type=Path, help="ACES serving probe")
     parser.add_argument(
         "--model-size", choices=tuple(structural.MODEL_SPECS), default="120b"
     )
@@ -572,20 +786,29 @@ def main() -> None:
     if args.html and args.action != "preview":
         parser.error("--html belongs to preview")
     if args.action == "prepare":
-        if args.campaign is None:
-            parser.error("prepare requires --campaign")
-        from autoformalism.research.insulin_meal_campaign import proposer_inputs
+        if (args.campaign is None) == (args.source is None):
+            parser.error("prepare requires exactly one of --campaign or --source")
+        if args.source:
+            result = prepare_source(args.root, args.source, args.model_size)
+        else:
+            from autoformalism.research.insulin_meal_campaign import proposer_inputs
 
-        result = prepare(
-            args.root, model_size=args.model_size, **proposer_inputs(args.campaign)
-        )
+            result = prepare(
+                args.root, model_size=args.model_size, **proposer_inputs(args.campaign)
+            )
     elif args.action == "preview":
         _, inputs = _load(args.root)
         result = {k: inputs[k] for k in ("system", "user", "response_schema")}
         result["user"] = json.loads(result["user"])
         if args.html:
             write_prompt_html(args.html, result["user"])
+    elif args.action in {"status", "inspect"}:
+        result = status(args.root) if args.action == "status" else inspect(args.root)
     else:
+        if args.runtime_record:
+            from scripts.submit_meal_insulin_revision_aces import bind_server
+
+            bind_server(args.root, args.runtime_record, args.endpoint)
         receipt = run(args.root, args.endpoint)
         result = {
             k: receipt[k]

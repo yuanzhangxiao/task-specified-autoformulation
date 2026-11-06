@@ -1,5 +1,9 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Candidate 15 construction revision from qualified fits
+
+The returned direct-meal control improves training NMSE to 0.261011 while the three shifted insulin peaks remain 91 minutes early. The separate one-call 120B ACES job consumes a pinned reviewed intake, applies deterministic admission, and exports any eligible revision for Orion. No fitting is launched by this job. See [the launch and scope](PHASE_C_INSULIN_REVISION_ACES.md).
+
 ## Broader construction fitting for the other 22 parents
 
 The opt-in remaining-portfolio campaign continues all parents except candidate

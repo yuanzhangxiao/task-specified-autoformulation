@@ -1,5 +1,9 @@
 # Phase 1 Pipeline Design
 
+## Portable reviewed evidence for the insulin revision
+
+The construction intake pins a projection of the verified historical fit receipts and creates a fresh plan for the current proposer implementation. ACES serving assets and launcher identities are sealed separately. One generation reservation survives interruption, and admission/reports preserve unresolved scientific checks. Normalized parent declarations do not count as disconnected additions. See [the protocol and runbook](PHASE_C_INSULIN_REVISION_ACES.md).
+
 ## Bounded fitting across the remaining construction portfolio
 
 `construction-remaining-portfolio-1` authenticates a compact training-only intake
