@@ -172,3 +172,17 @@ Source/runtime/launcher identities are sealed. Completed and interrupted phases
 do not acquire new budgets on resume. Ambiguous scheduler replies require receipt
 reconciliation rather than automatic duplicate submission. Existing campaign
 outputs are neither modified nor overwritten.
+
+## Returned Delta results
+
+All six tasks completed. Each unconstrained continuation improved training NMSE
+and retained a negative insulin tail. The primary constrained fit achieved
+0.16556 versus 0.16164 in its matched free arm and passed all 38,416 finer-grid
+concentration checks within tolerance. Its three shifted meal peaks remained
+36, 29 and 30 minutes early. Every outer search reached its 1,800-second limit.
+
+On the 150 g trajectory the primary constrained fit reaches zero at minute 300
+with a net insulin rate of −0.802 pmol/L/min. A one-minute diagnostic extension
+with zero ingestion and external insulin takes it to −0.794 pmol/L. The
+observed concentration at minute 300 is 22.62 pmol/L. The paired results and
+equation-level witnesses are in the [construction handoff](../work/agent-comms/2026-11-07-insulin-positive-continuation-results.md).
