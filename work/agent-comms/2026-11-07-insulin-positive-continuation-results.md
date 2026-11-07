@@ -65,6 +65,50 @@ delayed effect of insulin on glucose disposal while changing this feedback into
 the insulin balance. The primary constrained fit provides a common comparison
 at NMSE 0.16556. The data leave the choice of functional form open.
 
+## Shared coefficients and latent initial values
+
+On the 150 g trajectory every replay starts from the observed insulin of
+25.59 pmol/L. The fitted trajectory-specific quantities are the initial meal
+reservoir A and delayed action X. I replayed the original equations with
+the shared coefficients from one arm and the two latent initials from the other.
+The entries are insulin at minute 300 in pmol/L. The observation is 22.62.
+
+| Saved start | Both from free fit | Change only initials to constrained fit | Change only shared coefficients to constrained fit | Both from constrained fit |
+| --- | ---: | ---: | ---: | ---: |
+| Primary | −31.75 | −26.64 | −2.99 | ≈0 |
+| Originally negative | −17.57 | −15.10 | −1.20 | ≈0 |
+| Originally positive | −49.06 | −36.54 | −3.50 | ≈0 |
+
+Changing the shared coefficients had the larger effect in every pair. With
+the primary free initials held fixed, the earlier nested coefficients with
+zero X-to-I coupling also give a positive trajectory. They predict 83.35
+pmol/L at minute 300 on the 150 g meal and a minimum of 17.39 pmol/L across
+all 16 trajectories on the original sampling grid. These replays establish
+that the same equation family can yield either sign.
+
+I also held all 20 shared coefficients at the primary free fit and re-estimated
+only A(0) and X(0) for each trajectory. With the coefficients fixed, the
+original model's readouts are affine in those two initials. The conditional
+problem is therefore convex. Each of the 16 solves used the original target
+weights, root bounds and sampled insulin constraint and passed its numerical
+optimality check. Original-equation Radau replay checked all 38,416 finer-grid
+insulin values within tolerance. The best initial-values-only repair raised
+aggregate training NMSE from 0.16164 to **0.60794**. Allowing the shared
+coefficients to change as well had achieved **0.16556** in the primary pair.
+
+On the 150 g case the initial-values-only repair uses A(0) = 0 and raises
+X(0) from 1.166 to 3.129. The model then predicts initial disposal U(0) = 4.129
+against an observation of 1.916. Matching U(0) exactly in this graph would
+give X(0) = U(0) − Uii(0) = 0.916. Substituting that value with A(0) = 0
+and the free coefficients gives I(300) = −35.80 pmol/L.
+
+Thus initial values can keep these training trajectories above the numerical
+lower bound by compromising their fit elsewhere. The known outward rate at
+I = 0 is a property of the fitted vector field. A different initialization
+changes which states the model visits. The best fit achievable by this
+family with physically admissible dynamics over unseen schedules remains open.
+The numerical details are in the [post-hoc fitting controls](../../output/insulin-positive-continuation-analysis-9d821bb2/initials-or-coefficients.json).
+
 ## Fitting and verification
 
 Each outer search exhausted 1,800 numerical seconds. The free arms completed
