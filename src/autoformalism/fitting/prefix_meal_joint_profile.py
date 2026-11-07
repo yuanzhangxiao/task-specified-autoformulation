@@ -128,8 +128,17 @@ class JointMealProfile(roots.RootProfile):
         record.pop("sha256")
         self.audit = record | {"sha256": content_sha256(record)}
 
-    def design(self, parameters: Mapping[str, float], deadline: float) -> dict:
+    def design(
+        self,
+        parameters: Mapping[str, float],
+        deadline: float,
+        *,
+        subdivisions: int = 1,
+        constrained_channel: str | None = None,
+    ) -> dict:
         """Assemble one shared forcing block and independent trajectory-root blocks."""
+        if type(subdivisions) is not int or not 1 <= subdivisions <= 16:
+            raise ValueError("joint design requires 1..16 subdivisions")
         roots._check(deadline)
         encoded = self.meal.encode(parameters)
         k = float(parameters[self.meal.rate])
@@ -141,6 +150,9 @@ class JointMealProfile(roots.RootProfile):
         columns = 1 + ns + nr
         scales = np.asarray([original.scales[c] for c in system.channels])
         design_rows, offsets, cache = [], [], {}
+        constraint_rows, constraint_offsets = [], []
+        if constrained_channel is not None:
+            channel_index = system.channels.index(constrained_channel)
         for row_index, (row, initializer) in enumerate(
             zip(original.rows, self.initializers, strict=True)
         ):
@@ -151,11 +163,18 @@ class JointMealProfile(roots.RootProfile):
             state = np.zeros((n, columns))
             state[:, 0], state[:, 1 + ns :] = initial[:, 0], initial[:, 1:]
             forcing = trajectory_forcing(system.model, row)
+            times = np.concatenate(
+                [
+                    np.linspace(a, b, subdivisions, endpoint=False)
+                    for a, b in zip(row.time[:-1], row.time[1:], strict=True)
+                ]
+                + [np.asarray(row.time[-1:])]
+            )
             inputs = np.asarray(
-                [[forcing.value(name, t) for name in system.inputs] for t in row.time]
-            ).reshape(len(row.time), m)
+                [[forcing.value(name, t) for name in system.inputs] for t in times]
+            ).reshape(len(times), m)
             force = []
-            for time, values in zip(row.time, inputs, strict=True):
+            for time, values in zip(times, inputs, strict=True):
                 roots._check(deadline)
                 basis = roots._finite(
                     self.forcing_basis(time, local, values), "forcing"
@@ -165,10 +184,10 @@ class JointMealProfile(roots.RootProfile):
                     basis[:, 1] /= k
                 force.append(roots._finite(basis, "joint gain forcing"))
             outputs = []
-            for i, time in enumerate(row.time):
+            for i, time in enumerate(times):
                 roots._check(deadline)
                 if i:
-                    dt = float(time - row.time[i - 1])
+                    dt = float(time - times[i - 1])
                     key = generator.tobytes(), dt
                     if key not in cache:
                         cache[key] = self.transitions(generator * dt, [], deadline)[0]
@@ -182,6 +201,16 @@ class JointMealProfile(roots.RootProfile):
                 values[:, 0] += np.asarray(offset).ravel()
                 outputs.append(values)
             values = roots._finite(outputs, "joint weighted outputs")
+            if constrained_channel is not None:
+                # Physical prediction, not residual: no measured values on RHS.
+                c = values[:, channel_index] / scales[channel_index]
+                full = np.zeros((len(times), len(self.inner)))
+                full[:, :ns] = c[:, 1 : 1 + ns]
+                j = ns + row_index * nr
+                full[:, j : j + nr] = c[:, 1 + ns :]
+                constraint_rows.append(full)
+                constraint_offsets.append(c[:, 0])
+            values = values[::subdivisions]
             observed = np.column_stack([row.targets[c] for c in system.channels])
             local_design = (values[:, :, 1:] / scales[None, :, None]).reshape(
                 -1, ns + nr
@@ -200,13 +229,37 @@ class JointMealProfile(roots.RootProfile):
         # The certified nonnegative unbounded q domain is identical for g at k>0.
         if lower[0] != 0 or upper[0] != np.inf:
             raise ValueError("certified meal gain domain changed")
-        return {
+        result = {
             "design": roots._finite(np.concatenate(design_rows), "global design"),
             "offset": roots._finite(np.concatenate(offsets), "global offset"),
             "lower": lower,
             "upper": upper,
             "source_inner": encoded[list(self.inner)],
         }
+        if constrained_channel is not None:
+            result.update(
+                constraint_design=np.concatenate(constraint_rows),
+                constraint_offset=np.concatenate(constraint_offsets),
+            )
+        return result
+
+    def solve_block(self, block: dict, deadline: float):
+        """Historical bounded least squares; subclasses can add explicit domains."""
+        a, b, lower, upper = (
+            block[name] for name in ("design", "offset", "lower", "upper")
+        )
+        fixed = lower == upper
+        fitted = lower.copy()
+        fitted[~fixed], predicted, _, audit = projection._project(
+            a[:, ~fixed],
+            b + a[:, fixed] @ lower[fixed],
+            None,
+            None,
+            lower[~fixed],
+            upper[~fixed],
+            deadline,
+        )
+        return fitted, predicted, audit
 
     def _profile(self, parameters: Mapping[str, float], deadline: float) -> dict:
         # Ephemeral paired residual for bounded local diagnostics. Never include
@@ -214,21 +267,10 @@ class JointMealProfile(roots.RootProfile):
         self.last_residual = None
         block = self._call("basis", lambda: self.design(parameters, deadline))
         roots._check(deadline)
-        a, b, lower, upper = (
-            block[name] for name in ("design", "offset", "lower", "upper")
-        )
+        lower, upper = block["lower"], block["upper"]
         fixed = lower == upper
-        fitted = lower.copy()
         try:
-            fitted[~fixed], predicted, _, audit = projection._project(
-                a[:, ~fixed],
-                b + a[:, fixed] @ lower[fixed],
-                None,
-                None,
-                lower[~fixed],
-                upper[~fixed],
-                deadline,
-            )
+            fitted, predicted, audit = self.solve_block(block, deadline)
         except Exception as error:
             if self.failure_diagnostics:
                 error.root_profile_diagnostic = {"stage": "joint_inner_solve"}

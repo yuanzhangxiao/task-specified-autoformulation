@@ -1,5 +1,18 @@
 # Phase 1 Pipeline Design
 
+## Sampled concentration-constrained continuation
+
+`insulin-positive-continuation-1` binds each saved revised endpoint to two
+independently journaled arms with equal new search allowances. At fixed matrix
+coefficients, exact affine prediction columns support bounded least squares or
+an explicit concentration-constrained convex QP over shared forcing and roots.
+All original inequality rows and KKT conditions must qualify. A separate finer
+Radau replay gates constrained retention. Infeasible source references cannot
+win that arm or suppress feasible search checkpoints. Local objective probes
+report remaining descent without declaring convergence or equation inadequacy.
+Historical defaults, signed parameter domains and training boundaries remain
+unchanged. See [the runbook](PHASE_C_INSULIN_POSITIVE_CONTINUATION.md).
+
 ## Signed feedback fitting after construction admission
 
 The insulin-revision campaign authenticates the admitted full initialization

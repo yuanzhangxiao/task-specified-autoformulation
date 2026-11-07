@@ -614,9 +614,9 @@ def report(root: Path) -> dict:
     return summary
 
 
-def inspection(root: Path) -> Path:
+def inspection(root: Path, *, reporter=None) -> Path:
     """Package compact inputs, complete numerical receipts and bounded log tails."""
-    report(root)
+    (reporter or report)(root)
     paths = [
         root / n for n in ("plan.json", "inputs.json", "summary.json", "REPORT.md")
     ]

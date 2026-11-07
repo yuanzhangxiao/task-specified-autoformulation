@@ -165,3 +165,6 @@ The detailed returned review and next-step recommendation are appended to
 `work/agent-comms/2026-11-06-insulin-revision-fitting-campaign.md`. The next
 experiment should distinguish further numerical continuation from an explicit
 positivity-aware control, retaining the original receipts and comparison.
+
+The implemented next experiment is documented in
+[the continuation and concentration-control runbook](PHASE_C_INSULIN_POSITIVE_CONTINUATION.md).

@@ -1,5 +1,15 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Insulin continuation and explicit concentration control
+
+The returned signed revision improves timing and NMSE, but all three searches
+remain budget-limited and predict some negative insulin. Six new CPU tasks pair
+warm continuation with an explicit insulin-nonnegativity control. The latter
+uses conditional convex quadratic fitting, full constraint/KKT checks and a finer
+original-equation replay before retention. The signed coupling stays free;
+physical admissibility and optimizer convergence remain separate. See
+[the protocol and Delta commands](PHASE_C_INSULIN_POSITIVE_CONTINUATION.md).
+
 ## Fitting the admitted insulin feedback revision
 
 The admitted candidate-15 revision adds a real-valued X-to-I coupling while

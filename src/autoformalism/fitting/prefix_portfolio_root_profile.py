@@ -598,6 +598,11 @@ def root_profile_search(
                 "Powell over remaining shared coordinates; global bounded LS "
                 "over selected shared coefficients and trajectory roots"
             )
+        if profiler.audit.get("inner_solver"):
+            result["optimizer"] = (
+                "Powell over remaining shared coordinates; "
+                + profiler.audit["inner_solver"]
+            )
         fixed = dict(fixed or {})
         if set(fixed) - {oracle.names[i] for i in profiler.outer}:
             raise ValueError("fixed coordinates must be existing shared coordinates")
