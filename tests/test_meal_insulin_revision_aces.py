@@ -71,8 +71,12 @@ def setup(tmp_path, monkeypatch):
     return tmp_path, plan
 
 
-def test_one_call_resources_and_idempotent_submission(setup, monkeypatch):
+@pytest.mark.parametrize(
+    "protocol", [submission.PROTOCOL, submission.BOUNDARY_PROTOCOL]
+)
+def test_one_call_resources_and_idempotent_submission(setup, monkeypatch, protocol):
     tmp, plan = setup
+    plan["protocol"] = protocol
     calls = []
 
     def scheduler(argv, **kwargs):
@@ -88,6 +92,8 @@ def test_one_call_resources_and_idempotent_submission(setup, monkeypatch):
     loaded, execution = submission.verify(root, check_assets=True)
     assert loaded == plan
     assert len(calls) == 1
+    job_name = "boundary" if protocol == submission.BOUNDARY_PROTOCOL else "revision"
+    assert f"--job-name=phasec-insulin-{job_name}-120b" in calls[0]
     assert {
         "--gres=gpu:h100:2",
         "--cpus-per-task=16",

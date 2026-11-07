@@ -11,6 +11,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import urlopen
 
+from autoformalism.research.insulin_boundary_revision import (
+    PROTOCOL as BOUNDARY_PROTOCOL,
+)
 from scripts import harmony_vocab
 from scripts.submit_structural_revision_aces import (
     MODELS,
@@ -40,6 +43,7 @@ ENTRYPOINTS = (
     "scripts/propose_meal_insulin_revision.py",
     "scripts/submit_meal_insulin_revision_aces.py",
     "scripts/hpc/start_meal_insulin_revision_aces.sh",
+    "scripts/hpc/start_insulin_boundary_revision_aces.sh",
     "scripts/hpc/run_meal_insulin_revision_aces.sh",
     "scripts/submit_structural_revision_aces.py",
     "scripts/harmony_vocab.py",
@@ -64,7 +68,7 @@ def verify_inputs(root: Path) -> dict:
     """Require the exact training-only one-call 120B request before scheduling."""
     plan, _ = _proposer_load(root)
     if (
-        plan.get("protocol") != PROTOCOL
+        plan.get("protocol") not in {PROTOCOL, BOUNDARY_PROTOCOL}
         or plan.get("model_size") != "120b"
         or plan.get("settings") != SETTINGS
         or plan.get("seed") != 0
@@ -266,7 +270,9 @@ def submit(root: Path) -> dict:
             "--time=01:00:00",
             "--signal=B:TERM@300",
             "--exclude=ac042",
-            "--job-name=phasec-insulin-revision-120b",
+            "--job-name=phasec-insulin-boundary-120b"
+            if plan["protocol"] == BOUNDARY_PROTOCOL
+            else "--job-name=phasec-insulin-revision-120b",
             f"--output={root}/logs/propose-%j.out",
             f"--error={root}/logs/propose-%j.err",
             str(REPO / "scripts/hpc/run_meal_insulin_revision_aces.sh"),

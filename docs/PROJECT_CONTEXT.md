@@ -1,5 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
+## Insulin revision at zero concentration
+
+The constrained fit reaches the end of the 150 g training trajectory at zero
+insulin with an outward rate of −0.802 pmol/L/min. The next one-call revision
+uses the fitted balance and the measured ten-minute meal response to guide
+construction. [Evidence and ACES commands](PHASE_C_INSULIN_REVISION_ACES.md#revising-the-insulin-balance-at-depletion)
+
 ## Insulin continuation and explicit concentration control
 
 The returned signed revision improves timing and NMSE, but all three searches

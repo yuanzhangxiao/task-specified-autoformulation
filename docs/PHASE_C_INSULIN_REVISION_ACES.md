@@ -1,5 +1,62 @@
 # Candidate 15 proposer revision on ACES
 
+## Revising the insulin balance at depletion
+
+The 7 November run uses Orion’s primary concentration-constrained endpoint
+with training NMSE 0.165562. On the 150 g training trajectory, observed insulin
+is 22.62 pmol/L at minute 300. The matched unconstrained fit gives −31.75.
+The constrained fit reaches zero within numerical tolerance and passes all
+38,416 fine-grid samples. At that terminal state, setting I exactly to zero
+gives a glucose contribution of +0.123 and an action-state contribution of
+−0.925 pmol/L/min. With ingestion and external insulin both zero, the net rate
+is −0.802 pmol/L/min. A one-minute diagnostic extension gives −0.794 pmol/L.
+The final observation is at minute 300.
+
+The proposer receives this boundary and the three shifted 90 g meal windows.
+Observed insulin rises by 1.97 pmol/L in each window, compared with fitted
+rises of 162.19, 165.86 and 167.27. The direct meal term alone contributes
++154.27. The proposer chooses the function form, gives the assembled rate
+at I=0 and explains how the early meal response changes. The required delayed
+I-to-disposal pathway remains part of the public task. Orion’s result record
+contains the matched fits and diagnostic provenance.
+[Fitting handoff](../work/agent-comms/2026-11-07-insulin-positive-continuation-results.md)
+
+The runtime expands the proposed insulin balance after the existing structural
+and model-data checks. Bounded polynomial arithmetic rejects a zero-input
+boundary law that exactly preserves the known outward rate, or a law proven
+strictly outward at the displayed state across the declared parameter
+domains. A sufficient polynomial sign check can establish a nonnegative
+boundary rate under the displayed assumptions. Other forms receive a deferred
+sign assessment and a numerical point diagnostic when their inputs are
+available. That diagnostic uses inherited values and new parameter guesses.
+The subsequent fit must check trajectories, meal-window changes, and the
+depleted-state behavior independently.
+
+Upload `phase-c-insulin-boundary-revision-v1.tar.gz` to ACES group scratch.
+Paste this line on ACES to prepare the request and submit the one-call 120B job.
+
+```bash
+cd /scratch/group/p.nairr260351.000/u.yx126462 && tar -xzf phase-c-insulin-boundary-revision-v1.tar.gz && cd phase-c-insulin-boundary-revision-v1 && sha256sum --quiet -c SHA256SUMS && bash scripts/hpc/start_insulin_boundary_revision_aces.sh run
+```
+
+For status and inspection, use the same wrapper from any directory.
+
+```bash
+bash /scratch/group/p.nairr260351.000/u.yx126462/phase-c-insulin-boundary-revision-v1/scripts/hpc/start_insulin_boundary_revision_aces.sh status
+```
+
+```bash
+bash /scratch/group/p.nairr260351.000/u.yx126462/phase-c-insulin-boundary-revision-v1/scripts/hpc/start_insulin_boundary_revision_aces.sh inspect
+```
+
+Download `phase-c-insulin-boundary-120b-v1/inspection.tar.gz` from group
+scratch. The new run has its own sealed plan, output directory and one
+generation reservation. It uses the same 2-H100 configuration and 4,096-token
+generation limit as the earlier revision. The prepared prompt is in
+`output/insulin-boundary-prompts-review-20261107/PROMPTS.html`.
+
+## Earlier revision after the direct meal control
+
 The verified nested child has training NMSE 0.261011 but still peaks 91 minutes
 early on all three shifted 90 g meals. This job asks GPT-OSS-120B for one insulin
 law revision and applies deterministic admission. It runs no optimization,

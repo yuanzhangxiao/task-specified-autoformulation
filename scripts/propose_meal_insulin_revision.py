@@ -27,6 +27,7 @@ from autoformalism.llm.staged_topology import (
 )
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
+from autoformalism.research import insulin_boundary_revision as boundary
 from autoformalism.research import meal_revision_metrics as metrics
 from autoformalism.research.construction_repair_identity import family_identity
 from autoformalism.research.construction_revision_edits import (
@@ -56,7 +57,7 @@ INTAKE_PROTOCOL = "candidate-15-reviewed-revision-intake-1"
 REVIEWED_INTAKE_SHA256 = (
     "fc5372e439b37f4ff7f0a93dce071f0480013e3b612fa00c4045d93c95bddbfe"
 )
-SYSTEM = """Revise one law in the post-meal glucose and insulin model.
+_MEAL_INSTRUCTION = """Revise one law in the post-meal glucose and insulin model.
 The direct ingestion coefficient in the insulin balance has already been freed and
 refitted. Use the fitted child's training residuals to motivate your change.
 When ingestion ends, what could sustain insulin production until the observed peak?
@@ -69,7 +70,8 @@ Use only current supplied inputs/auxiliaries and generated model state in the
 dynamics. The observations and conditional replay, when present, are evidence.
 Return the complete law and its sources using the response schema. Return empty
 lists for unnecessary supporting declarations. The estimated parameters shown
-describe the fitted model and can be refitted during a later comparison.
+describe the fitted model and can be refitted during a later comparison."""
+_EDIT_FORMAT = """\
 edit.expression replaces the whole named RHS; keep every contribution you intend
 to retain. Write only the RHS using + - * / **, parentheses, and the supported
 functions abs, exp, log, max, min, sigmoid, sin, softplus, sqrt, tanh.
@@ -80,6 +82,8 @@ for public time-zero readings or other state initials; their parameters are
 initializer-local, separate from dynamics parameters with the same spelling.
 For a fixed initial constant, use mode=map, a numeric expression and empty lists.
 Initialization scopes and the permitted observation prefix are shown below."""
+SYSTEM = _MEAL_INSTRUCTION + "\n" + _EDIT_FORMAT
+BOUNDARY_SYSTEM = boundary.INSTRUCTION + "\n" + _EDIT_FORMAT
 
 
 class InsulinRevision(StrictSchema):
@@ -93,6 +97,21 @@ class InsulinRevision(StrictSchema):
     new_states: tuple[NewLatentState, ...] = Field(max_length=1)
     new_processes: tuple[NewProcess, ...] = Field(max_length=1)
     new_parameters: tuple[FunctionParameter, ...] = Field(max_length=8)
+
+
+class BoundaryRevision(InsulinRevision):
+    """Explain the boundary and ingestion behavior of the proposed equations."""
+
+    insulin_rate_at_zero: str = Field(min_length=1, max_length=1200)
+    expected_ingestion_window_change: str = Field(min_length=1, max_length=800)
+
+
+def _contract(protocol: str) -> tuple[str, type[InsulinRevision]]:
+    if protocol == PROTOCOL:
+        return SYSTEM, InsulinRevision
+    if protocol == boundary.PROTOCOL:
+        return BOUNDARY_SYSTEM, BoundaryRevision
+    raise ValueError(f"unknown insulin revision protocol: {protocol}")
 
 
 def _source() -> dict:
@@ -196,7 +215,9 @@ def prompt_payload(problem, brief, scientific_aliases, feedback) -> dict:
     }
 
 
-def write_prompt_html(path: Path, request: dict, *, illustrative=False) -> None:
+def write_prompt_html(
+    path: Path, request: dict, *, illustrative=False, protocol=PROTOCOL
+) -> None:
     """Render the visible messages and response schema without creating a run plan."""
     note = (
         "Illustrative preview using the parent fit at the nested starting point "
@@ -204,9 +225,12 @@ def write_prompt_html(path: Path, request: dict, *, illustrative=False) -> None:
         if illustrative
         else "Prepared from the verified fitted child."
     )
-    schema = strict_provider_schema(InsulinRevision.model_json_schema())
+    system, response_model = _contract(protocol)
+    schema = strict_provider_schema(response_model.model_json_schema())
+    if protocol == boundary.PROTOCOL:
+        note = "Prepared from the primary concentration-constrained training fit."
     sections = [
-        ("System", SYSTEM),
+        ("System", system),
         ("Training evidence", request["training_evidence"]),
         ("Full user message", request),
         ("Response schema", schema),
@@ -243,6 +267,7 @@ def prepare(
     result_identity,
     fitting_contract,
     model_size="120b",
+    boundary_feedback=None,
 ) -> dict:
     """Freeze the completed fit's eligible training evidence as a portable packet."""
     problem = PrefixFitProblem.model_validate(fitted_problem)
@@ -251,10 +276,23 @@ def prepare(
     if evidence.context != problem.context:
         raise ValueError("fit problem differs from the training evidence context")
     brief = PublicScientificBrief.model_validate(public_brief)
-    feedback = _training_feedback(
-        comparison, {t.trajectory_id for t in evidence.trajectories}
-    )
+    protocol = boundary.PROTOCOL if boundary_feedback is not None else PROTOCOL
+    system, response_model = _contract(protocol)
+    training_ids = {t.trajectory_id for t in evidence.trajectories}
+    if boundary_feedback is None:
+        feedback = _training_feedback(comparison, training_ids)
+    else:
+        witness = boundary_feedback["depletion"]
+        feedback_ids = {witness["trajectory"]} | {
+            row["trajectory"] for row in boundary_feedback["ingestion_windows"]
+        }
+        if not feedback_ids <= training_ids:
+            raise ValueError("boundary feedback requires public training trajectories")
+        feedback = boundary_feedback
     request = prompt_payload(problem, brief, scientific_aliases, feedback)
+    if boundary_feedback is not None:
+        # Put the actual witnesses first in the user message sent on this repair.
+        request = {"training_evidence": feedback, **request}
     request["initialization_contract"] = {
         "shared_training": "One learned initial constant shared across trajectories.",
         "trajectory": "Independent training roots may be estimated from training "
@@ -289,17 +327,22 @@ def prepare(
                 "result_identity": result_identity,
                 "fitting_contract": fitting_contract,
                 "fitted_child_metrics": comparison["child_metrics"],
-                "system": SYSTEM,
+                **(
+                    {"revision_protocol": protocol, "boundary_witness": witness}
+                    if boundary_feedback is not None
+                    else {}
+                ),
+                "system": system,
                 "user": json.dumps(request, ensure_ascii=False, separators=(",", ":")),
                 "response_schema": strict_provider_schema(
-                    InsulinRevision.model_json_schema()
+                    response_model.model_json_schema()
                 ),
             },
         )
         return sealed_write(
             root / "plan.json",
             {
-                "protocol": PROTOCOL,
+                "protocol": protocol,
                 "model_size": model_size,
                 "source": _source(),
                 "inputs_sha256": inputs["artifact_sha256"],
@@ -317,6 +360,10 @@ def prepare_source(root: Path, source: Path, model_size="120b") -> dict:
     from autoformalism.benchmarks.audited_release import read_seal
 
     intake = read_seal(source)
+    if intake.get("protocol") == boundary.INTAKE_PROTOCOL:
+        if content_sha256(intake) != boundary.INTAKE_SHA256:
+            raise ValueError("expected the reviewed insulin boundary intake")
+        return prepare(root, model_size=model_size, **intake["arguments"])
     if (
         intake.get("protocol") != INTAKE_PROTOCOL
         or content_sha256(intake) != REVIEWED_INTAKE_SHA256
@@ -328,13 +375,14 @@ def prepare_source(root: Path, source: Path, model_size="120b") -> dict:
 def _load(root: Path):
     plan = sealed_read(root / "plan.json")
     inputs = sealed_read(root / "inputs.json")
+    system, response_model = _contract(plan["protocol"])
     if (
-        plan["protocol"] != PROTOCOL
+        plan["protocol"] != inputs.get("revision_protocol", PROTOCOL)
         or plan["source"] != _source()
         or inputs["artifact_sha256"] != plan["inputs_sha256"]
         or inputs["response_schema"]
-        != strict_provider_schema(InsulinRevision.model_json_schema())
-        or inputs["system"] != SYSTEM
+        != strict_provider_schema(response_model.model_json_schema())
+        or inputs["system"] != system
     ):
         raise ValueError("frozen proposer plan or source differs")
     return plan, inputs
@@ -342,14 +390,20 @@ def _load(root: Path):
 
 def assess(inputs: dict, raw: dict) -> dict:
     """Check the single proposed revision using the current construction gate."""
-    response = InsulinRevision.model_validate(raw)
+    protocol = inputs.get("revision_protocol", PROTOCOL)
+    _, response_model = _contract(protocol)
+    response = response_model.model_validate(raw)
     if response.edit.component not in {"I", "insulin_production"}:
         raise ValueError("one existing edit to I or insulin_production required")
     problem = PrefixFitProblem.model_validate(inputs["problem"])
     reply = {
         "decision": "revise",
         "hypothesis": response.hypothesis,
-        "evidence_ids": ["public_task", "postmeal_training_replay"],
+        "evidence_ids": (
+            ["public_task", "depletion", "ingestion_windows"]
+            if protocol == boundary.PROTOCOL
+            else ["public_task", "postmeal_training_replay"]
+        ),
         "expected_observable_effect": response.expected_peak_timing
         + " "
         + response.expected_peak_height,
@@ -397,7 +451,13 @@ def assess(inputs: dict, raw: dict) -> dict:
             "a qualified training witness contradicts the revision",
             assessment=consistency,
         )
+    boundary_result = {}
+    if protocol == boundary.PROTOCOL:
+        boundary_result["insulin_boundary_check"] = boundary.check(
+            problem, child, inputs["boundary_witness"]
+        )
     return {
+        **boundary_result,
         "status": "eligible_for_refit",
         "problem": child.model_dump(mode="json"),
         "audit": audit,
@@ -436,7 +496,7 @@ def _one_call(root, plan, inputs, endpoint, transport, token_transport):
     arguments = {
         "system": inputs["system"],
         "user": inputs["user"],
-        "response_model": InsulinRevision,
+        "response_model": _contract(plan["protocol"])[1],
         "step": "insulin_law",
         "attempt": 0,
     }
@@ -535,6 +595,14 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None) -> d
                 "limits and original-equation replay. Compare the new fit with the "
                 "retained nested child using compare_refit_replay.",
             }
+            if plan["protocol"] == boundary.PROTOCOL:
+                outcome["refit_handoff"]["comparison"] = (
+                    "Compare against the primary constrained endpoint. Refit using "
+                    "the declared concentration control and replay original equations. "
+                    "Report dense minima, boundary rates, one-minute zero-input "
+                    "extension, ingestion-window rises, shifted peaks, no-meal "
+                    "controls and per-trajectory NMSE median/MAD on the same rows."
+                )
         return sealed_write(
             terminal,
             {
@@ -562,7 +630,7 @@ def compare_refit_replay(
     inputs = sealed_read(root / "inputs.json")
     accepted = sealed_read(root / "result.json")
     if (
-        plan["protocol"] != PROTOCOL
+        plan["protocol"] not in {PROTOCOL, boundary.PROTOCOL}
         or plan["inputs_sha256"] != inputs["artifact_sha256"]
         or accepted["plan_sha256"] != plan["artifact_sha256"]
         or accepted["status"] != "eligible_for_refit"
@@ -629,7 +697,7 @@ def status(root: Path) -> dict:
         and (terminal is None or terminal["status"] == "interrupted_after_reservation")
     )
     return {
-        "protocol": PROTOCOL,
+        "protocol": plan["protocol"],
         "plan_sha256": plan["artifact_sha256"],
         "status": terminal["status"]
         if terminal
@@ -650,6 +718,14 @@ def status(root: Path) -> dict:
         "training_consistency": (terminal or {})
         .get("training_consistency", {})
         .get("status"),
+        **(
+            {
+                "insulin_boundary_check": (terminal or {}).get("insulin_boundary_check")
+                or (terminal or {}).get("details", {}).get("boundary_check")
+            }
+            if plan["protocol"] == boundary.PROTOCOL
+            else {}
+        ),
         "error": (terminal or {}).get("error"),
         "optimizer_calls": 0,
         "test_data_opened": False,
@@ -720,7 +796,9 @@ def report(root: Path) -> dict:
             "<h1>Candidate 15 insulin revision</h1><p>One bounded proposal followed by "
             "deterministic admission. An admitted model still needs fitting.</p>" + body
         )
-        write_prompt_html(root / "PROMPT.html", json.loads(inputs["user"]))
+        write_prompt_html(
+            root / "PROMPT.html", json.loads(inputs["user"]), protocol=plan["protocol"]
+        )
     return summary
 
 
@@ -735,7 +813,7 @@ def inspect(root: Path) -> dict:
             "attempt.json",
             "result.json",
             "execution.json",
-        "serving_runtime.json",
+            "serving_runtime.json",
             "summary.json",
             "SUMMARY.md",
             "REPORT.html",
@@ -797,11 +875,11 @@ def main() -> None:
                 args.root, model_size=args.model_size, **proposer_inputs(args.campaign)
             )
     elif args.action == "preview":
-        _, inputs = _load(args.root)
+        plan, inputs = _load(args.root)
         result = {k: inputs[k] for k in ("system", "user", "response_schema")}
         result["user"] = json.loads(result["user"])
         if args.html:
-            write_prompt_html(args.html, result["user"])
+            write_prompt_html(args.html, result["user"], protocol=plan["protocol"])
     elif args.action in {"status", "inspect"}:
         result = status(args.root) if args.action == "status" else inspect(args.root)
     else:
