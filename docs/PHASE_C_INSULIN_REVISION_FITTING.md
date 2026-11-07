@@ -146,3 +146,22 @@ scp yxiao2@login.delta.ncsa.illinois.edu:/work/hdd/bibo/yxiao2/phase_c/insulin-r
 Ambiguous scheduler replies block automatic resubmission; reconcile saved intents
 with Slurm before retrying. Keep the extracted source unchanged for the campaign.
 Source code, runtime, inputs and execution settings have separate sealed identities.
+
+## Returned result
+
+The primary revised fit improved training NMSE from 0.261011 to 0.163647.
+The three shifted-meal insulin peaks moved from 91 minutes early to 35, 29 and
+30 minutes early. All three starts reached their 1,800-second numerical limit
+while still improving; none establishes optimization convergence.
+
+All retained endpoints also predict negative insulin on some training samples
+(primary minimum -20.02 pmol/L). These are independently replayed predictions
+within the declared real parameter domains, not coefficient-bound violations.
+The new signed term became inhibitory and net insulin self-dependence became
+positive. The fit improves response timing but does not establish scientific
+validity or the proposer's pancreatic interpretation.
+
+The detailed returned review and next-step recommendation are appended to
+`work/agent-comms/2026-11-06-insulin-revision-fitting-campaign.md`. The next
+experiment should distinguish further numerical continuation from an explicit
+positivity-aware control, retaining the original receipts and comparison.
