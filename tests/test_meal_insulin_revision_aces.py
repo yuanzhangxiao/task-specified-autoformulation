@@ -72,7 +72,8 @@ def setup(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "protocol", [submission.PROTOCOL, submission.BOUNDARY_PROTOCOL]
+    "protocol",
+    [submission.PROTOCOL, submission.BOUNDARY_PROTOCOL, submission.REPAIR_PROTOCOL],
 )
 def test_one_call_resources_and_idempotent_submission(setup, monkeypatch, protocol):
     tmp, plan = setup
@@ -92,8 +93,7 @@ def test_one_call_resources_and_idempotent_submission(setup, monkeypatch, protoc
     loaded, execution = submission.verify(root, check_assets=True)
     assert loaded == plan
     assert len(calls) == 1
-    job_name = "boundary" if protocol == submission.BOUNDARY_PROTOCOL else "revision"
-    assert f"--job-name=phasec-insulin-{job_name}-120b" in calls[0]
+    assert f"--job-name={submission.JOB_NAMES[protocol]}" in calls[0]
     assert {
         "--gres=gpu:h100:2",
         "--cpus-per-task=16",
@@ -363,6 +363,7 @@ def test_binding_requires_loopback(serving, endpoint):
 def test_shell_syntax_and_offline_worker_contract():
     for name in (
         "start_meal_insulin_revision_aces.sh",
+        "start_insulin_feedback_repair_aces.sh",
         "run_meal_insulin_revision_aces.sh",
     ):
         subprocess.run(
@@ -387,8 +388,9 @@ def test_shell_syntax_and_offline_worker_contract():
 
 @pytest.mark.parametrize("command", ["run", "status", "inspect", "preview"])
 @pytest.mark.parametrize("load_modules", [False, True])
+@pytest.mark.parametrize("feedback_repair", [False, True])
 def test_shell_dispatch_uses_actual_checkout_and_task_root(
-    tmp_path, command, load_modules
+    tmp_path, command, load_modules, feedback_repair
 ):
     group = tmp_path / "group scratch"
     group.mkdir()
@@ -426,10 +428,17 @@ def test_shell_dispatch_uses_actual_checkout_and_task_root(
     if load_modules:
         env["AF_TEST_MODULES"] = "yes"
     env.pop("AF_MEAL_INSULIN_REVISION_ROOT", None)
+    entry = (
+        "start_insulin_feedback_repair_aces.sh"
+        if feedback_repair
+        else "start_meal_insulin_revision_aces.sh"
+    )
+    if feedback_repair:
+        env["AF_MEAL_INSULIN_REVISION_ROOT"] = str(group / "previous-run")
     result = subprocess.run(
         [
             "bash",
-            str(REAL_REPO / "scripts/hpc/start_meal_insulin_revision_aces.sh"),
+            str(REAL_REPO / "scripts/hpc" / entry),
             command,
         ],
         cwd=tmp_path,
@@ -440,7 +449,14 @@ def test_shell_dispatch_uses_actual_checkout_and_task_root(
     )
     assert result.returncode == 0, result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
-    expected = str(group / "phase-c-insulin-revision-120b-v1")
+    expected = str(
+        group
+        / (
+            "phase-c-insulin-feedback-120b-v1"
+            if feedback_repair
+            else "phase-c-insulin-revision-120b-v1"
+        )
+    )
     assert calls and all(call["root"] == expected for call in calls)
     assert all(call["repo"] == str(REAL_REPO) for call in calls)
     assert all(
@@ -451,7 +467,13 @@ def test_shell_dispatch_uses_actual_checkout_and_task_root(
     if command == "run":
         prepare = next(c["argv"] for c in calls if "prepare" in c["argv"])
         assert prepare[prepare.index("--source") + 1] == str(
-            REAL_REPO / "inputs/revision-intake.json"
+            REAL_REPO
+            / "inputs"
+            / (
+                "insulin-feedback-intake.json"
+                if feedback_repair
+                else "revision-intake.json"
+            )
         )
         assert prepare[prepare.index("--model-size") + 1] == "120b"
         assert calls[-1]["argv"][0].endswith("submit_meal_insulin_revision_aces.py")

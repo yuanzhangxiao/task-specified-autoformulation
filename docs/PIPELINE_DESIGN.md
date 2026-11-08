@@ -1,5 +1,12 @@
 # Phase 1 Pipeline Design
 
+Candidate 15's feedback repair applies one new 120B patch to the constrained
+fitted parent. The immutable input includes the prior attempt, its deterministic
+diagnostics and a fixed-parameter training replay. Scoped identifier
+normalization precedes the existing admission checks. The reporter records
+spelling resolutions and the disposition of the zero-concentration check.
+[Protocol and ACES commands](PHASE_C_INSULIN_REVISION_ACES.md#repair-using-the-deterministic-feedback)
+
 ## Sampled concentration-constrained continuation
 
 `insulin-positive-continuation-1` binds each saved revised endpoint to two

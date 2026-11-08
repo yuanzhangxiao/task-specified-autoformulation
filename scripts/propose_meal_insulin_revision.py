@@ -29,6 +29,7 @@ from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.research import insulin_boundary_revision as boundary
 from autoformalism.research import meal_revision_metrics as metrics
+from autoformalism.research import revision_spelling
 from autoformalism.research.construction_repair_identity import family_identity
 from autoformalism.research.construction_revision_edits import (
     LawEdit,
@@ -111,11 +112,18 @@ def _contract(protocol: str) -> tuple[str, type[InsulinRevision]]:
         return SYSTEM, InsulinRevision
     if protocol == boundary.PROTOCOL:
         return BOUNDARY_SYSTEM, BoundaryRevision
+    if protocol == boundary.REPAIR_PROTOCOL:
+        return boundary.REPAIR_INSTRUCTION + "\n" + _EDIT_FORMAT, BoundaryRevision
     raise ValueError(f"unknown insulin revision protocol: {protocol}")
 
 
 def _source() -> dict:
-    paths = [Path(__file__), Path(structural.__file__), Path(structural.old.__file__)]
+    paths = [
+        Path(__file__),
+        Path(__file__).with_name("describe_insulin_boundary.py"),
+        Path(structural.__file__),
+        Path(structural.old.__file__),
+    ]
     return {
         "package": runtime_source_hash(),
         **{p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths},
@@ -227,7 +235,7 @@ def write_prompt_html(
     )
     system, response_model = _contract(protocol)
     schema = strict_provider_schema(response_model.model_json_schema())
-    if protocol == boundary.PROTOCOL:
+    if protocol in boundary.BOUNDARY_PROTOCOLS:
         note = "Prepared from the primary concentration-constrained training fit."
     sections = [
         ("System", system),
@@ -235,9 +243,21 @@ def write_prompt_html(
         ("Full user message", request),
         ("Response schema", schema),
     ]
+    if protocol == boundary.REPAIR_PROTOCOL:
+        sections.insert(
+            2,
+            (
+                "Previous attempt and deterministic feedback",
+                request["previous_attempt"],
+            ),
+        )
     body = "".join(
         "<details"
-        + (" open" if i < 2 else "")
+        + (
+            " open"
+            if i < 2 or label == "Previous attempt and deterministic feedback"
+            else ""
+        )
         + "><summary>"
         + escape(label)
         + "</summary><pre>"
@@ -268,6 +288,7 @@ def prepare(
     fitting_contract,
     model_size="120b",
     boundary_feedback=None,
+    repair_history=None,
 ) -> dict:
     """Freeze the completed fit's eligible training evidence as a portable packet."""
     problem = PrefixFitProblem.model_validate(fitted_problem)
@@ -277,6 +298,10 @@ def prepare(
         raise ValueError("fit problem differs from the training evidence context")
     brief = PublicScientificBrief.model_validate(public_brief)
     protocol = boundary.PROTOCOL if boundary_feedback is not None else PROTOCOL
+    if repair_history is not None:
+        if boundary_feedback is None or model_size != "120b":
+            raise ValueError("feedback repair requires the 120B boundary comparison")
+        protocol = boundary.REPAIR_PROTOCOL
     system, response_model = _contract(protocol)
     training_ids = {t.trajectory_id for t in evidence.trajectories}
     if boundary_feedback is None:
@@ -293,6 +318,26 @@ def prepare(
     if boundary_feedback is not None:
         # Put the actual witnesses first in the user message sent on this repair.
         request = {"training_evidence": feedback, **request}
+    if repair_history is not None:
+        previous = repair_history["previous_attempt"]
+        if (
+            repair_history["fitted_problem_sha256"] != content_sha256(problem)
+            or previous["fixed_parameter_replay"]["trajectory"] not in training_ids
+        ):
+            raise ValueError("previous feedback differs from the fitted training case")
+        request["training_evidence"] = {
+            "deterministic_feedback": repair_history["fitted_feedback"],
+            "depleted_state": witness["state_at_boundary"],
+            "measured_I_at_300": witness["observed_I_pmol_L"],
+            "fitted_I_at_300": witness["constrained_fit_I_pmol_L"],
+            "zero_input_extension": feedback["zero_input_extension"],
+        }
+        # Keep the fitted parent and the previous, unfitted attempt distinguishable.
+        request = {
+            "training_evidence": request.pop("training_evidence"),
+            "previous_attempt": previous,
+            **request,
+        }
     request["initialization_contract"] = {
         "shared_training": "One learned initial constant shared across trajectories.",
         "trajectory": "Independent training roots may be estimated from training "
@@ -328,6 +373,14 @@ def prepare(
                 "fitting_contract": fitting_contract,
                 "fitted_child_metrics": comparison["child_metrics"],
                 **(
+                    {
+                        "repair_history": repair_history,
+                        "boundary_feedback": boundary_feedback,
+                    }
+                    if repair_history is not None
+                    else {}
+                ),
+                **(
                     {"revision_protocol": protocol, "boundary_witness": witness}
                     if boundary_feedback is not None
                     else {}
@@ -360,6 +413,12 @@ def prepare_source(root: Path, source: Path, model_size="120b") -> dict:
     from autoformalism.benchmarks.audited_release import read_seal
 
     intake = read_seal(source)
+    if intake.get("protocol") == boundary.REPAIR_INTAKE_PROTOCOL:
+        if content_sha256(intake) != boundary.REPAIR_INTAKE_SHA256:
+            raise ValueError(
+                "expected the reviewed deterministic feedback repair intake"
+            )
+        return prepare(root, model_size=model_size, **intake["arguments"])
     if intake.get("protocol") == boundary.INTAKE_PROTOCOL:
         if content_sha256(intake) != boundary.INTAKE_SHA256:
             raise ValueError("expected the reviewed insulin boundary intake")
@@ -390,6 +449,44 @@ def _load(root: Path):
 
 def assess(inputs: dict, raw: dict) -> dict:
     """Check the single proposed revision using the current construction gate."""
+    if inputs.get("revision_protocol") != boundary.REPAIR_PROTOCOL:
+        return _assess(inputs, raw)
+    from scripts.describe_insulin_boundary import revision_messages
+
+    parent = PrefixFitProblem.model_validate(inputs["problem"])
+    patch, spellings = revision_spelling.normalize(parent, raw, BoundaryRevision)
+    try:
+        outcome = _assess(inputs, patch)
+        history = inputs["repair_history"]
+        child = PrefixFitProblem.model_validate(outcome["problem"])
+        if boundary.previous_counterexample_applies(parent, child, history):
+            raise RevisionValidationError(
+                "PREVIOUS_REPAIR_REPEATED",
+                "the returned equations and initialization reproduce the previous "
+                "negative-insulin counterexample at admissible parameter values",
+                previous_family_sha256=history["previous_family_sha256"],
+                counterexample=history["previous_attempt"]["fixed_parameter_replay"],
+            )
+    except RevisionValidationError as exc:
+        exc.details["identifier_spellings"] = spellings
+        raise
+    except ValueError as exc:
+        if not spellings:
+            raise
+        raise RevisionValidationError(
+            "NORMALIZED_PATCH_REJECTED", str(exc), identifier_spellings=spellings
+        ) from exc
+    outcome["audit"]["identifier_spellings"] = spellings
+    outcome["revision_feedback"] = revision_messages(
+        outcome,
+        inputs["boundary_witness"],
+        inputs["boundary_feedback"]["ingestion_windows"],
+    )
+    return outcome
+
+
+def _assess(inputs: dict, raw: dict) -> dict:
+    """Apply the typed edit to the fitted model and check the resulting equations."""
     protocol = inputs.get("revision_protocol", PROTOCOL)
     _, response_model = _contract(protocol)
     response = response_model.model_validate(raw)
@@ -401,7 +498,7 @@ def assess(inputs: dict, raw: dict) -> dict:
         "hypothesis": response.hypothesis,
         "evidence_ids": (
             ["public_task", "depletion", "ingestion_windows"]
-            if protocol == boundary.PROTOCOL
+            if protocol in boundary.BOUNDARY_PROTOCOLS
             else ["public_task", "postmeal_training_replay"]
         ),
         "expected_observable_effect": response.expected_peak_timing
@@ -452,7 +549,7 @@ def assess(inputs: dict, raw: dict) -> dict:
             assessment=consistency,
         )
     boundary_result = {}
-    if protocol == boundary.PROTOCOL:
+    if protocol in boundary.BOUNDARY_PROTOCOLS:
         boundary_result["insulin_boundary_check"] = boundary.check(
             problem, child, inputs["boundary_witness"]
         )
@@ -595,7 +692,7 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None) -> d
                 "limits and original-equation replay. Compare the new fit with the "
                 "retained nested child using compare_refit_replay.",
             }
-            if plan["protocol"] == boundary.PROTOCOL:
+            if plan["protocol"] in boundary.BOUNDARY_PROTOCOLS:
                 outcome["refit_handoff"]["comparison"] = (
                     "Compare against the primary constrained endpoint. Refit using "
                     "the declared concentration control and replay original equations. "
@@ -630,7 +727,7 @@ def compare_refit_replay(
     inputs = sealed_read(root / "inputs.json")
     accepted = sealed_read(root / "result.json")
     if (
-        plan["protocol"] not in {PROTOCOL, boundary.PROTOCOL}
+        plan["protocol"] not in {PROTOCOL, *boundary.BOUNDARY_PROTOCOLS}
         or plan["inputs_sha256"] != inputs["artifact_sha256"]
         or accepted["plan_sha256"] != plan["artifact_sha256"]
         or accepted["status"] != "eligible_for_refit"
@@ -677,7 +774,7 @@ def _terminal(root: Path, plan: dict) -> dict:
 
 def status(root: Path) -> dict:
     """Report cached outcomes without contacting a server or reserving a call."""
-    plan, _ = _load(root)
+    plan, inputs = _load(root)
     terminal = _terminal(root, plan) if (root / "result.json").exists() else None
     records = [
         json.loads(p.read_text()) for p in sorted((root / "calls").glob("*.json"))
@@ -723,7 +820,23 @@ def status(root: Path) -> dict:
                 "insulin_boundary_check": (terminal or {}).get("insulin_boundary_check")
                 or (terminal or {}).get("details", {}).get("boundary_check")
             }
-            if plan["protocol"] == boundary.PROTOCOL
+            if plan["protocol"] in boundary.BOUNDARY_PROTOCOLS
+            else {}
+        ),
+        **(
+            {
+                "identifier_spellings": (terminal or {})
+                .get("audit", {})
+                .get(
+                    "identifier_spellings",
+                    (terminal or {}).get("details", {}).get("identifier_spellings", []),
+                ),
+                "revision_feedback": (terminal or {}).get("revision_feedback", []),
+                "prior_attempt_plan_sha256": inputs["repair_history"][
+                    "source_plan_sha256"
+                ],
+            }
+            if plan["protocol"] == boundary.REPAIR_PROTOCOL
             else {}
         ),
         "error": (terminal or {}).get("error"),
@@ -773,13 +886,24 @@ def report(root: Path) -> dict:
         + "</pre></details>"
         for title, value in sections
     )
+    repair_result = ""
+    if plan["protocol"] == boundary.REPAIR_PROTOCOL:
+        sign = (summary["insulin_boundary_check"] or {}).get(
+            "boundary_sign", "unassessed"
+        )
+        repair_result = (
+            f"The zero-concentration boundary assessment is {sign}. "
+            f"Resolved {len(summary['identifier_spellings'])} identifier spellings.\n\n"
+        )
+        if summary["error"]:
+            repair_result += summary["error"] + "\n\n"
     with _lock(root / "report"):
         atomic_json(root / "summary.json", summary)
         (root / "SUMMARY.md").write_text(
             "# Candidate 15 insulin revision\n\n"
             f"Status: {summary['status']}. Generation attempts recorded: "
             f"{summary['physical_requests_started']}. Observed tokens: "
-            f"{summary['observed_total_tokens']}.\n\n"
+            f"{summary['observed_total_tokens']}.\n\n{repair_result}"
             "Admission means the current deterministic checks passed, with unresolved "
             "checks retained. Peak improvement and scientific adequacy require an "
             "independently verified refit. No fitting or test evaluation runs here.\n\n"

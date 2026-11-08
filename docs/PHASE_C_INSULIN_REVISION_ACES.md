@@ -1,5 +1,51 @@
 # Candidate 15 proposer revision on ACES
 
+## Repair using the deterministic feedback
+
+One GPT-OSS-120B call receives the primary constrained fit, the earlier
+unfitted patch, its resolved parameter spellings and the deterministic feedback
+from the public training evidence. The request includes the three 90 g meal
+windows and the legal 150 g example in which insulin fell from +26.10 at
+minute 31 to −1.53 pmol/L at minute 32. The reply is a full replacement patch
+against the fitted parent. Its new-state and process allowances are available
+even if it discards the entire clock proposal.
+
+Upload `phase-c-insulin-feedback-repair-v1.tar.gz` from
+`output/insulin-feedback-repair-delivery-20261107/` to
+`/scratch/group/p.nairr260351.000/u.yx126462`. Submit from the ACES login node.
+
+```bash
+cd /scratch/group/p.nairr260351.000/u.yx126462 && tar -xzf phase-c-insulin-feedback-repair-v1.tar.gz && cd phase-c-insulin-feedback-repair-v1 && sha256sum --quiet -c SHA256SUMS && bash scripts/hpc/start_insulin_feedback_repair_aces.sh run
+```
+
+Check the job or package the results from any ACES directory.
+
+```bash
+bash /scratch/group/p.nairr260351.000/u.yx126462/phase-c-insulin-feedback-repair-v1/scripts/hpc/start_insulin_feedback_repair_aces.sh status
+```
+
+```bash
+bash /scratch/group/p.nairr260351.000/u.yx126462/phase-c-insulin-feedback-repair-v1/scripts/hpc/start_insulin_feedback_repair_aces.sh inspect
+```
+
+Download `phase-c-insulin-feedback-120b-v1/inspection.tar.gz` from group scratch.
+After extraction, the same wrapper's `preview` action can prepare and display
+the request before submission. The job uses two H100s, one hour, one generation
+reservation and a 4,096-token output limit. Repeating a confirmed submission
+returns its original job ID. The cached response can be assessed again offline.
+
+The verifier matches Greek letters and their case-sensitive spelled-out names
+in whole identifiers against scientific declarations. Initializer formulas use
+their own local aliases and parameters. Conflicting declarations and unknown
+symbols surface as errors. The raw response is cached and each substitution
+is logged by field. A replay of the same equation family, including a change
+of parameter roles alone that still admits the known counterexample, is
+reported as a repeated repair. A different model receives the existing public
+path, training-consistency and boundary checks. See `summary.json` for
+`insulin_boundary_check.boundary_sign` and `identifier_spellings`.
+An eligible patch with a deferred sign still needs further assessment. Orion
+can refit an admitted patch separately. [Reference fit and equations](PHASE_C_INSULIN_MODEL_COMPARISON.md)
+
 ## Revising the insulin balance at depletion
 
 ACES job 2314569 completed. The reply used Greek τ in two formula symbols

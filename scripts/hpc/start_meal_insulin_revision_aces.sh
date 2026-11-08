@@ -59,6 +59,9 @@ PY
     exec "$AF_PYTHON" "$AF_CLI" status --root "$AF_OUTPUT_ROOT"
     ;;
   preview)
+    if [[ ! -f "$AF_OUTPUT_ROOT/plan.json" ]]; then
+      "$AF_PYTHON" "$AF_CLI" prepare --source "${AF_MEAL_INSULIN_REVISION_SOURCE:-$AF_REPO_ROOT/inputs/revision-intake.json}" --root "$AF_OUTPUT_ROOT" --model-size 120b
+    fi
     exec "$AF_PYTHON" "$AF_CLI" preview --root "$AF_OUTPUT_ROOT" --html "$AF_OUTPUT_ROOT/PROMPT.html"
     ;;
   inspect)

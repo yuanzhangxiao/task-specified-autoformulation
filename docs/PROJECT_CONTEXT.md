@@ -1,5 +1,10 @@
 # Autoformalism Phase 1 Implementation Context
 
+The next Candidate 15 repair gives GPT-OSS-120B the public training witnesses,
+the previous clock patch and its fixed-parameter counterexample. The new run
+records identifier spelling repairs and evaluates a replacement against the
+fitted parent. [ACES launch and inspection](PHASE_C_INSULIN_REVISION_ACES.md#repair-using-the-deterministic-feedback)
+
 ## Insulin revision at zero concentration
 
 The constrained fit reaches the end of the 150 g training trajectory at zero

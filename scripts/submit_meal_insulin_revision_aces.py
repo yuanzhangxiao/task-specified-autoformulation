@@ -14,6 +14,7 @@ from urllib.request import urlopen
 from autoformalism.research.insulin_boundary_revision import (
     PROTOCOL as BOUNDARY_PROTOCOL,
 )
+from autoformalism.research.insulin_boundary_revision import REPAIR_PROTOCOL
 from scripts import harmony_vocab
 from scripts.submit_structural_revision_aces import (
     MODELS,
@@ -27,6 +28,11 @@ from scripts.submit_structural_revision_aces import (
 
 REPO = Path(__file__).resolve().parents[1]
 PROTOCOL = "candidate-15-postmeal-revision-1"
+JOB_NAMES = {
+    PROTOCOL: "phasec-insulin-revision-120b",
+    BOUNDARY_PROTOCOL: "phasec-insulin-boundary-120b",
+    REPAIR_PROTOCOL: "phasec-insulin-feedback-120b",
+}
 EXECUTION_PROTOCOL = "candidate-15-insulin-revision-aces-execution-1"
 SETTINGS = {
     "model": MODELS["120b"]["model"],
@@ -44,6 +50,8 @@ ENTRYPOINTS = (
     "scripts/submit_meal_insulin_revision_aces.py",
     "scripts/hpc/start_meal_insulin_revision_aces.sh",
     "scripts/hpc/start_insulin_boundary_revision_aces.sh",
+    "scripts/hpc/start_insulin_feedback_repair_aces.sh",
+    "scripts/describe_insulin_boundary.py",
     "scripts/hpc/run_meal_insulin_revision_aces.sh",
     "scripts/submit_structural_revision_aces.py",
     "scripts/harmony_vocab.py",
@@ -68,7 +76,7 @@ def verify_inputs(root: Path) -> dict:
     """Require the exact training-only one-call 120B request before scheduling."""
     plan, _ = _proposer_load(root)
     if (
-        plan.get("protocol") not in {PROTOCOL, BOUNDARY_PROTOCOL}
+        plan.get("protocol") not in JOB_NAMES
         or plan.get("model_size") != "120b"
         or plan.get("settings") != SETTINGS
         or plan.get("seed") != 0
@@ -270,9 +278,7 @@ def submit(root: Path) -> dict:
             "--time=01:00:00",
             "--signal=B:TERM@300",
             "--exclude=ac042",
-            "--job-name=phasec-insulin-boundary-120b"
-            if plan["protocol"] == BOUNDARY_PROTOCOL
-            else "--job-name=phasec-insulin-revision-120b",
+            "--job-name=" + JOB_NAMES[plan["protocol"]],
             f"--output={root}/logs/propose-%j.out",
             f"--error={root}/logs/propose-%j.err",
             str(REPO / "scripts/hpc/run_meal_insulin_revision_aces.sh"),

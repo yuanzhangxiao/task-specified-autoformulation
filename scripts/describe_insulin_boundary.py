@@ -123,11 +123,15 @@ def _missing_state_term(
 def feedback(inputs: dict, reply: dict | None = None) -> dict:
     """Describe the fitted witness and optionally assess one explicit reply."""
     if (
-        inputs.get("revision_protocol") != boundary.PROTOCOL
+        inputs.get("revision_protocol") not in boundary.BOUNDARY_PROTOCOLS
         or inputs["evidence"]["split"] != "train"
     ):
         raise ValueError("expected the public training insulin-boundary protocol")
-    evidence = json.loads(inputs["user"])["training_evidence"]
+    evidence = (
+        inputs["boundary_feedback"]
+        if "boundary_feedback" in inputs
+        else json.loads(inputs["user"])["training_evidence"]
+    )
     witness = inputs["boundary_witness"]
     windows = evidence["ingestion_windows"]
     training_ids = {row["trajectory_id"] for row in inputs["evidence"]["trajectories"]}
@@ -190,6 +194,18 @@ def feedback(inputs: dict, reply: dict | None = None) -> dict:
             "reply_status": "rejected",
             "diagnostic": {"message": str(exc)},
         }
+    return {
+        **report,
+        "reply_status": assessment["status"],
+        "boundary_check": assessment["insulin_boundary_check"],
+        "revision_feedback": revision_messages(assessment, witness, windows),
+    }
+
+
+def revision_messages(
+    assessment: dict, witness: dict, windows: list[dict]
+) -> list[str]:
+    """Render the checks for the equations in this particular assessed patch."""
     child = PrefixFitProblem.model_validate(assessment["problem"])
     result = assessment["insulin_boundary_check"]
     messages = _clock_feedback(child, set(assessment["audit"]["new_states"]))
@@ -213,12 +229,7 @@ def feedback(inputs: dict, reply: dict | None = None) -> dict:
             f"meal term in dI/dt contributes {coefficient * dose:+.2f} pmol/L over "
             f"{dose:g} g. Check the net change after including the other terms."
         )
-    return {
-        **report,
-        "reply_status": assessment["status"],
-        "boundary_check": result,
-        "revision_feedback": messages,
-    }
+    return messages
 
 
 def main() -> None:
@@ -234,7 +245,7 @@ def main() -> None:
     inputs = sealed_read(args.root / "inputs.json")
     if (
         plan["inputs_sha256"] != inputs["artifact_sha256"]
-        or plan["protocol"] != boundary.PROTOCOL
+        or plan["protocol"] not in boundary.BOUNDARY_PROTOCOLS
     ):
         raise ValueError("plan does not identify these insulin-boundary inputs")
     reply = json.loads(args.reply.read_text()) if args.reply else None

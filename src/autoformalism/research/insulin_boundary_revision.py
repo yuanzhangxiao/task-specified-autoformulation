@@ -9,12 +9,20 @@ from autoformalism.expressions.compiler import _evaluate
 from autoformalism.expressions.diagnostics import RuntimeExpressionError
 from autoformalism.expressions.parser import ParsedExpression
 from autoformalism.rebuttal import basin_algebra as algebra
+from autoformalism.research.construction_repair_identity import family_identity
 from autoformalism.research.construction_revision_edits import RevisionValidationError
+from autoformalism.schemas.candidate import ParameterRole
 from autoformalism.schemas.prefix_initialization import PrefixFitProblem
 
 PROTOCOL = "candidate-15-insulin-boundary-revision-1"
 INTAKE_PROTOCOL = "candidate-15-reviewed-boundary-intake-1"
 INTAKE_SHA256 = "4daf9b76e848cc9a8d42b3fdcc4f30b1a823c0f0a8eabfb72e802d7c54012afa"
+REPAIR_PROTOCOL = "candidate-15-deterministic-feedback-repair-1"
+REPAIR_INTAKE_PROTOCOL = "candidate-15-reviewed-feedback-repair-intake-1"
+REPAIR_INTAKE_SHA256 = (
+    "86e526479090801ebddd6f4f9c4afd6a6c4e94363b00306d1d021e6f07ab89fd"
+)
+BOUNDARY_PROTOCOLS = (PROTOCOL, REPAIR_PROTOCOL)
 MEAL = "meal_rate_g_per_min"
 INFUSION = "insulin_pmol_per_kg_min"
 
@@ -42,11 +50,81 @@ Use the displayed public channels and generated states. State domain assumptions
 explicitly, including assumptions on any new state. Review each source and
 sink at I=0 after substituting your proposed processes."""
 
+REPAIR_INSTRUCTION = """Repair the insulin balance of fitted Candidate 15 using
+the deterministic feedback in the user message. current_model is the fitted
+parent. previous_attempt is an unfitted patch to that parent. Return one complete
+replacement patch relative to current_model. You can discard the previous
+additions or redeclare any that you keep. A spelling correction alone leaves
+the previous equations and their counterexample in place.
+
+I is an absolute concentration. Write your complete dI/dt at I=0 after
+substituting the processes. Account for every remaining term, including its
+parameter domain and the reachable sign of any new state. Preserve the public
+meal-to-glucose and delayed insulin-to-disposal paths. The reverse action-to-I
+connection is editable. Use the meal-window changes and shifted peaks to
+explain the expected response of the complete balance when a meal moves or is
+absent. Choose the mechanism and its formula.
+
+Replace the RHS of I or insulin_production. You may add one connected
+differential state with its initializer, one connected algebraic process and
+up to eight shared dynamics parameters. Use declared identifiers consistently.
+Equivalent Greek and spelled-out names resolve only to a unique declaration
+in scope. The comparison uses public training evidence and a fixed-parameter
+diagnostic of the previous attempt. The repaired model will require a refit."""
+
 
 def _insulin_tree(problem: PrefixFitProblem) -> ast.AST:
     candidate = problem.base_candidate
     rhs = next(row.rhs for row in candidate.state_equations if row.state == "I")
     return algebra.expanded(rhs, {p.name: p.expression for p in candidate.processes})
+
+
+def previous_counterexample_applies(
+    parent: PrefixFitProblem, child: PrefixFitProblem, history: dict
+) -> bool:
+    """Match the prior dynamics and initializers at admissible witness values."""
+    previous = history["previous_family_sha256"]
+    if not previous:
+        return False
+    if family_identity(parent, child).get("sha256") == previous:
+        return True
+    # Changing only a parameter role may still allow the very same trajectory.
+    # Compare the equations after checking every old named setting in the new domain.
+    attempt = history["previous_attempt"]
+    values = attempt["fixed_parameter_replay"].get("new_parameters", {})
+    old_roles = {
+        p["name"]: ParameterRole(p["role"])
+        for p in attempt["patch"].get("new_parameters", [])
+    }
+    inherited = {p.name for p in parent.base_candidate.parameters}
+    parameters = child.base_candidate.parameters
+    if (
+        not values
+        or set(values) != set(old_roles)
+        or set(values) != {p.name for p in parameters if p.name not in inherited}
+    ):
+        return False
+    comparable = []
+    changed = False
+    for p in parameters:
+        if p.name in values:
+            value = values[p.name]
+            if (
+                (p.domain == "positive" and value <= 0)
+                or (p.domain == "nonnegative" and value < 0)
+                or (p.bounds and not p.bounds.lower <= value <= p.bounds.upper)
+            ):
+                return False
+            role = old_roles[p.name]
+            if p.role != role:
+                changed = True
+                p = p.model_copy(update={"role": role, "domain": role.domain})
+        comparable.append(p)
+    if not changed:
+        return False
+    model = child.base_candidate.model_copy(update={"parameters": tuple(comparable)})
+    comparison = child.model_copy(update={"base_candidate": model})
+    return family_identity(parent, comparison).get("sha256") == previous
 
 
 def _polynomial(tree: ast.AST) -> algebra.Polynomial | None:
