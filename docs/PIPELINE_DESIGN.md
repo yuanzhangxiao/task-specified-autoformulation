@@ -1,6 +1,6 @@
 # Phase 1 Pipeline Design
 
-The three-origin breadth pilot freezes both fitted parents, training evidence and roster before submission. Two five-option requests and five fresh topology seeds precede any corrections. Canonical model and expanded-balance comparisons group eligible fitting packets. Each branch retains its equations, initializer contract and evidence. [Protocol and ACES commands](PHASE_C_T2_BREADTH.md)
+The T2 worker visits all branches at each repair depth. A new result root can import authenticated first-wave responses and interrupted reservations. The same-name Slurm dependency serializes the upgrade with a previous job even when its submission acknowledgment was lost. [Protocol and ACES commands](PHASE_C_T2_BREADTH.md)
 
 Candidate 15's feedback repair applies one new 120B patch to the constrained
 fitted parent. The immutable input includes the prior attempt, its deterministic

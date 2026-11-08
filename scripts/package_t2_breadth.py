@@ -14,7 +14,7 @@ from pathlib import Path
 from autoformalism.rebuttal.prefit_replay import sealed_read
 from scripts import harmony_vocab, t2_breadth
 
-NAME = "phase-c-t2-breadth-v1"
+NAME = "phase-c-t2-breadth-v2"
 
 
 def package(destination: Path, intake: Path, harmony: Path) -> Path:

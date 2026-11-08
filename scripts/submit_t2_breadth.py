@@ -11,6 +11,7 @@ from pathlib import Path
 from autoformalism.fitting.public_fitting import _lock
 from scripts import submit_meal_insulin_revision_aces as aces
 from scripts import t2_breadth as campaign
+from scripts import t2_breadth_scheduler as scheduler
 from scripts.submit_structural_revision_aces import (
     _digest,
     _read,
@@ -26,7 +27,7 @@ def execution(plan, image, snapshot):
     )
     return {
         **values,
-        "protocol": "t2-three-origin-aces-1",
+        "protocol": "t2-three-origin-aces-2",
         "entrypoint_sha256": plan["entrypoints"],
         "generation_settings": plan["settings"],
         "maximum_output_tokens": plan["settings"]["max_output_tokens"],
@@ -92,6 +93,29 @@ def _manifest(wave, identity, job):
     )
 
 
+def scheduler_status(root: Path) -> dict:
+    """Inspect both the original acknowledgment and the most recent deeper wave."""
+    observed = {"predecessor": scheduler.predecessor(root), "current": None}
+    waves = sorted((root / "submissions").glob("wave-*"))
+    if waves:
+        last = waves[-1]
+        manifest = last / "manifest.json"
+        if manifest.exists():
+            observed["current"] = _read(manifest)
+        else:
+            try:
+                observed["current"] = scheduler.reconcile(root, last)
+            except (ValueError, OSError, subprocess.SubprocessError) as exc:
+                observed["current"] = {
+                    "status": "acknowledgment_pending",
+                    "lookup": str(exc),
+                }
+            reply = last / "propose.reply.json"
+            if reply.exists():
+                observed["scheduler_reply"] = json.loads(reply.read_text())
+    return observed
+
+
 def submit(root, resume=False):
     root = root.resolve()
     with _lock(root / "submission-lock"):
@@ -107,15 +131,33 @@ def submit(root, resume=False):
             if (last / "propose.receipt.json").is_file():
                 receipt = json.loads((last / "propose.receipt.json").read_text())
                 _manifest(last, identity, receipt["job"])
-            if not (last / "manifest.json").is_file():
-                raise ValueError(
-                    f"Scheduler acknowledgment unconfirmed. Check the queue and {last}"
-                )
-            prior = _read(last / "manifest.json")
-            if prior["execution_sha256"] != identity["artifact_sha256"]:
-                raise ValueError("Submission belongs to a different execution")
-            if not resume or not _finished(prior["job"]):
-                return prior
+            manifest = last / "manifest.json"
+            if not manifest.is_file():
+                try:
+                    observation = scheduler.reconcile(root, last)
+                except (ValueError, OSError, subprocess.SubprocessError) as exc:
+                    return {
+                        "status": "acknowledgment_pending",
+                        "wave": str(last),
+                        "lookup": str(exc),
+                        "next_action": "run",
+                    }
+                if observation["status"] == "confirmed":
+                    _manifest(last, identity, observation["job"])
+                    _seal(last / "adoption.json", observation)
+                elif not resume:
+                    return {**observation, "next_action": "resume", "wave": str(last)}
+            if manifest.exists():
+                prior = _read(manifest)
+                if prior["execution_sha256"] != identity["artifact_sha256"]:
+                    raise ValueError("Submission belongs to a different execution")
+                if not resume or not _finished(prior["job"]):
+                    return prior
+        earlier = (
+            scheduler.predecessor(root)
+            if not (root / "legacy/index.json").exists()
+            else None
+        )
         image, snapshot = aces._assets()
         identity = _seal(
             root / "execution.json", execution(plan, file_hash(image), snapshot)
@@ -139,13 +181,55 @@ def submit(root, resume=False):
             "--signal=B:TERM@300",
             "--exclude=ac042",
             "--job-name=phasec-t2-breadth",
+            "--dependency=singleton",
+            f"--comment=t2-depth3-{identity['artifact_sha256'][:12]}-{wave.name}",
             f"--output={root}/logs/propose-%j.out",
             f"--error={root}/logs/propose-%j.err",
             str(campaign.REPO / "scripts/hpc/run_meal_insulin_revision_aces.sh"),
             "t2-breadth",
         ]
-        job = _submit_job(wave, argv)
-        return _manifest(wave, identity, job)
+        if earlier:
+            _seal(wave / "predecessor-check.json", earlier)
+            if earlier.get("state") in {
+                "PENDING",
+                "RUNNING",
+                "CONFIGURING",
+                "COMPLETING",
+                "SUSPENDED",
+                "RESIZING",
+            }:
+                job = earlier["job"]
+                if not job.isdecimal():
+                    raise ValueError("Expected a numeric predecessor job ID")
+                pos = argv.index("--dependency=singleton")
+                argv[pos] += ",afterany:" + job
+        try:
+            job = _submit_job(wave, argv)
+        except ValueError as exc:
+            # The site wrapper sometimes times out after the controller accepted
+            # the job. Preserve sbatch's actual error even if accounting lags.
+            reply_path = wave / "propose.reply.json"
+            reply = json.loads(reply_path.read_text()) if reply_path.exists() else {}
+            try:
+                observed = scheduler.reconcile(root, wave)
+            except (ValueError, OSError, subprocess.SubprocessError) as lookup:
+                return {
+                    "status": "acknowledgment_pending",
+                    "wave": str(wave),
+                    "scheduler_reply": reply,
+                    "lookup": str(lookup),
+                    "next_action": "Run the launcher again to reconcile this intent.",
+                }
+            if observed["status"] != "confirmed":
+                return {
+                    **observed,
+                    "submission_error": str(exc),
+                    "next_action": "resume",
+                }
+            job = observed["job"]
+            _seal(wave / "adoption.json", observed)
+        result = _manifest(wave, identity, job)
+        return {**result, "predecessor": earlier} if earlier else result
 
 
 if __name__ == "__main__":
@@ -154,12 +238,19 @@ if __name__ == "__main__":
     parser.add_argument("--verify-only", action="store_true")
     parser.add_argument("--check-assets", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--status", action="store_true")
     args = parser.parse_args()
-    print(
-        json.dumps(
-            verify(args.root, args.check_assets)
-            if args.verify_only
-            else submit(args.root, args.resume),
-            indent=2,
-        )
-    )
+    if args.status:
+        result = scheduler_status(args.root)
+    elif args.verify_only:
+        result = verify(args.root, args.check_assets)
+    else:
+        result = submit(args.root, args.resume)
+    print(json.dumps(result, indent=2))
+    if not (
+        args.status
+        or args.verify_only
+        or result.get("job")
+        or result.get("status") == "already_complete"
+    ):
+        raise SystemExit(75)

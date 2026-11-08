@@ -19,7 +19,6 @@ from autoformalism.llm.response_revision import PromptPreflightError
 from autoformalism.llm.staged_topology import (
     StagedModelSettings,
     atomic_json,
-    visible_response,
 )
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
@@ -38,14 +37,16 @@ from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.staged_topology import content_hash
 from scripts import propose_meal_insulin_revision as insulin
 from scripts import structural_revision_campaign as structural
+from scripts import t2_breadth_history as history
 from scripts.construction_functions import file_hash
 
 REPO = Path(__file__).resolve().parents[1]
-PROTOCOL = "t2-three-origin-breadth-1"
+PROTOCOL = "t2-three-origin-breadth-2"
 INTAKE = "db0b5e78406147a8482c1b05f9d2463dacddbb2937f4f0f542ba9d74700a064c"
 SEEDS = tuple(range(100, 105))
 GROUPS = ("c15", "c21", "fresh")
-MAX_CALLS = 2 + len(SEEDS) * 2 + len(GROUPS) * len(SEEDS)
+MAX_CORRECTIONS = 3
+MAX_CALLS = 2 + len(SEEDS) * 2 + MAX_CORRECTIONS * len(GROUPS) * len(SEEDS)
 SETTINGS = StagedModelSettings(
     model="openai/gpt-oss-120b",
     model_revision="b5c939de8f754692c1647ca79fbf85e8c1e70f8a",
@@ -57,6 +58,8 @@ SETTINGS = StagedModelSettings(
 )
 ENTRYPOINTS = (
     "scripts/t2_breadth.py",
+    "scripts/t2_breadth_history.py",
+    "scripts/t2_breadth_scheduler.py",
     "scripts/submit_t2_breadth.py",
     "scripts/hpc/start_t2_breadth_aces.sh",
     "scripts/hpc/run_meal_insulin_revision_aces.sh",
@@ -101,7 +104,7 @@ def _plan(inputs: dict) -> dict:
         "groups": list(GROUPS),
         "alternatives_per_group": 5,
         "fresh_topology_seeds": list(SEEDS),
-        "maximum_corrections_per_branch": 1,
+        "maximum_corrections_per_branch": MAX_CORRECTIONS,
         "maximum_generation_requests": MAX_CALLS,
         "settings": SETTINGS.model_dump(mode="json"),
         "runtime_source": runtime_source_hash(),
@@ -111,10 +114,11 @@ def _plan(inputs: dict) -> dict:
     }
 
 
-def prepare(root: Path, source: Path) -> dict:
+def prepare(root: Path, source: Path, previous: Path | None = None) -> dict:
     inputs = sealed_read(source)
     plan = _plan(inputs)
     with _lock(root / "prepare-lock"):
+        history.bind_source(root, previous, INTAKE)
         sealed_write(
             root / "inputs.json",
             {k: v for k, v in inputs.items() if k != "artifact_sha256"},
@@ -376,7 +380,18 @@ def _assess(data, group, raw, stage, topo=None):
 
 
 def _ask(
-    root, plan, slot, seed, system, packet, schema, endpoint, transport, token_transport
+    root,
+    plan,
+    slot,
+    seed,
+    system,
+    packet,
+    schema,
+    endpoint,
+    transport,
+    token_transport,
+    prefix,
+    ceiling,
 ):
     """One durable generation slot, including failures and interrupted requests."""
     identity = content_hash([plan["artifact_sha256"], slot])
@@ -399,10 +414,30 @@ def _ask(
         if reply["key"] != key:
             raise ValueError("saved reply belongs to a different prompt")
         if "request_hash" in reply:
-            physical = directory / "calls" / (reply["request_hash"] + ".json")
+            base = (
+                (root / "legacy/steps" / slot)
+                if reply.get("source_plan")
+                else directory
+            )
+            physical = base / "calls" / (reply["request_hash"] + ".json")
             if file_hash(physical) != reply["physical_receipt_sha256"]:
                 raise ValueError(f"Changed physical call record for {slot}")
         return reply
+    old = history.prior_reply(root, prefix, slot, seed, request, SETTINGS)
+    if old is not None:
+        return sealed_write(path, {"key": key, **old})
+    # A cache reservation, including an interrupted call, already spent its slot.
+    local = list((directory / "calls").glob("*.json"))
+    if len(local) > 1:
+        raise ValueError(f"Multiple reservations in generation slot {slot}")
+    if not local:
+        charged = prefix["physical_requests"] + sum(
+            1 for _ in (root / "steps").glob("*/calls/*.json")
+        )
+        if charged >= ceiling:
+            raise ValueError(
+                f"Physical request ceiling {ceiling} reached before {slot}"
+            )
     client = ConstructionClient(
         settings=SETTINGS,
         base_url=endpoint,
@@ -419,18 +454,13 @@ def _ask(
         return sealed_write(
             path, {"key": key, "status": "preflight_blocked", "error": str(exc)}
         )
-    outcome = {"status": record["status"], "request_hash": record["request_hash"]}
-    outcome["physical_receipt_sha256"] = file_hash(
-        directory / "calls" / (record["request_hash"] + ".json")
-    )
-    if record["status"] == "responded":
-        try:
-            visible = json.loads(
-                json.dumps(visible_response(record), sort_keys=True, allow_nan=False)
-            )
-            outcome.update(status="visible", value=visible)
-        except (ValueError, TypeError, KeyError, AttributeError) as exc:
-            outcome.update(status="incomplete_reply", error=str(exc))
+    outcome = {
+        **history.visible(record),
+        "request_hash": record["request_hash"],
+        "physical_receipt_sha256": file_hash(
+            directory / "calls" / (record["request_hash"] + ".json")
+        ),
+    }
     return sealed_write(path, dict(key=key, **outcome))
 
 
@@ -448,8 +478,195 @@ def _batch_slots(reply):
     return body["alternatives"]
 
 
+def _initial_branches(root, plan, data, ask):
+    branches = []
+    for group in GROUPS:
+        system, packet = _packet(data, group)
+        if group != "fresh":
+            schema = (
+                FiveInsulinRepairs if group == "c15" else science.FiveGlucoseRepairs
+            )
+            reply, ordinal = ask(
+                group + "-five", 0, system + "\n" + FIVE, packet, schema
+            )
+            options = _batch_slots(reply)
+        for i, seed in enumerate(SEEDS):
+            if group == "fresh":
+                name, stage = f"fresh-{seed}", "topology"
+                reply, ordinal = ask(
+                    name + "-topology", seed, system, packet, science.Topology
+                )
+                raw = reply.get("value")
+            else:
+                name, stage, raw = f"{group}-{i}", "patch", options[i]
+            outcome = (
+                _assess(data, group, raw, stage)
+                if raw is not None
+                else {
+                    "status": "unavailable",
+                    "reason": reply.get(
+                        "error",
+                        reply["status"]
+                        if reply["status"] != "visible"
+                        else "invalid_five_alternative_envelope",
+                    ),
+                }
+            )
+            branch = {
+                "name": name,
+                "group": group,
+                "seed": seed,
+                "stage": stage,
+                "raw": raw,
+                "initial_sampling_seed": seed if group == "fresh" else 0,
+                "outcome": outcome,
+                "corrections": 0,
+                "duplicate_of": None,
+                "history": [_event(stage, 0, ordinal, outcome, raw)],
+            }
+            sealed_write(
+                root / "first" / (name + ".json"),
+                {
+                    "plan": plan["artifact_sha256"],
+                    **{
+                        k: branch[k]
+                        for k in (
+                            "name",
+                            "group",
+                            "seed",
+                            "stage",
+                            "raw",
+                            "initial_sampling_seed",
+                        )
+                    },
+                    "initial": outcome,
+                },
+            )
+            branches.append(branch)
+    return branches
+
+
+def _event(stage, depth, ordinal, outcome, raw):
+    return {
+        "stage": stage,
+        "depth": depth,
+        "through_call": ordinal,
+        "outcome": outcome["status"],
+        "diagnostic": outcome.get("diagnostic"),
+        "reply_sha256": content_hash(raw) if raw is not None else None,
+    }
+
+
+def _advance(data, branch, depth, attempted, ask):
+    """Spend one correction and supply laws when a new graph passes."""
+    name, group, seed = (branch[k] for k in ("name", "group", "seed"))
+    system, packet = _packet(data, group)
+    while not branch["duplicate_of"]:
+        old, previous = branch["outcome"], branch["raw"]
+        if old["status"] == "topology_ready":
+            branch["topology"] = old["topology"]
+            stage, schema = "laws", science.Laws
+            instruction, question = (
+                LAW_INSTRUCTION,
+                {**packet, "topology": branch["topology"]},
+            )
+        elif old["status"] == "rejected" and branch["corrections"] < depth:
+            if depth == 1 and group != "fresh":
+                signature = (group, content_hash(previous))
+                if signature in attempted:
+                    branch["duplicate_of"] = attempted[signature]
+                    break
+                attempted[signature] = name
+            branch["corrections"] += 1
+            question = {
+                **packet,
+                "previous_reply": previous,
+                "rejection": correction_feedback(old["diagnostic"]),
+                "instruction": "This branch failed admission. Correct the full patch.",
+            }
+            instruction = system
+            if group != "fresh":
+                stage = "patch_correction"
+                schema = (
+                    insulin.BoundaryRevision
+                    if group == "c15"
+                    else science.InScopeRevisionReply
+                )
+            elif branch["stage"] in {"topology", "topology_correction"}:
+                stage, schema = "topology_correction", science.Topology
+            else:
+                stage, schema = "complete_correction", science.FreshCorrection
+                question["previous_topology"] = branch["topology"]
+                instruction = (
+                    LAW_INSTRUCTION + " You may revise the topology and laws together."
+                )
+            if depth > 1:
+                question["correction_number"] = depth
+                question["earlier_failures"] = [
+                    {
+                        "stage": h["stage"],
+                        "depth": h["depth"],
+                        "reason": h["diagnostic"]["message"][:700],
+                        "same_reply_as_latest": h["reply_sha256"]
+                        == branch["history"][-1]["reply_sha256"],
+                    }
+                    for h in branch["history"][:-1]
+                    if h["diagnostic"]
+                ]
+                question["instruction"] += (
+                    " Keep useful edits. Address the latest rejection and its witness."
+                )
+        else:
+            break
+        slot = name + "-" + stage
+        if depth > 1 and stage.endswith("correction"):
+            slot += f"-{depth}"
+        reply, ordinal = ask(slot, seed, instruction, question, schema)
+        raw = reply.get("value")
+        outcome = (
+            _assess(
+                data,
+                group,
+                raw,
+                stage,
+                branch.get("topology") if stage == "laws" else None,
+            )
+            if reply["status"] == "visible"
+            else {
+                "status": "unavailable",
+                "reason": reply.get("error", reply["status"]),
+            }
+        )
+        if (
+            stage == "complete_correction"
+            and isinstance(raw, dict)
+            and isinstance(raw.get("topology"), dict)
+        ):
+            # The next whole-model repair refers to the topology actually proposed.
+            branch["topology"] = raw["topology"]
+        branch.update(stage=stage, raw=raw, outcome=outcome)
+        branch["history"].append(
+            _event(stage, branch["corrections"], ordinal, outcome, raw)
+        )
+
+
+def _result(branch, plan):
+    return {
+        "plan": plan["artifact_sha256"],
+        "name": branch["name"],
+        "group": branch["group"],
+        "initial_sampling_seed": branch["initial_sampling_seed"],
+        "correction_seed": branch["seed"],
+        "correction_duplicate_of": branch["duplicate_of"],
+        "correction_count": branch["corrections"],
+        "correction_used": bool(branch["corrections"]),
+        "history": branch["history"],
+        **branch["outcome"],
+    }
+
+
 def run(root: Path, endpoint: str, *, transport=None, token_transport=None):
-    """Visit all initial branches before corrections and resume from disk."""
+    """Visit all branches at one depth before starting the next."""
     from urllib.parse import urlsplit
 
     u = urlsplit(endpoint)
@@ -465,9 +682,12 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None):
         raise ValueError("An unauthenticated loopback vLLM endpoint is required")
     with _lock(root / "worker-lock"):
         plan, data = load(root)
+        prefix = history.snapshot(root)
+        ledger = []
+        ceiling = 27
 
         def ask(slot, seed, system, packet, schema):
-            return _ask(
+            reply = _ask(
                 root,
                 plan,
                 slot,
@@ -478,137 +698,67 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None):
                 endpoint,
                 transport,
                 token_transport,
+                prefix,
+                ceiling,
             )
-
-        branches = []
-        for group in GROUPS:
-            system, packet = _packet(data, group)
-            if group != "fresh":
-                batch_schema = (
-                    FiveInsulinRepairs if group == "c15" else science.FiveGlucoseRepairs
-                )
-                reply = ask(
-                    group + "-five", 0, system + "\n" + FIVE, packet, batch_schema
-                )
-                options = _batch_slots(reply)
-            for i, seed in enumerate(SEEDS):
-                name = f"{group}-{i}" if group != "fresh" else f"fresh-{seed}"
-                stage = "topology" if group == "fresh" else "patch"
-                if group == "fresh":
-                    reply = ask(
-                        name + "-topology", seed, system, packet, science.Topology
-                    )
-                    raw = reply.get("value")
-                else:
-                    raw = options[i]
-                outcome = (
-                    _assess(data, group, raw, stage)
-                    if raw is not None
-                    else {
-                        "status": "unavailable",
-                        "reason": reply.get(
-                            "error",
-                            reply["status"]
-                            if reply["status"] != "visible"
-                            else "invalid_five_alternative_envelope",
+            if "request_hash" in reply:
+                ledger.append(
+                    {
+                        "call": len(ledger) + 1,
+                        "slot": slot,
+                        "request_hash": reply["request_hash"],
+                        "source_plan": reply.get(
+                            "source_plan", plan["artifact_sha256"]
                         ),
                     }
                 )
-                branches.append(
-                    {
-                        "name": name,
-                        "group": group,
-                        "initial_sampling_seed": seed if group == "fresh" else 0,
-                        "seed": seed,
-                        "stage": stage,
-                        "raw": raw,
-                        "initial": outcome,
-                    }
-                )
-                sealed_write(
-                    root / "first" / (name + ".json"),
-                    dict(plan=plan["artifact_sha256"], **branches[-1]),
-                )
+            return reply, len(ledger)
 
+        branches = _initial_branches(root, plan, data, ask)
         attempted = {}
-        for branch in branches:
-            name, group, seed = (branch[k] for k in ("name", "group", "seed"))
-            system, packet = _packet(data, group)
-            stage, raw, outcome = (branch[k] for k in ("stage", "raw", "initial"))
-            history = []
-            duplicate_of = None
-            while True:
-                history.append(
-                    {
-                        "stage": stage,
-                        "outcome": outcome["status"],
-                        "diagnostic": outcome.get("diagnostic"),
-                    }
-                )
-                corrected = any(h["stage"].endswith("correction") for h in history)
-                if outcome["status"] == "topology_ready":
-                    topo = outcome["topology"]
-                    stage = "laws"
-                    schema = science.Laws
-                    question = {**packet, "topology": topo}
-                    instruction = LAW_INSTRUCTION
-                elif outcome["status"] == "rejected" and not corrected:
-                    if group != "fresh":
-                        signature = (group, content_hash(raw))
-                        if signature in attempted:
-                            duplicate_of = attempted[signature]
-                            break
-                        attempted[signature] = name
-                    question = {
-                        **packet,
-                        "previous_reply": raw,
-                        "rejection": correction_feedback(outcome["diagnostic"]),
-                        "instruction": (
-                            "This branch failed admission. Correct the full patch."
-                        ),
-                    }
-                    instruction = system
-                    if group != "fresh":
-                        stage = "patch_correction"
-                        schema = (
-                            insulin.BoundaryRevision
-                            if group == "c15"
-                            else science.InScopeRevisionReply
-                        )
-                    elif stage == "topology":
-                        stage, schema = "topology_correction", science.Topology
-                    else:
-                        stage, schema = "complete_correction", science.FreshCorrection
-                        question["previous_topology"] = topo
-                        instruction = (
-                            LAW_INSTRUCTION
-                            + " You may revise the topology and laws together."
-                        )
-                else:
-                    break
-                answer = ask(name + "-" + stage, seed, instruction, question, schema)
-                raw = answer.get("value")
-                outcome = (
-                    _assess(data, group, raw, stage, topo if stage == "laws" else None)
-                    if answer["status"] == "visible"
-                    else {
-                        "status": "unavailable",
-                        "reason": answer.get("error", answer["status"]),
-                    }
-                )
+        for depth in range(1, MAX_CORRECTIONS + 1):
+            ceiling = 27 + (depth - 1) * len(GROUPS) * len(SEEDS)
+            dest = root / "depths" / str(depth)
+            for branch in branches:
+                _advance(data, branch, depth, attempted, ask)
+                row = _result(branch, plan)
+                sealed_write(dest / (branch["name"] + ".json"), row)
+            if depth == 1:
+                used = {
+                    call["slot"]
+                    for call in ledger
+                    if call["source_plan"] == history.V1_PLAN
+                }
+                charged = {
+                    slot
+                    for slot, files in prefix["slots"].items()
+                    if any(f.startswith("calls/") for f in files)
+                }
+                if used != charged or len(ledger) > 27:
+                    raise ValueError(
+                        "Original calls differ from the one-correction checkpoint"
+                    )
+            rows = [_result(b, plan) for b in branches]
+            order = sealed_write(dest / "calls.json", {"calls": list(ledger)})
             sealed_write(
-                root / "results" / (name + ".json"),
-                dict(
-                    plan=plan["artifact_sha256"],
-                    name=name,
-                    group=group,
-                    initial_sampling_seed=branch["initial_sampling_seed"],
-                    correction_seed=seed,
-                    correction_duplicate_of=duplicate_of,
-                    correction_used=corrected,
-                    history=history,
-                    **outcome,
-                ),
+                dest / "summary.json",
+                {
+                    "depth": depth,
+                    "call_order_sha256": order["artifact_sha256"],
+                    "physical_requests": len(ledger),
+                    "eligible": sum(r["status"] == "eligible" for r in rows),
+                    "groups": {
+                        g: dict(Counter(r["status"] for r in rows if r["group"] == g))
+                        for g in GROUPS
+                    },
+                    "distinct_representatives": len(_balance_groups(rows)),
+                    "corrections_attempted": sum(r["correction_count"] for r in rows),
+                },
+            )
+        sealed_write(root / "call-order.json", {"calls": ledger})
+        for branch in branches:
+            sealed_write(
+                root / "results" / (branch["name"] + ".json"), _result(branch, plan)
             )
         return report(root)
 
@@ -645,10 +795,8 @@ def _rows(root: Path, plan: dict) -> list[dict]:
     return rows
 
 
-def report(root: Path) -> dict:
-    """Report every terminal branch and export distinct representatives."""
-    plan, inputs = load(root)
-    rows = _rows(root, plan)
+def _balance_groups(rows):
+    """Group equivalent admitted branches using the original sifting policy."""
     groups = []
     for row in rows:
         if row["status"] != "eligible":
@@ -674,10 +822,19 @@ def report(root: Path) -> dict:
     members_by_rep = {
         names[0]: names for _, names in sorted(groups, key=lambda g: g[1])
     }
+    return members_by_rep
+
+
+def report(root: Path) -> dict:
+    """Report terminal states, actual expenditures and each stopping point."""
+    plan, inputs = load(root)
+    rows = _rows(root, plan)
+    members_by_rep = _balance_groups(rows)
     representatives = list(members_by_rep)
     receipts = [
         json.loads(p.read_text())
-        for p in sorted((root / "steps").glob("*/calls/*.json"))
+        for base in (root / "legacy/steps", root / "steps")
+        for p in sorted(base.glob("*/calls/*.json"))
     ]
     if len(receipts) > MAX_CALLS:
         raise ValueError("Campaign physical request ceiling exceeded")
@@ -708,7 +865,20 @@ def report(root: Path) -> dict:
         "eligible_after_correction": sum(
             g["after_correction"] for g in yield_by_origin.values()
         ),
-        "corrections_attempted": sum(r["correction_used"] for r in rows),
+        "corrections_attempted": sum(r["correction_count"] for r in rows),
+        "inherited_physical_requests": len(
+            list((root / "legacy/steps").glob("*/calls/*.json"))
+        ),
+        "depth_progress": {
+            str(d): sum(
+                p.stem in {*history.BRANCHES, *history.FRESH}
+                for p in (root / "depths" / str(d)).glob("*.json")
+            )
+            for d in range(1, MAX_CORRECTIONS + 1)
+        },
+        "depth_comparison": [
+            sealed_read(p) for p in sorted((root / "depths").glob("*/summary.json"))
+        ],
         "physical_requests": len(receipts),
         "usage_missing": sum(r.get("observed_total_tokens") is None for r in receipts),
         "observed_tokens": sum(r.get("observed_total_tokens") or 0 for r in receipts),
@@ -718,6 +888,19 @@ def report(root: Path) -> dict:
         "optimizer_calls": 0,
         "test_data_opened": False,
     }
+    if len(rows) == 15:
+        # An early shallow finish leaves room for deeper calls in the first 27.
+        cutoff = min(27, len(receipts))
+        admitted = [
+            r
+            for r in rows
+            if r["status"] == "eligible" and r["history"][-1]["through_call"] <= cutoff
+        ]
+        summary["first_27_physical_calls"] = {
+            "through_call": cutoff,
+            "eligible": len(admitted),
+            "representatives": list(_balance_groups(admitted)),
+        }
     # Freeze representatives once every branch has a disposition.
     if len(rows) == 15:
         for name in representatives:
@@ -800,7 +983,8 @@ def preview(root: Path):
             "<h2>Fresh function construction</h2><pre>",
             html.escape(LAW_INSTRUCTION),
             "</pre><h2>Correction</h2>",
-            "<p>Each selected branch receives its previous reply and the "
+            "<p>Up to three corrections per branch, one round across all branches "
+            "at a time. Each receives its previous reply and the "
             "deterministic rejection. A fresh formula correction may also "
             "change the topology.</p>",
             _details("Example of a recorded rejection", data["last_failure"]),
@@ -856,6 +1040,10 @@ def inspect(root: Path):
                 "execution.json",
                 "PROMPTS.html",
                 "REPORT.html",
+                "legacy",
+                "depths",
+                "call-order.json",
+                "predecessor.json",
                 "first",
                 "results",
                 "steps",
@@ -884,6 +1072,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("action", choices=("prepare", "status", "preview", "run", "inspect"))
     p.add_argument("--source", type=Path)
+    p.add_argument("--previous", type=Path)
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--endpoint")
     p.add_argument("--runtime-record", type=Path)
@@ -895,7 +1084,7 @@ def main():
         p.error("run requires --endpoint and --runtime-record from the ACES worker")
     root = args.root.resolve()
     if args.action == "prepare":
-        result = prepare(root, args.source)
+        result = prepare(root, args.source, args.previous)
         preview(root)
     elif args.action == "run":
         from scripts.submit_t2_breadth import bind

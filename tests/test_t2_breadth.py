@@ -247,7 +247,7 @@ def test_budget_full_roster_fresh_independence_and_resume(experiment, monkeypatc
         if name.startswith("Five"):
             return reply({"alternatives": [{"incomplete_option": i} for i in range(5)]})
         if name in {"InScopeRevisionReply", "BoundaryRevision"}:
-            assert "rejection" in payload and payload["previous_reply"]
+            assert "rejection" in payload and "previous_reply" in payload
             return reply({})
         assert "current_model" not in payload
         assert (
@@ -259,9 +259,14 @@ def test_budget_full_roster_fresh_independence_and_resume(experiment, monkeypatc
         if name == "Laws":
             return reply({**laws, "latent_initials": []})
         if name == "FreshCorrection":
-            assert payload["previous_topology"] == science.Topology.model_validate(
-                topo
-            ).model_dump(mode="json")
+            assert science.Topology.model_validate(
+                payload["previous_topology"]
+            ) == science.Topology.model_validate(topo)
+            # The last round succeeds. This exercises all 57 physical slots.
+            if payload.get("correction_number", 1) < 3:
+                return reply(
+                    {"topology": topo, "laws": {**laws, "latent_initials": []}}
+                )
             return reply({"topology": topo, "laws": laws})
         raise AssertionError(name)
 
@@ -273,7 +278,7 @@ def test_budget_full_roster_fresh_independence_and_resume(experiment, monkeypatc
         "FiveGlucoseRepairs",
     ] + ["Topology"] * 5
     assert len({seed for _, seed in calls[2:7]}) == 5
-    assert len(calls) == summary["physical_requests"] == pilot.MAX_CALLS == 27
+    assert len(calls) == summary["physical_requests"] == pilot.MAX_CALLS == 57
     assert summary["groups"] == {
         "c15": {"rejected": 5},
         "c21": {"rejected": 5},
@@ -281,8 +286,11 @@ def test_budget_full_roster_fresh_independence_and_resume(experiment, monkeypatc
     }
     assert (
         summary["eligible_after_correction"] == 5
-        and summary["corrections_attempted"] == 15
+        and summary["corrections_attempted"] == 45
     )
+    assert [d["physical_requests"] for d in summary["depth_comparison"]] == [27, 42, 57]
+    assert [d["eligible"] for d in summary["depth_comparison"]] == [0, 0, 5]
+    assert summary["first_27_physical_calls"]["eligible"] == 0
     assert summary["representatives"] == ["fresh-100"]
     handoff = sealed_read(root / "handoff/fresh-100.json")
     assert handoff["problem"]["base_candidate"]["parent_candidate_id"] is None
@@ -312,10 +320,10 @@ def test_bad_topology_can_be_corrected_once_and_then_receive_formulas(experiment
                 if "rejection" in data
                 else {"components": [], "hypothesis": "Incomplete"}
             )
-        assert name == "Laws"
-        return reply(
-            {**laws, "parameters": []}
-        )  # No second correction, even at another stage.
+        if name == "Laws":
+            return reply({**laws, "parameters": []})
+        assert name == "FreshCorrection" and data["correction_number"] == 2
+        return reply({"topology": topo, "laws": laws})
 
     r = pilot.run(
         experiment, "http://127.0.0.1", transport=transport, token_transport=tokenizer
@@ -323,13 +331,15 @@ def test_bad_topology_can_be_corrected_once_and_then_receive_formulas(experiment
     assert r["groups"] == {
         "c15": {"unavailable": 5},
         "c21": {"unavailable": 5},
-        "fresh": {"rejected": 5},
+        "fresh": {"eligible": 5},
     }
-    assert r["physical_requests"] == 17
+    assert r["physical_requests"] == 22
+    assert [d["physical_requests"] for d in r["depth_comparison"]] == [17, 22, 22]
+    assert r["first_27_physical_calls"]["eligible"] == 5
     assert [
         h["stage"]
         for h in sealed_read(experiment / "results/fresh-104.json")["history"]
-    ] == ["topology", "topology_correction", "laws"]
+    ] == ["topology", "topology_correction", "laws", "complete_correction"]
 
 
 def test_scheduler_idempotency_and_resume(experiment, monkeypatch, tmp_path):
@@ -349,7 +359,7 @@ def test_scheduler_idempotency_and_resume(experiment, monkeypatch, tmp_path):
     first = aces.submit(root)
     assert (
         aces.submit(root) == first
-        and aces.verify(root, True)["maximum_generation_requests"] == 27
+        and aces.verify(root, True)["maximum_generation_requests"] == 57
     )
     monkeypatch.setattr(aces, "_finished", lambda job: False)
     assert aces.submit(root, resume=True) == first
@@ -375,9 +385,9 @@ def test_duplicate_sibling_and_provider_failure_remain_distinguishable(experimen
     result = pilot.run(
         experiment, "http://127.0.0.1", transport=transport, token_transport=tokenizer
     )
-    assert result["physical_requests"] == 8
+    assert result["physical_requests"] == 10
     assert result["unavailable_branches"] == 10
-    assert result["corrections_attempted"] == 1
+    assert result["corrections_attempted"] == 3
     assert (
         sealed_read(experiment / "results/c15-3.json")["correction_duplicate_of"]
         == "c15-0"
@@ -412,3 +422,26 @@ def test_interrupted_generation_spends_its_slot_and_other_branches_resume(experi
     assert summary["provider_outcomes"]["uncertain"] == 1
     assert summary["usage_missing"] == 7
     assert summary["unavailable_branches"] == 15
+
+
+def test_laws_can_follow_third_topology_correction(experiment):
+    topo, laws = proposal()
+
+    def transport(url, body, timeout):
+        schema = body["response_format"]["json_schema"]["name"]
+        packet = json.loads(body["messages"][1]["content"])
+        if schema.startswith("Five"):
+            return reply({"alternatives": []})
+        if schema == "Topology":
+            return reply(topo if packet.get("correction_number") == 3 else {})
+        assert schema == "Laws"
+        return reply(laws)
+
+    result = pilot.run(
+        experiment, "http://127.0.0.1", transport=transport, token_transport=tokenizer
+    )
+    assert [r["eligible"] for r in result["depth_comparison"]] == [0, 0, 5]
+    assert [r["physical_requests"] for r in result["depth_comparison"]] == [12, 17, 27]
+    assert result["first_27_physical_calls"]["eligible"] == 5
+    row = sealed_read(experiment / "results/fresh-104.json")
+    assert row["correction_count"] == 3 and row["history"][-1]["stage"] == "laws"

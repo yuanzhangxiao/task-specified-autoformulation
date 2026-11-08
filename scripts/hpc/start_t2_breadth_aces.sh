@@ -4,7 +4,8 @@ set -euo pipefail
 AF_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 export AF_REPO_ROOT
 AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
-export AF_OUTPUT_ROOT=${AF_T2_BREADTH_ROOT:-$AF_GROUP/phase-c-t2-breadth-results-v1}
+export AF_OUTPUT_ROOT=${AF_T2_DEPTH_ROOT:-$AF_GROUP/phase-c-t2-breadth-results-v2}
+AF_PREVIOUS=${AF_T2_BREADTH_PREVIOUS_ROOT:-${AF_T2_BREADTH_ROOT:-$AF_GROUP/phase-c-t2-breadth-results-v1}}
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
 export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1
 AF_CLI="$AF_REPO_ROOT/scripts/t2_breadth.py"
@@ -21,15 +22,18 @@ case "${1:-}" in
       export AF_HF_HOME="$AF_CACHE"
     fi
     export AF_HARMONY_ASSETS=${AF_HARMONY_ASSETS:-$AF_REPO_ROOT/assets/harmony}
-    "$AF_PYTHON" "$AF_CLI" prepare --root "$AF_OUTPUT_ROOT" --source "$AF_REPO_ROOT/inputs/intake.json" >/dev/null
+    "$AF_PYTHON" "$AF_CLI" prepare --root "$AF_OUTPUT_ROOT" --source "$AF_REPO_ROOT/inputs/intake.json" --previous "$AF_PREVIOUS" >/dev/null
     AF_ARGS=(--root "$AF_OUTPUT_ROOT")
     [[ "$1" != resume ]] || AF_ARGS+=(--resume)
     exec "$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_t2_breadth.py" "${AF_ARGS[@]}" ;;
   status|inspect|preview)
-    if [[ "$1" == preview && ! -f "$AF_OUTPUT_ROOT/plan.json" ]]; then
-      "$AF_PYTHON" "$AF_CLI" prepare --root "$AF_OUTPUT_ROOT" --source "$AF_REPO_ROOT/inputs/intake.json" >/dev/null
+    if [[ "$1" != inspect && ! -f "$AF_OUTPUT_ROOT/plan.json" ]]; then
+      "$AF_PYTHON" "$AF_CLI" prepare --root "$AF_OUTPUT_ROOT" --source "$AF_REPO_ROOT/inputs/intake.json" --previous "$AF_PREVIOUS" >/dev/null
     fi
-    if [[ "$1" == status ]] && command -v squeue >/dev/null; then squeue -u "$USER" -o '%.18i %.28j %.10T %R' || true; fi
+    if [[ "$1" == status ]]; then
+      if command -v squeue >/dev/null; then squeue -u "$USER" -o '%.18i %.28j %.10T %R' || true; fi
+      "$AF_PYTHON" "$AF_REPO_ROOT/scripts/submit_t2_breadth.py" --status --root "$AF_OUTPUT_ROOT"
+    fi
     exec "$AF_PYTHON" "$AF_CLI" "$1" --root "$AF_OUTPUT_ROOT" ;;
   *) echo 'Use run, resume, status, inspect or preview.' >&2; exit 2 ;;
 esac

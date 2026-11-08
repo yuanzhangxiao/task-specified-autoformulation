@@ -8,9 +8,13 @@ Generate fifteen alternatives with GPT-OSS-120B on the corrected public T2-easy 
 | Candidate 21 | One request requiring five independent patches | Orion’s verified training fit, fasting glucose with positive disposal, and the rising post-meal source. A parent-relative patch can change dynamics, processes and eligible initializers. |
 | Fresh T2-easy constructions | One independent topology per seed, 100 through 104 | Public task, corrected forcing, training observations and prefix policy. The proposer chooses differential states, algebraic quantities and their dependencies. Each accepted graph receives a separate call for complete functions and latent initialization. |
 
-The first seven requests cover all three origins before any correction. Each distinct, assessable rejected patch can receive one correction. An identical rejected sibling from the same parent shares the first opportunity. Each fresh seed has one correction across topology and functions combined. A rejected fresh function can be returned with a revised graph. A failed or truncated batch is recorded as unavailable. A response with five slots is assessed slot by slot. A formula request following an accepted topology is ordinary construction. The hard maximum is 27 generation requests across all allocations and resumes.
+The first seven requests cover the two fitted parents and five fresh topology seeds. The worker finishes the original one-correction workflow across all fifteen branches before spending a second correction on any branch. It completes that second pass before starting the third. Each assessable, unresolved branch may use up to three corrections across topology and functions combined. An identical rejected option from the same batch shares its sibling’s correction opportunity. An admitted branch stops. A corrected fresh topology still receives its first formula request, including when the third correction resolved its topology. Operational failures and truncated batches are recorded separately.
 
-The single correction is a budget choice for this pilot. In the October replay, 16 of 60 initial options passed, and 8 of 39 selected follow-ups passed. Those observations measure yield through one correction. A later depth experiment can start from the saved rejected branches and compare the extra yield from corrections two and three.
+The campaign-wide ceiling is 57 physical generation requests. This includes two five-option calls, five first topology calls, at most five first formula calls, and at most 45 corrections. Reused v1 requests and interrupted provider reservations count toward the same total. Commit `be80173` contains the one-correction implementation. Its saved outcomes remain in the original ACES result directory.
+
+## Comparing repair depths
+
+The inspection contains separate branch snapshots, chronological call lists, and summaries under `depths/1/`, `depths/2/`, and `depths/3/`. Each summary gives the cumulative physical requests, admitted branches by origin, and distinct representatives. `depths/1/summary.json` is the original stopping rule, which can finish before call 27. The final `summary.json` also reports which models were admitted within the first 27 physical calls, or all calls if fewer were needed. `call-order.json` identifies the source plan of each call.
 
 ## Admission and fitting handoff
 
@@ -22,18 +26,20 @@ The archive includes the complete models in `results/`, the representative packe
 
 ## ACES
 
-Upload `phase-c-t2-breadth-v1.tar.gz` to the group scratch directory. From the ACES login shell:
+Upload `phase-c-t2-breadth-v2.tar.gz` to the group scratch directory. From the ACES login shell:
 
 ```bash
-cd /scratch/group/p.nairr260351.000/u.yx126462 && tar -xzf phase-c-t2-breadth-v1.tar.gz && cd phase-c-t2-breadth-v1 && sha256sum --quiet -c SHA256SUMS && bash scripts/hpc/start_t2_breadth_aces.sh run
+cd /scratch/group/p.nairr260351.000/u.yx126462 && tar -xzf phase-c-t2-breadth-v2.tar.gz && cd phase-c-t2-breadth-v2 && sha256sum --quiet -c SHA256SUMS && bash scripts/hpc/start_t2_breadth_aces.sh run
 ```
 
-One allocation requests two H100s for at most two hours. A repeated `run` returns the existing submission. Use the following commands from any directory.
+One allocation requests two H100s for up to two hours. The v2 launcher reads the original `phase-c-t2-breadth-results-v1` root if it exists and publishes to `phase-c-t2-breadth-results-v2`. It checks ambiguous acknowledgments against the live queue and accounting, including submission time, owner, worker and campaign log paths. The Slurm singleton dependency uses the original job name and waits behind an earlier same-name job even if its ID was lost. An identified active predecessor also gets an explicit job dependency. [Slurm dependency semantics](https://slurm.schedmd.com/sbatch.html#OPT_dependency)
+
+At worker startup, v2 snapshots any original durable call records and verifies each reused prompt, response schema, seed and physical receipt against its slot. It completes missing slots with the v2 namespace. The original model outcomes and scheduler receipts are preserved. Repeating `run` reconciles or returns the existing v2 submission. If the scheduler explicitly rejects a v2 submission, its response is printed. After resolving that condition, `resume` can submit a new wave using the same plan and budget. Use the following commands from any directory.
 
 ```bash
-AF_LAUNCH=/scratch/group/p.nairr260351.000/u.yx126462/phase-c-t2-breadth-v1/scripts/hpc/start_t2_breadth_aces.sh
+AF_LAUNCH=/scratch/group/p.nairr260351.000/u.yx126462/phase-c-t2-breadth-v2/scripts/hpc/start_t2_breadth_aces.sh
 bash "$AF_LAUNCH" status
 bash "$AF_LAUNCH" inspect
 ```
 
-Download `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-t2-breadth-results-v1/inspection.tar.gz`. For a terminal allocation with unfinished branches, `bash "$AF_LAUNCH" resume` reuses the frozen plan, cached calls and original allowances. A request interrupted in flight counts against its slot. Inspect an ambiguous scheduler acknowledgement via `squeue`, `sacct` and the saved submission intent.
+Download `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-t2-breadth-results-v2/inspection.tar.gz`. For a terminal allocation with unfinished branches, `bash "$AF_LAUNCH" resume` reuses the frozen plan, cached calls and original allowances. A request interrupted in flight counts against its slot. Inspect an ambiguous scheduler acknowledgement via `squeue`, `sacct` and the saved submission intent.
