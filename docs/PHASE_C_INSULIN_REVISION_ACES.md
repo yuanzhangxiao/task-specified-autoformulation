@@ -2,6 +2,13 @@
 
 ## Revising the insulin balance at depletion
 
+ACES job 2314569 completed. The reply used Greek τ in two formula symbols
+whose declarations used the ASCII name tau. A spelling-only replay passed
+static checks and deferred the boundary assessment. A permitted parameter
+choice then produced negative insulin on the 150 g training schedule. The
+scientific repair and its numerical witnesses are in the
+[returned proposal audit](../work/agent-comms/2026-11-07-insulin-boundary-proposal-results.md).
+
 The 7 November run uses Orion’s primary concentration-constrained endpoint
 with training NMSE 0.165562. On the 150 g training trajectory, observed insulin
 is 22.62 pmol/L at minute 300. The matched unconstrained fit gives −31.75.

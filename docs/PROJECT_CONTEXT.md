@@ -3,9 +3,10 @@
 ## Insulin revision at zero concentration
 
 The constrained fit reaches the end of the 150 g training trajectory at zero
-insulin with an outward rate of −0.802 pmol/L/min. The next one-call revision
-uses the fitted balance and the measured ten-minute meal response to guide
-construction. [Evidence and ACES commands](PHASE_C_INSULIN_REVISION_ACES.md#revising-the-insulin-balance-at-depletion)
+insulin with an outward rate of −0.802 pmol/L/min. The one-call ACES revision
+added an absolute-time pulse to an integrated latent state. A spelling-only
+replay exposed the remaining timing and sign problems, including a verified
+negative-insulin counterexample. [Returned equations and repair feedback](../work/agent-comms/2026-11-07-insulin-boundary-proposal-results.md)
 
 ## Insulin continuation and explicit concentration control
 
