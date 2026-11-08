@@ -2,6 +2,13 @@
 
 ## Repair using the deterministic feedback
 
+ACES job 2315743 completed this request. The returned basal-secretion edit
+referenced `direct_ingestion`, which existed only in the previous draft,
+and did not declare it. No child was admitted for fitting. The result
+review includes the exact rejection, the signed boundary equation and
+training replays under two explicit interpretations.
+[Basal repair results](../work/agent-comms/2026-11-08-insulin-basal-repair-results.md)
+
 One GPT-OSS-120B call receives the primary constrained fit, the earlier
 unfitted patch, its resolved parameter spellings and the deterministic feedback
 from the public training evidence. The request includes the three 90 g meal

@@ -66,8 +66,9 @@ $$
 | One-coefficient numerical control | Frees the direct meal coefficient $c_I$. Joint training gives $c_I=3.11416$ with $\kappa=0$. | 0.261011 |
 | GPT-OSS-120B signed-action revision | Adds $\kappa X$ to insulin production. The primary free fit and concentration-constrained fit use the same equations. | 0.161635 free, 0.165562 constrained |
 | GPT-OSS-120B depletion revision | Rectifies net production and insulin, retains direct meal forcing and integrates a clock pulse in a new state $D$. | Unfitted |
+| GPT-OSS-120B basal revision | Adds $B\ge0$, returns to signed production and uses $D$ without declaring it against the fitted parent. | Rejected, unfitted |
 
-The last proposed balance, inspected on a copy with two parameter names spelled as declared, is
+The clock proposal, inspected on a copy with two parameter names spelled as declared, is
 
 $$
 \begin{aligned}
@@ -79,6 +80,11 @@ $$
 $$
 
 Here $\sigma$ is logistic, $g_2=g_7=1$ at the inherited values, and $e_t$ denotes a clock time. The derivative of $D$ is the same function of absolute time across schedules at fixed shared parameters. The raw reply remains rejected for undeclared Greek parameter identifiers. [Construction record](../work/agent-comms/2026-11-07-insulin-boundary-proposal-results.md)
+
+The subsequent basal proposal returned $\dot I=c_Ir+P+B-g_2I+J+D$ with empty
+new-state and new-process declarations. At the recorded depleted state this
+would give $\dot I=B+D-0.801736$ pmol/L/min. The proposer supplied no equation
+for $D$ in the new patch. [Basal repair results](../work/agent-comms/2026-11-08-insulin-basal-repair-results.md)
 
 ## The trajectories that crossed zero
 

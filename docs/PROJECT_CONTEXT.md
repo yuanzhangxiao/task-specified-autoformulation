@@ -1,9 +1,12 @@
 # Autoformalism Phase 1 Implementation Context
 
-The next Candidate 15 repair gives GPT-OSS-120B the public training witnesses,
-the previous clock patch and its fixed-parameter counterexample. The new run
-records identifier spelling repairs and evaluates a replacement against the
-fitted parent. [ACES launch and inspection](PHASE_C_INSULIN_REVISION_ACES.md#repair-using-the-deterministic-feedback)
+Candidate 15's 120B repair added a nonnegative basal secretion coefficient
+and referenced an undeclared state from the rejected clock draft. The run
+produced no fitting candidate. With that state omitted and the basal rate
+fixed at 1.5, all 16 training trajectories stay nonnegative on the sampled
+grid, but the three shifted meal peaks occur 95 minutes early. Restoring
+the old clock at its witnessed settings gives negative insulin on all 16.
+[Equation audit and next repair feedback](../work/agent-comms/2026-11-08-insulin-basal-repair-results.md)
 
 ## Insulin revision at zero concentration
 
