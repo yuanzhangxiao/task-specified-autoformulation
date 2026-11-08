@@ -100,7 +100,9 @@ def _assets() -> tuple[Path, dict]:
     return image, snapshot_identity(Path(os.environ["AF_HF_HOME"]), "120b")
 
 
-def execution_identity(plan: dict, image_sha256: str, snapshot: dict) -> dict:
+def execution_identity(
+    plan: dict, image_sha256: str, snapshot: dict, *, entrypoints=ENTRYPOINTS
+) -> dict:
     """Bind the request to pinned serving assets, launcher code and resources."""
     model = MODELS["120b"]
     return {
@@ -115,7 +117,7 @@ def execution_identity(plan: dict, image_sha256: str, snapshot: dict) -> dict:
         "harmony_vocabulary": harmony_vocab.verify(
             Path(os.environ.get("AF_HARMONY_ASSETS", REPO / "assets/harmony"))
         ),
-        "entrypoint_sha256": {name: file_hash(REPO / name) for name in ENTRYPOINTS},
+        "entrypoint_sha256": {name: file_hash(REPO / name) for name in entrypoints},
         "served_context_tokens": 32768,
         "maximum_output_tokens": 4096,
         "tensor_parallel_size": 2,
@@ -154,6 +156,13 @@ def verify(root: Path, *, check_assets: bool = False) -> tuple[dict, dict]:
 
 def bind_server(root: Path, runtime_record: Path, endpoint: str) -> dict:
     """Freeze the observed pinned runtime before the sole physical request."""
+    _, execution = verify(root)
+    record = checked_server(execution, runtime_record, endpoint)
+    return _seal(root / "serving_runtime.json", record)
+
+
+def checked_server(execution: dict, runtime_record: Path, endpoint: str) -> dict:
+    """Validate the observed two-H100 runtime against a sealed execution."""
     parsed = urlsplit(endpoint)
     if (
         parsed.scheme != "http"
@@ -164,7 +173,6 @@ def bind_server(root: Path, runtime_record: Path, endpoint: str) -> dict:
         or parsed.fragment
     ):
         raise ValueError("server requires an unauthenticated loopback HTTP endpoint")
-    _, execution = verify(root)
     runtime = _read(runtime_record)
     keys = (
         "artifact_sha256",
@@ -221,10 +229,7 @@ def bind_server(root: Path, runtime_record: Path, endpoint: str) -> dict:
         or served[0].get("max_model_len") != execution["served_context_tokens"]
     ):
         raise ValueError("actual local model alias or context differs")
-    return _seal(
-        root / "serving_runtime.json",
-        {key: value for key, value in runtime.items() if key != "artifact_sha256"},
-    )
+    return {key: value for key, value in runtime.items() if key != "artifact_sha256"}
 
 
 def submit(root: Path) -> dict:

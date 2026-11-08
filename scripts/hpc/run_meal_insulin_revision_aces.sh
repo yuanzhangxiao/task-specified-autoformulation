@@ -9,6 +9,13 @@ set -euo pipefail
 export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0
 AF_CLI="$AF_REPO_ROOT/scripts/propose_meal_insulin_revision.py"
 AF_SUBMIT="$AF_REPO_ROOT/scripts/submit_meal_insulin_revision_aces.py"
+case "${1:-insulin}" in
+  insulin) ;;
+  t2-breadth)
+    AF_CLI="$AF_REPO_ROOT/scripts/t2_breadth.py"
+    AF_SUBMIT="$AF_REPO_ROOT/scripts/submit_t2_breadth.py" ;;
+  *) echo 'Unknown construction worker.' >&2; exit 2 ;;
+esac
 if ! "$AF_PYTHON" "$AF_CLI" --help >/dev/null 2>&1; then
   echo 'Loading scientific Python and its compiler/library hierarchy.' >&2
   module load "${AF_GCCCORE_MODULE:-GCCcore/13.2.0}" "${AF_PYTHON_MODULE:-Python/3.11.5}"

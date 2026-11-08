@@ -1,5 +1,7 @@
 # Autoformalism Phase 1 Implementation Context
 
+The T2-easy breadth pilot opens five alternatives from the fitted Candidate 15 descendant, five from Candidate 21 and five independent constructions from public evidence. The inspection retains initial and corrected outcomes, distinct fitted-parent references and an Orion qualification roster. [Protocol and ACES commands](PHASE_C_T2_BREADTH.md)
+
 Candidate 15's 120B repair added a nonnegative basal secretion coefficient
 and referenced an undeclared state from the rejected clock draft. The run
 produced no fitting candidate. With that state omitted and the basal rate
