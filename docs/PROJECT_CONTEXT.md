@@ -1,5 +1,10 @@
 # Autoformalism Phase 1 Implementation Context
 
+All five T2 breadth descendants have verified training fits. The meal-memory
+child reaches pooled NMSE 0.11673. The saturating glucose-response child
+reaches 0.12941 and comes closest to the observed shifted-meal insulin peak
+times. Both use fitted training initial values. [Fitted models and construction feedback](../work/agent-comms/2026-11-08-t2-breadth-fitting-results.md)
+
 The T2 breadth run allows three corrections per unresolved branch, with a combined ceiling of 57 generation requests. Its archive records the one-correction stopping point and the distinct models recovered at each additional depth. [Protocol and ACES commands](PHASE_C_T2_BREADTH.md)
 
 Candidate 15's 120B repair added a nonnegative basal secretion coefficient

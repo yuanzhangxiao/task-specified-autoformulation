@@ -26,6 +26,51 @@ The archive includes the complete models in `results/`, the representative packe
 
 The completed run produced five distinct fitting packets in 39 calls. The equation audit and two-solver training replay identify `c15-4` as the first refit to prioritize. [Results and fitting handoff for Orion](../work/agent-comms/2026-11-08-t2-breadth-results-and-fitting-handoff.md)
 
+## Fitting the five admitted equations
+
+The November 8 fitting campaign uses the 16 public T2-easy training trajectories. It includes all five returned equations and a sixth task with the basal amplitude in `c15-4` fixed to zero. This control recovers Candidate 15's parent dynamics. Each task starts by reproducing Astra's per-target and pooled scores with the supplied shared coefficients and 32 training initial values. The 8-minute observation prefix applies to a future forecast evaluation.
+
+The fitter searches original or algebraically reduced coordinates and returns all coefficients and initial values in the original names. It uses exact affine propagation and a conditional initial-value start for `c15-3` and `c21-2`. Nonlinear trials integrate the supplied continuous-time equations with eight RK4 substeps per minute. Smooth equations use bounded least squares. The clipped `c15-0` uses a bounded, derivative-free Powell search. Public training scales determine the additional starts, including the glucose threshold and slope of the sigmoid.
+
+Each task reserves up to 1,000 whole-training evaluations and 900 numerical seconds for each of two stages. The first minimizes the mean of the three variance-normalized target errors. The second adds a penalty for negative predicted concentrations or disposal rates. Retention uses the unpenalized pooled error and saves both the lowest-error endpoint and the lowest-error endpoint passing the sampled domain check. Two adaptive solvers, Radau and DOP853, must agree on the original equations at every observation. Each input corner splits the integration interval. For the clipped law the original-equation replay additionally uses a two-minute internal step cap and tighter tolerances.
+
+The domain check samples all three targets at 0.125-minute spacing, accepting numerical undershoot of up to `1e-8` times that target's pooled training standard deviation. Peak times, rates at zero insulin, and a 30-minute zero-input extension from the 150 g meal are reported separately. Training ends at minute 300.
+
+### Reproducing the fits on Delta
+
+The verified local results and fitted models are available in the [numerical handoff](../work/agent-comms/2026-11-08-t2-breadth-fitting-results.md). For an independent Delta run, upload the bundle from your local terminal.
+
+```bash
+scp "$HOME/Projects/autoformalism/output/t2-breadth-fitting-20261108/t2-breadth-fitting-bundle.tar.gz" \
+  yxiao2@login.delta.ncsa.illinois.edu:/projects/bibo/yxiao2/
+```
+
+On Delta, unpack the code and construction handoff into one checkout. Retain the checkout until the workers and report finish.
+
+```bash
+AF_REPO=$(mktemp -d /projects/bibo/yxiao2/repos/t2-breadth-fitting.XXXXXX)
+tar -xzf /projects/bibo/yxiao2/t2-breadth-fitting-bundle.tar.gz -C "$AF_REPO"
+(cd "$AF_REPO" && sha256sum --quiet -c SHA256SUMS && bash scripts/hpc/start_t2_breadth_fitting_delta.sh run)
+```
+
+This submits a six-element CPU array with concurrency two and a dependent report. In any subsequent Delta login, recover the original checkout and export the fitted coefficients from the completed run.
+
+```bash
+export AF_T2_BREADTH_FIT_ROOT=/work/hdd/bibo/yxiao2/phase_c/t2-breadth-fitting-v1
+AF_REPO=$(jq -er '.value.repo' "$AF_T2_BREADTH_FIT_ROOT/launcher_execution.json")
+AF_LAUNCHER="$AF_REPO/scripts/hpc/start_t2_breadth_fitting_delta.sh"
+bash "$AF_LAUNCHER" status
+bash "$AF_LAUNCHER" export
+bash "$AF_LAUNCHER" inspect
+```
+
+From your local terminal, retrieve the portable inspection. It contains the plan, authenticated input models, training observations, search checkpoints and full verification records.
+
+```bash
+scp yxiao2@login.delta.ncsa.illinois.edu:/work/hdd/bibo/yxiao2/phase_c/t2-breadth-fitting-v1/inspection.tar.gz \
+  "$HOME/Downloads/t2-breadth-fitting-inspection.tar.gz"
+```
+
 ## ACES
 
 Upload `phase-c-t2-breadth-v2.tar.gz` to the group scratch directory. From the ACES login shell:
