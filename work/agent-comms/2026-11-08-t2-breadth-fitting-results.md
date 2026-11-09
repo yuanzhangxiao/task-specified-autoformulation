@@ -20,6 +20,9 @@ The evidence supports a local plateau in training error for the two leaders. Bef
 
 ## Matched training fits
 
+The subsequent four independent starts reproduced both trajectory discrepancies.
+[November 9 fit results and construction feedback](2026-11-09-t2-independent-start-fits.md)
+
 All rows use the 16 corrected public T2-easy trajectories, the same pooled target scales and the same maximum search allowance. The zero-basal control shares the Candidate 15 parent equations. The fitted vectors use the original shared coefficient names and two hidden initial values per training trajectory.
 
 | Model | Supplied start | Lowest pooled NMSE | Lowest NMSE passing the sampled domain check | Per-target NMSE at that fit, Gp / I / U | Per-trajectory median [MAD] at that fit |
