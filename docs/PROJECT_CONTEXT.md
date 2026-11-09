@@ -1,5 +1,10 @@
 # Autoformalism Phase 1 Implementation Context
 
+The two-parent T2-easy construction run asks the 120B proposer for five independent
+patches to each fitted model. The meal-memory branch targets early insulin peaks
+on shifted meals. The glucose-sigmoid branch targets excessive late insulin after
+the 150 g meal. [Public training evidence and ACES commands](PHASE_C_T2_BREADTH.md#five-revisions-per-fitted-parent)
+
 All five T2 breadth descendants have verified training fits. The meal-memory
 child reaches pooled NMSE 0.11673. The saturating glucose-response child
 reaches 0.12941 and comes closest to the observed shifted-meal insulin peak

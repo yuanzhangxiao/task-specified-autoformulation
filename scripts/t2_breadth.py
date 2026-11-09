@@ -1,4 +1,4 @@
-"""Generate and sift five alternatives from each of three T2-easy starting points."""
+"""Generate and check five alternatives per enrolled T2-easy construction parent."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from autoformalism.llm.staged_topology import (
 )
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
+from autoformalism.research import revision_spelling
 from autoformalism.research import t2_breadth as science
 from autoformalism.research.construction_revision_edits import (
     RevisionValidationError,
@@ -29,6 +30,7 @@ from autoformalism.research.construction_revision_edits import (
 )
 from autoformalism.research.construction_structural_feedback import consistency_view
 from autoformalism.research.construction_structural_revision import (
+    _StructuralRevisionFields,
     apply_structural_revision,
 )
 from autoformalism.schemas.base import StrictSchema
@@ -38,6 +40,7 @@ from autoformalism.staged_topology import content_hash
 from scripts import propose_meal_insulin_revision as insulin
 from scripts import structural_revision_campaign as structural
 from scripts import t2_breadth_history as history
+from scripts import t2_fitted_targets as fitted
 from scripts.construction_functions import file_hash
 
 REPO = Path(__file__).resolve().parents[1]
@@ -58,6 +61,7 @@ SETTINGS = StagedModelSettings(
 )
 ENTRYPOINTS = (
     "scripts/t2_breadth.py",
+    "scripts/t2_fitted_targets.py",
     "scripts/t2_breadth_history.py",
     "scripts/t2_breadth_scheduler.py",
     "scripts/submit_t2_breadth.py",
@@ -96,29 +100,56 @@ class FiveInsulinRepairs(StrictSchema):
 
 
 def _plan(inputs: dict) -> dict:
-    if inputs["artifact_sha256"] != INTAKE:
+    fitted_run = inputs.get("protocol") == fitted.INPUT_PROTOCOL
+    intake = fitted.INTAKE if fitted_run else INTAKE
+    if inputs["artifact_sha256"] != intake:
         raise ValueError("Expected reviewed T2 training intake and both fitted parents")
-    return {
-        "protocol": PROTOCOL,
-        "intake_sha256": INTAKE,
-        "groups": list(GROUPS),
+    files = (
+        (*ENTRYPOINTS, "scripts/hpc/start_t2_fitted_aces.sh")
+        if fitted_run
+        else ENTRYPOINTS
+    )
+    plan = {
+        "protocol": fitted.PROTOCOL if fitted_run else PROTOCOL,
+        "intake_sha256": intake,
+        "groups": list(fitted.GROUPS if fitted_run else GROUPS),
         "alternatives_per_group": 5,
-        "fresh_topology_seeds": list(SEEDS),
+        "fresh_topology_seeds": [] if fitted_run else list(SEEDS),
         "maximum_corrections_per_branch": MAX_CORRECTIONS,
-        "maximum_generation_requests": MAX_CALLS,
+        "maximum_generation_requests": (
+            len(fitted.GROUPS) * (1 + 5 * MAX_CORRECTIONS) if fitted_run else MAX_CALLS
+        ),
         "settings": SETTINGS.model_dump(mode="json"),
         "runtime_source": runtime_source_hash(),
-        "entrypoints": {k: file_hash(REPO / k) for k in ENTRYPOINTS},
+        "entrypoints": {k: file_hash(REPO / k) for k in files},
         "optimizer_calls": 0,
         "test_data_opened": False,
     }
+    if fitted_run:
+        plan["objectives"] = fitted.OBJECTIVES
+        plan["fitted_parents"] = {
+            g: inputs[g]["parent_reference"] for g in fitted.GROUPS
+        }
+    return plan
 
 
-def prepare(root: Path, source: Path, previous: Path | None = None) -> dict:
+def prepare(
+    root: Path,
+    source: Path,
+    previous: Path | None = None,
+    *,
+    expected_protocol: str | None = None,
+) -> dict:
     inputs = sealed_read(source)
     plan = _plan(inputs)
+    if expected_protocol and plan["protocol"] != expected_protocol:
+        raise ValueError("The supplied intake belongs to a different T2 campaign")
     with _lock(root / "prepare-lock"):
-        history.bind_source(root, previous, INTAKE)
+        if plan["protocol"] == fitted.PROTOCOL and previous is not None:
+            raise ValueError(
+                "The fitted residual campaign has its own generation slots"
+            )
+        history.bind_source(root, previous, plan["intake_sha256"])
         sealed_write(
             root / "inputs.json",
             {k: v for k, v in inputs.items() if k != "artifact_sha256"},
@@ -137,6 +168,8 @@ def load(root: Path):
 
 
 def _packet(data: dict, group: str) -> tuple[str, dict]:
+    if group in fitted.GROUPS:
+        return fitted.packet(data, group)
     brief = data["brief"]
     fasting = next(
         r for r in data["training"]["rows"] if r["trajectory_id"] == "train_000"
@@ -258,11 +291,24 @@ def _problem_outcome(data, group, patch, topology=None):
                 for k in ("audit", "training_consistency", "insulin_boundary_check")
             }
         else:
-            edit = science.InScopeRevisionReply.model_validate(patch)
+            # The structural editor validates raw fields after unambiguous
+            # declaration/spelling normalization. A fitted alternative must revise.
+            if group in fitted.GROUPS:
+                if not isinstance(patch, dict) or patch.get("decision") != "revise":
+                    raise ValueError(
+                        "Each alternative must propose a complete revision"
+                    )
+                edit, spellings = revision_spelling.normalize(
+                    inherited, patch, _StructuralRevisionFields
+                )
+                evidence_ids = list(data[group]["witnesses"])
+            else:
+                edit = science.InScopeRevisionReply.model_validate(patch)
+                evidence_ids = EVIDENCE_IDS
             applied = apply_structural_revision(
                 inherited,
                 edit,
-                evidence_ids=EVIDENCE_IDS,
+                evidence_ids=evidence_ids,
                 brief=brief,
                 scientific_aliases=aliases,
                 normalize_parent_declarations=True,
@@ -270,6 +316,9 @@ def _problem_outcome(data, group, patch, topology=None):
             if applied["status"] != "revised":
                 raise ValueError("No change to the fitted parent")
             problem, audit = applied["problem"], {"audit": applied["audit"]}
+            if group in fitted.GROUPS:
+                audit["identifier_spellings"] = spellings
+                fitted.check_meal_edit(inherited, problem)
     paths = science.check_paths(problem, brief, aliases)
     compiled, _ = science._validate_problem(problem)
     prefix = data["fitting_contract"]["prefix_policy"]
@@ -278,6 +327,9 @@ def _problem_outcome(data, group, patch, topology=None):
         | set(prefix.get("future_auxiliaries", ()))
         | set(problem.context.fixed_covariates)
     )
+    if group in fitted.GROUPS:
+        # The qualified T2 fitter runs autonomous rollouts with external inputs.
+        permitted = set(prefix["future_inputs"])
     forcing = set(compiled.validated.forcing_symbols)
     if forbidden := forcing - permitted:
         raise ValueError(
@@ -305,8 +357,8 @@ def _problem_outcome(data, group, patch, topology=None):
                 "Public training witness contradicts the model",
                 assessment=audit["training_consistency"],
             )
-    # Use the same name anchors in the offline comparison for all 15 branches.
-    # The fresh prompt never receives this comparison model.
+    # A fitted alternative is compared to its own parent. The original pilot
+    # uses one common set of name anchors, including for its fresh models.
     return {
         "status": "eligible",
         "problem": problem.model_dump(mode="json"),
@@ -314,7 +366,9 @@ def _problem_outcome(data, group, patch, topology=None):
         "public_paths": paths,
         "glucose_balance": balance,
         "balances": science.balance_view(problem),
-        "family": science.alternative_identity(data["c15"]["problem"], problem),
+        "family": science.alternative_identity(
+            data[group if group in fitted.GROUPS else "c15"]["problem"], problem
+        ),
         "modeled_auxiliaries": {
             k: v for k, v in aliases.items() if k in problem.context.auxiliaries
         },
@@ -350,7 +404,7 @@ def correction_feedback(diagnostic: dict) -> dict:
     }
 
 
-def _assess(data, group, raw, stage, topo=None):
+def _assess(data, group, raw, stage, topo=None, *, name=None, admitted=None):
     try:
         if stage in {"topology", "topology_correction"}:
             topo = science.Topology.model_validate(raw)
@@ -369,12 +423,15 @@ def _assess(data, group, raw, stage, topo=None):
                 revision.topology.model_dump(mode="json"),
                 revision.laws.model_dump(mode="json"),
             )
-        return _problem_outcome(
+        outcome = _problem_outcome(
             data,
             group,
             raw,
             science.Topology.model_validate(topo) if topo is not None else None,
         )
+        if group in fitted.GROUPS and admitted is not None:
+            fitted.claim_alternative(name, outcome, admitted[group])
+        return outcome
     except (ValueError, ModelValidationError) as exc:
         return {"status": "rejected", "diagnostic": _feedback(exc)}
 
@@ -478,16 +535,24 @@ def _batch_slots(reply):
     return body["alternatives"]
 
 
-def _initial_branches(root, plan, data, ask):
+def _batch_schema(group):
+    if group in fitted.GROUPS:
+        return fitted.FiveFittedAlternatives
+    return FiveInsulinRepairs if group == "c15" else science.FiveGlucoseRepairs
+
+
+def _batch_system(group, system):
+    return system + "\n" + (fitted.FIVE if group in fitted.GROUPS else FIVE)
+
+
+def _initial_branches(root, plan, data, ask, admitted):
     branches = []
-    for group in GROUPS:
+    for group in plan["groups"]:
         system, packet = _packet(data, group)
         if group != "fresh":
-            schema = (
-                FiveInsulinRepairs if group == "c15" else science.FiveGlucoseRepairs
-            )
+            schema = _batch_schema(group)
             reply, ordinal = ask(
-                group + "-five", 0, system + "\n" + FIVE, packet, schema
+                group + "-five", 0, _batch_system(group, system), packet, schema
             )
             options = _batch_slots(reply)
         for i, seed in enumerate(SEEDS):
@@ -500,7 +565,7 @@ def _initial_branches(root, plan, data, ask):
             else:
                 name, stage, raw = f"{group}-{i}", "patch", options[i]
             outcome = (
-                _assess(data, group, raw, stage)
+                _assess(data, group, raw, stage, name=name, admitted=admitted)
                 if raw is not None
                 else {
                     "status": "unavailable",
@@ -512,6 +577,19 @@ def _initial_branches(root, plan, data, ask):
                     ),
                 }
             )
+            if (
+                group in fitted.GROUPS
+                and raw is None
+                and reply["status"] in {"visible", "incomplete_reply"}
+            ):
+                # A completed, unusable batch can recover its slots individually.
+                # An uncertain/inflight physical request stays terminal.
+                outcome["diagnostic"] = {
+                    "code": "MISSING_BATCH_OPTION",
+                    "message": "The batch supplied no usable five-option list. "
+                    "Return one independent complete patch for this slot.",
+                    "details": {"batch_outcome": outcome["reason"]},
+                }
             branch = {
                 "name": name,
                 "group": group,
@@ -557,7 +635,7 @@ def _event(stage, depth, ordinal, outcome, raw):
     }
 
 
-def _advance(data, branch, depth, attempted, ask):
+def _advance(data, branch, depth, attempted, ask, admitted):
     """Spend one correction and supply laws when a new graph passes."""
     name, group, seed = (branch[k] for k in ("name", "group", "seed"))
     system, packet = _packet(data, group)
@@ -570,8 +648,11 @@ def _advance(data, branch, depth, attempted, ask):
                 LAW_INSTRUCTION,
                 {**packet, "topology": branch["topology"]},
             )
-        elif old["status"] == "rejected" and branch["corrections"] < depth:
-            if depth == 1 and group != "fresh":
+        elif (
+            old["status"] == "rejected"
+            or (old.get("diagnostic") or {}).get("code") == "MISSING_BATCH_OPTION"
+        ) and branch["corrections"] < depth:
+            if depth == 1 and group in ("c15", "c21"):
                 signature = (group, content_hash(previous))
                 if signature in attempted:
                     branch["duplicate_of"] = attempted[signature]
@@ -584,6 +665,16 @@ def _advance(data, branch, depth, attempted, ask):
                 "rejection": correction_feedback(old["diagnostic"]),
                 "instruction": "This branch failed admission. Correct the full patch.",
             }
+            if group in fitted.GROUPS:
+                question["accepted_siblings"] = [
+                    {"branch": sibling, "hypothesis": hypothesis[:320]}
+                    for sibling, hypothesis in dict.fromkeys(admitted[group].values())
+                ]
+                question["instruction"] = (
+                    "Return one complete parent-relative patch for this slot. Address "
+                    "the diagnostic and keep useful edits. Choose a change distinct "
+                    "from the accepted siblings."
+                )
             instruction = system
             if group != "fresh":
                 stage = "patch_correction"
@@ -613,9 +704,11 @@ def _advance(data, branch, depth, attempted, ask):
                     for h in branch["history"][:-1]
                     if h["diagnostic"]
                 ]
-                question["instruction"] += (
-                    " Keep useful edits. Address the latest rejection and its witness."
-                )
+                if group not in fitted.GROUPS:
+                    question["instruction"] += (
+                        " Keep useful edits. Address the latest rejection "
+                        "and its witness."
+                    )
         else:
             break
         slot = name + "-" + stage
@@ -630,6 +723,8 @@ def _advance(data, branch, depth, attempted, ask):
                 raw,
                 stage,
                 branch.get("topology") if stage == "laws" else None,
+                name=name,
+                admitted=admitted,
             )
             if reply["status"] == "visible"
             else {
@@ -684,7 +779,11 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None):
         plan, data = load(root)
         prefix = history.snapshot(root)
         ledger = []
-        ceiling = 27
+        branch_count = len(plan["groups"]) * plan["alternatives_per_group"]
+        shallow = (
+            plan["maximum_generation_requests"] - (MAX_CORRECTIONS - 1) * branch_count
+        )
+        ceiling = shallow
 
         def ask(slot, seed, system, packet, schema):
             reply = _ask(
@@ -714,16 +813,17 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None):
                 )
             return reply, len(ledger)
 
-        branches = _initial_branches(root, plan, data, ask)
+        admitted = {group: {} for group in plan["groups"]}
+        branches = _initial_branches(root, plan, data, ask, admitted)
         attempted = {}
         for depth in range(1, MAX_CORRECTIONS + 1):
-            ceiling = 27 + (depth - 1) * len(GROUPS) * len(SEEDS)
+            ceiling = shallow + (depth - 1) * branch_count
             dest = root / "depths" / str(depth)
             for branch in branches:
-                _advance(data, branch, depth, attempted, ask)
+                _advance(data, branch, depth, attempted, ask, admitted)
                 row = _result(branch, plan)
                 sealed_write(dest / (branch["name"] + ".json"), row)
-            if depth == 1:
+            if depth == 1 and plan["protocol"] == PROTOCOL:
                 used = {
                     call["slot"]
                     for call in ledger
@@ -749,9 +849,9 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None):
                     "eligible": sum(r["status"] == "eligible" for r in rows),
                     "groups": {
                         g: dict(Counter(r["status"] for r in rows if r["group"] == g))
-                        for g in GROUPS
+                        for g in plan["groups"]
                     },
-                    "distinct_representatives": len(_balance_groups(rows)),
+                    "distinct_representatives": len(_representatives(rows, plan)),
                     "corrections_attempted": sum(r["correction_count"] for r in rows),
                 },
             )
@@ -780,12 +880,21 @@ LAW_INSTRUCTION = (
 )
 
 
-def _rows(root: Path, plan: dict) -> list[dict]:
-    names = [f"{g}-{i}" for g in GROUPS[:2] for i in range(5)] + [
-        f"fresh-{i}" for i in SEEDS
+def _names(plan: dict) -> list[str]:
+    return [
+        f"{g}-{i}"
+        for g in plan["groups"]
+        for i in (
+            plan["fresh_topology_seeds"]
+            if g == "fresh"
+            else range(plan["alternatives_per_group"])
+        )
     ]
+
+
+def _rows(root: Path, plan: dict) -> list[dict]:
     rows = []
-    for name in names:
+    for name in _names(plan):
         path = root / "results" / (name + ".json")
         if path.exists():
             row = sealed_read(path)
@@ -825,21 +934,37 @@ def _balance_groups(rows):
     return members_by_rep
 
 
+def _representatives(rows, plan):
+    if plan["protocol"] == fitted.PROTOCOL:
+        # Keep provenance and fitted roots of both parents even when their
+        # descendants converge to the same family.
+        return {
+            name: members
+            for group in plan["groups"]
+            for name, members in _balance_groups(
+                [r for r in rows if r["group"] == group]
+            ).items()
+        }
+    return _balance_groups(rows)
+
+
 def report(root: Path) -> dict:
     """Report terminal states, actual expenditures and each stopping point."""
     plan, inputs = load(root)
     rows = _rows(root, plan)
-    members_by_rep = _balance_groups(rows)
+    members_by_rep = _representatives(rows, plan)
+    names = set(_names(plan))
+    finished = len(rows) == len(names)
     representatives = list(members_by_rep)
     receipts = [
         json.loads(p.read_text())
         for base in (root / "legacy/steps", root / "steps")
         for p in sorted(base.glob("*/calls/*.json"))
     ]
-    if len(receipts) > MAX_CALLS:
+    if len(receipts) > plan["maximum_generation_requests"]:
         raise ValueError("Campaign physical request ceiling exceeded")
     yield_by_origin = {}
-    for origin in GROUPS:
+    for origin in plan["groups"]:
         accepted = [
             r for r in rows if r["group"] == origin and r["status"] == "eligible"
         ]
@@ -850,15 +975,15 @@ def report(root: Path) -> dict:
             "after_correction": after,
         }
     summary = {
-        "protocol": PROTOCOL,
+        "protocol": plan["protocol"],
         "plan_sha256": plan["artifact_sha256"],
-        "status": "complete" if len(rows) == 15 else "incomplete",
-        "expected": 15,
+        "status": "complete" if finished else "incomplete",
+        "expected": len(names),
         "recorded": len(rows),
         "unavailable_branches": sum(row["status"] == "unavailable" for row in rows),
         "groups": {
             g: dict(Counter(r["status"] for r in rows if r["group"] == g))
-            for g in GROUPS
+            for g in plan["groups"]
         },
         "admission_by_origin": yield_by_origin,
         "eligible_first_pass": sum(g["first_pass"] for g in yield_by_origin.values()),
@@ -871,8 +996,7 @@ def report(root: Path) -> dict:
         ),
         "depth_progress": {
             str(d): sum(
-                p.stem in {*history.BRANCHES, *history.FRESH}
-                for p in (root / "depths" / str(d)).glob("*.json")
+                p.stem in names for p in (root / "depths" / str(d)).glob("*.json")
             )
             for d in range(1, MAX_CORRECTIONS + 1)
         },
@@ -888,7 +1012,16 @@ def report(root: Path) -> dict:
         "optimizer_calls": 0,
         "test_data_opened": False,
     }
-    if len(rows) == 15:
+    if plan["protocol"] == fitted.PROTOCOL:
+        summary.update(
+            objectives=plan["objectives"],
+            maximum_generation_requests=plan["maximum_generation_requests"],
+            initial_branches_recorded=sum(
+                p.stem in names for p in (root / "first").glob("*.json")
+            ),
+            target_improvement="pending matched refitting",
+        )
+    if finished and plan["protocol"] == PROTOCOL:
         # An early shallow finish leaves room for deeper calls in the first 27.
         cutoff = min(27, len(receipts))
         admitted = [
@@ -902,9 +1035,26 @@ def report(root: Path) -> dict:
             "representatives": list(_balance_groups(admitted)),
         }
     # Freeze representatives once every branch has a disposition.
-    if len(rows) == 15:
+    if finished:
         for name in representatives:
             row = next(r for r in rows if r["name"] == name)
+            origin = row["group"]
+            qualified = {}
+            parent_reference = None
+            if origin == "c15":
+                parent_reference = inputs[origin]["result_identity"]
+            elif origin == "c21":
+                parent_reference = {"anchor_sha256": inputs[origin]["anchor_sha256"]}
+            elif origin in fitted.GROUPS:
+                parent_reference = inputs[origin]["parent_reference"]
+                qualified = {
+                    "objective": fitted.OBJECTIVES[origin],
+                    "parent_training_parameters": (
+                        f"inputs.json#{origin}.parameters_with_training_roots"
+                    ),
+                    "training_witnesses": inputs[origin]["witnesses"],
+                    "target_improvement": "pending matched refitting",
+                }
             sealed_write(
                 root / "handoff" / (name + ".json"),
                 {
@@ -923,13 +1073,7 @@ def report(root: Path) -> dict:
                     "training_file": "inputs.json#training",
                     "prefix_policy": inputs["fitting_contract"]["prefix_policy"],
                     "training_sha256": inputs["fitting_contract"]["training_sha256"],
-                    "parent_reference": (
-                        inputs["c15"]["result_identity"]
-                        if row["group"] == "c15"
-                        else {"anchor_sha256": inputs["c21"]["anchor_sha256"]}
-                        if row["group"] == "c21"
-                        else None
-                    ),
+                    "parent_reference": parent_reference,
                     "qualification": (
                         "Fit on matched training rows. Verify replay NMSE, "
                         "fasting balance, insulin minima, timing and mechanisms. "
@@ -937,6 +1081,7 @@ def report(root: Path) -> dict:
                     ),
                     "fitting_status": "pending",
                     "scientific_correctness_established": False,
+                    **qualified,
                 },
             )
         atomic_json(root / "summary.json", summary)
@@ -965,31 +1110,48 @@ def _details(label, value):
 
 
 def preview(root: Path):
-    """Render exactly what each of the three initial origins receives."""
-    _, data = load(root)
-    parts = _page("T2-easy breadth prompts")
-    for group in GROUPS:
+    """Render the actual system, user packet and schema for each initial call."""
+    plan, data = load(root)
+    parts = _page("T2-easy proposer prompts")
+    for group in plan["groups"]:
         system, packet = _packet(data, group)
         if group != "fresh":
-            system += "\n" + FIVE
+            system = _batch_system(group, system)
         parts.extend(
             [
                 f"<h2>{group}</h2><pre>{html.escape(system)}</pre>",
                 _details("Complete initial request", packet),
             ]
         )
-    parts.extend(
-        [
-            "<h2>Fresh function construction</h2><pre>",
-            html.escape(LAW_INSTRUCTION),
-            "</pre><h2>Correction</h2>",
-            "<p>Up to three corrections per branch, one round across all branches "
-            "at a time. Each receives its previous reply and the "
-            "deterministic rejection. A fresh formula correction may also "
-            "change the topology.</p>",
-            _details("Example of a recorded rejection", data["last_failure"]),
-        ]
-    )
+        if group in fitted.GROUPS:
+            from autoformalism.llm.staged_topology import strict_provider_schema
+
+            parts.append(
+                _details(
+                    "Required response schema",
+                    strict_provider_schema(_batch_schema(group).model_json_schema()),
+                )
+            )
+    if plan["protocol"] == fitted.PROTOCOL:
+        parts.append(
+            "<h2>Corrections</h2><p>Each rejected slot receives the same fitted "
+            "parent and its training evidence, its previous patch, and the specific "
+            "rejection. Each correction returns one complete alternative. Equivalent "
+            "siblings can be corrected. Up to three passes visit unresolved slots.</p>"
+        )
+    else:
+        parts.extend(
+            [
+                "<h2>Fresh function construction</h2><pre>",
+                html.escape(LAW_INSTRUCTION),
+                "</pre><h2>Correction</h2>",
+                "<p>Up to three corrections per branch, one round across all branches "
+                "at a time. Each receives its previous reply and the "
+                "deterministic rejection. A fresh formula correction may also "
+                "change the topology.</p>",
+                _details("Example of a recorded rejection", data["last_failure"]),
+            ]
+        )
     path = root / "PROMPTS.html"
     path.write_text("\n".join(parts))
     return {"preview": str(path)}
@@ -999,7 +1161,7 @@ def _render(root: Path, summary: dict):
     """Expose each branch's dispositions, equations and checkable witnesses."""
     parts = _page("T2-easy construction results")
     parts.append(
-        f"<p>{summary['recorded']} of 15 branches recorded. "
+        f"<p>{summary['recorded']} of {summary['expected']} branches recorded. "
         f"{len(summary['representatives'])} representatives for fitting.</p>"
     )
     parts.append(_details("First-pass yield, correction yield and costs", summary))
@@ -1008,6 +1170,21 @@ def _render(root: Path, summary: dict):
             f"<h2>{html.escape(row['name'])} · {html.escape(row['status'])}</h2>"
         )
         parts.append(_details("Stage outcomes and repair feedback", row["history"]))
+        if row["group"] in fitted.GROUPS:
+            name = html.escape(row["name"], quote=True)
+            parts.append(f'<p><a href="first/{name}.json">Initial alternative</a></p>')
+            for h in row["history"]:
+                suffix = f"-{h['depth']}" if h["depth"] > 1 else ""
+                slot = (
+                    f"{name}-patch_correction{suffix}"
+                    if h["depth"]
+                    else f"{row['group']}-five"
+                )
+                for call in sorted((root / "steps" / slot / "calls").glob("*.json")):
+                    link = html.escape(str(call.relative_to(root)), quote=True)
+                    parts.append(
+                        f'<p><a href="{link}">Request and response · {slot}</a></p>'
+                    )
         if row["status"] == "eligible":
             eqs = model_view(PrefixFitProblem.model_validate(row["problem"]))[
                 "equations"
@@ -1077,14 +1254,23 @@ def main():
     p.add_argument("--endpoint")
     p.add_argument("--runtime-record", type=Path)
     p.add_argument("--model-size", choices=("120b",))
+    p.add_argument("--expected-protocol", choices=(PROTOCOL, fitted.PROTOCOL))
     args = p.parse_args()
     if args.action == "prepare" and not args.source:
         p.error("prepare requires --source")
     if args.action == "run" and (not args.runtime_record or not args.endpoint):
         p.error("run requires --endpoint and --runtime-record from the ACES worker")
     root = args.root.resolve()
+    if (
+        args.action != "prepare"
+        and args.expected_protocol
+        and sealed_read(root / "plan.json")["protocol"] != args.expected_protocol
+    ):
+        p.error("The result directory belongs to a different T2 campaign")
     if args.action == "prepare":
-        result = prepare(root, args.source, args.previous)
+        result = prepare(
+            root, args.source, args.previous, expected_protocol=args.expected_protocol
+        )
         preview(root)
     elif args.action == "run":
         from scripts.submit_t2_breadth import bind

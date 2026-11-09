@@ -23,16 +23,18 @@ from scripts.submit_structural_revision_aces import (
 
 def execution(plan, image, snapshot):
     values = aces.execution_identity(
-        plan, image, snapshot, entrypoints=campaign.ENTRYPOINTS
+        plan, image, snapshot, entrypoints=tuple(plan["entrypoints"])
     )
     return {
         **values,
-        "protocol": "t2-three-origin-aces-2",
+        "protocol": "t2-fitted-residual-aces-1"
+        if plan["protocol"] == campaign.fitted.PROTOCOL
+        else "t2-three-origin-aces-2",
         "entrypoint_sha256": plan["entrypoints"],
         "generation_settings": plan["settings"],
         "maximum_output_tokens": plan["settings"]["max_output_tokens"],
-        "maximum_generation_requests": campaign.MAX_CALLS,
-        "maximum_charged_tokens": campaign.MAX_CALLS * 32768,
+        "maximum_generation_requests": plan["maximum_generation_requests"],
+        "maximum_charged_tokens": plan["maximum_generation_requests"] * 32768,
         "worker_seconds": 6600,
         "scheduler_walltime_seconds": 7200,
     }
@@ -88,7 +90,7 @@ def _manifest(wave, identity, job):
         {
             "execution_sha256": identity["artifact_sha256"],
             "job": job,
-            "maximum_generation_requests": campaign.MAX_CALLS,
+            "maximum_generation_requests": identity["maximum_generation_requests"],
         },
     )
 
@@ -120,7 +122,7 @@ def submit(root, resume=False):
     root = root.resolve()
     with _lock(root / "submission-lock"):
         plan, _ = campaign.load(root)
-        if len(campaign._rows(root, plan)) == 15:
+        if len(campaign._rows(root, plan)) == len(campaign._names(plan)):
             return {"status": "already_complete", "results": str(root)}
         base = root / "submissions"
         waves = sorted(base.glob("wave-*"))
@@ -166,6 +168,9 @@ def submit(root, resume=False):
         wave.mkdir(parents=True, exist_ok=False)
         (root / "logs").mkdir(exist_ok=True)
         os.environ.update(AF_REPO_ROOT=str(campaign.REPO), AF_OUTPUT_ROOT=str(root))
+        fitted_run = plan["protocol"] == campaign.fitted.PROTOCOL
+        job_name = "phasec-t2-fitted" if fitted_run else "phasec-t2-breadth"
+        tag = "t2-fitted" if fitted_run else "t2-depth3"
         argv = [
             "sbatch",
             "--parsable",
@@ -180,9 +185,9 @@ def submit(root, resume=False):
             "--time=02:00:00",
             "--signal=B:TERM@300",
             "--exclude=ac042",
-            "--job-name=phasec-t2-breadth",
+            f"--job-name={job_name}",
             "--dependency=singleton",
-            f"--comment=t2-depth3-{identity['artifact_sha256'][:12]}-{wave.name}",
+            f"--comment={tag}-{identity['artifact_sha256'][:12]}-{wave.name}",
             f"--output={root}/logs/propose-%j.out",
             f"--error={root}/logs/propose-%j.err",
             str(campaign.REPO / "scripts/hpc/run_meal_insulin_revision_aces.sh"),

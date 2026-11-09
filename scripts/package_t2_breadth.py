@@ -15,11 +15,16 @@ from autoformalism.rebuttal.prefit_replay import sealed_read
 from scripts import harmony_vocab, t2_breadth
 
 NAME = "phase-c-t2-breadth-v2"
+FITTED_NAME = "phase-c-t2-fitted-revisions-v1"
 
 
 def package(destination: Path, intake: Path, harmony: Path) -> Path:
     """Include committed runtime files and exactly the two reviewed external inputs."""
-    if sealed_read(intake)["artifact_sha256"] != t2_breadth.INTAKE:
+    reviewed = sealed_read(intake)
+    fitted_run = reviewed.get("protocol") == t2_breadth.fitted.INPUT_PROTOCOL
+    name = FITTED_NAME if fitted_run else NAME
+    expected = t2_breadth.fitted.INTAKE if fitted_run else t2_breadth.INTAKE
+    if reviewed["artifact_sha256"] != expected:
         raise ValueError("Different T2 training intake")
     harmony_vocab.verify(harmony)
     repo = t2_breadth.REPO
@@ -30,6 +35,8 @@ def package(destination: Path, intake: Path, harmony: Path) -> Path:
         "docs/PHASE_C_T2_BREADTH.md",
         *t2_breadth.ENTRYPOINTS,
     ]
+    if fitted_run:
+        tracked.append("scripts/hpc/start_t2_fitted_aces.sh")
     source = subprocess.check_output(
         ["git", "archive", "--format=tar", commit.strip(), *tracked], cwd=repo
     )
@@ -39,7 +46,7 @@ def package(destination: Path, intake: Path, harmony: Path) -> Path:
             if member.isfile():
                 files[member.name] = archive.extractfile(member).read(), member.mode
     for target, path in [
-        ("inputs/intake.json", intake),
+        ("inputs/fitted-targets.json" if fitted_run else "inputs/intake.json", intake),
         ("assets/harmony/o200k_base.tiktoken", harmony / "o200k_base.tiktoken"),
     ]:
         files[target] = path.read_bytes(), 0o644
@@ -50,7 +57,7 @@ def package(destination: Path, intake: Path, harmony: Path) -> Path:
     ]
     files["SHA256SUMS"] = "".join(checks).encode(), 0o644
     destination.mkdir(parents=True, exist_ok=True)
-    target = destination / (NAME + ".tar.gz")
+    target = destination / (name + ".tar.gz")
     temporary = target.with_suffix(".tmp")
     with (
         temporary.open("wb") as raw,
@@ -58,7 +65,7 @@ def package(destination: Path, intake: Path, harmony: Path) -> Path:
         tarfile.open(fileobj=stream, mode="w") as archive,
     ):
         for path, (data, mode) in sorted(files.items()):
-            member = tarfile.TarInfo(f"{NAME}/{path}")
+            member = tarfile.TarInfo(f"{name}/{path}")
             member.mode, member.size = mode, len(data)
             archive.addfile(member, io.BytesIO(data))
     temporary.replace(target)

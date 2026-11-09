@@ -126,23 +126,24 @@ def normalize(parent: PrefixFitProblem, raw: dict, schema) -> tuple[dict, list[d
         ]
     )
     locals_by_state = {}
-    for i, state in enumerate(raw.get("new_states", ())):
-        initial = state["initial"]
-        if initial["mode"] == "map":
-            locals_by_state[i] = _namespace(
-                [
-                    *(p["name"] for p in initial.get("parameters", ())),
-                    *(
-                        r["alias"]
-                        for field in ("state_initials", "public_initials")
-                        for r in initial.get(field, ())
-                    ),
-                ]
-            )
+    for field in ("new_states", "initialization_edits"):
+        for i, state in enumerate(raw.get(field, ())):
+            initial = state["initial"]
+            if initial["mode"] == "map":
+                locals_by_state[field, i] = _namespace(
+                    [
+                        *(p["name"] for p in initial.get("parameters", ())),
+                        *(
+                            r["alias"]
+                            for refs in ("state_initials", "public_initials")
+                            for r in initial.get(refs, ())
+                        ),
+                    ]
+                )
     for entry in audit:
         steps = entry["field"]
         local = "initial" in steps and steps[-1] in {"name", "alias"}
-        scope = locals_by_state[steps[1]] if local else global_names
+        scope = locals_by_state[steps[0], steps[1]] if local else global_names
         if entry["to"] not in scope:
             raise RevisionValidationError(
                 "UNKNOWN_IDENTIFIER_SPELLING",
@@ -171,15 +172,18 @@ def normalize(parent: PrefixFitProblem, raw: dict, schema) -> tuple[dict, list[d
                 for old, new in changes.items()
             )
 
-    formula(patch["edit"], "expression", ["edit"], global_names)
+    if "edit" in patch:
+        formula(patch["edit"], "expression", ["edit"], global_names)
+    for i, edit in enumerate(patch.get("edits", ())):
+        formula(edit, "expression", ["edits", i], global_names)
     for field, key in (("new_processes", "expression"), ("new_states", "rhs")):
         for i, row in enumerate(patch[field]):
             formula(row, key, [field, i], global_names)
-    for i, local_names in locals_by_state.items():
+    for (field, i), local_names in locals_by_state.items():
         formula(
-            patch["new_states"][i]["initial"],
+            patch[field][i]["initial"],
             "expression",
-            ["new_states", i, "initial"],
+            [field, i, "initial"],
             local_names,
         )
     return patch, audit
