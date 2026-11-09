@@ -33,6 +33,10 @@ These are reproducible training residuals across the two tested starts per model
 
 [Trajectory figure](../../output/t2-breadth-independent-starts-20261109/insulin-trajectories.png) · [All four fitted equations and parameters](../../output/t2-breadth-independent-starts-20261109/fitted-models.json) · [Machine-readable comparison](../../output/t2-breadth-independent-starts-20261109/comparison.json) · [Portable review package](../../output/t2-breadth-independent-starts-20261109/t2-independent-starts-review.tar.gz)
 
+The subsequent equation audit traces the early peaks to meal-driven secretion
+and the late rebound to excess glucose supply, and checks the paired infusion.
+[Term-level feedback and matched infusion controls](2026-11-09-t2-insulin-equation-attribution.md)
+
 ## Reproducing the numerical run
 
 The completed run used two local CPU workers and the same frozen fitting backend as the matched November 8 campaign. From the project checkout with the original handoff and numerical snapshot available, run the following commands. An existing result directory resumes its recorded operations.
