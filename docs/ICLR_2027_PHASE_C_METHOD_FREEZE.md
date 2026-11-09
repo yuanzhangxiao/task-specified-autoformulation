@@ -1,5 +1,7 @@
 # Frozen post-submission experiments
 
+The completed CPU forecast evaluation, the fitted-coupling ablation and the earlier matched intervention controls are documented in the [experimental results for the author team](ICLR_2027_FROZEN_PHASE_C_RESULTS.md).
+
 The revised method with both real proposer returns and independently replayed numerical fits is the November T2-easy experiment. Its construction commit is `ec485a5`, including authenticated calls inherited from `be80173`. Its matched fitting commit is `1ea3499`. The frozen [experiment manifest](../configs/iclr_2027_phase_c_method_freeze_v1.json) binds both Git revisions, source-tree digests, construction and fitting plans, model weights and the exact six-model fit export. Both original deployment bundles identify their respective commits in `SOURCE_COMMIT`. This composite freeze reproduces the run while later research can continue on the development branch.
 
 ## What was executed

@@ -1,0 +1,47 @@
+# Experiments for the ICLR author team
+
+The strongest evidence concerns whether a learned hidden state changes what a model can predict under a new forcing schedule. Three experiments answer different parts of that question. The November meal-memory experiment uses the improved method. The two earlier glucose experiments evaluate archived models. All results below are development or retrospective intervention results.
+
+## The frozen November method
+
+Use Git tag `iclr-2027-phase-c-method-v1` (`e8b2392`). It binds the GPT-OSS-120B constructor actually run on November 8, Orion's matched fitter, the corrected Phase C release and the forecast evaluator. Five alternatives from each of two fitted parents and five fresh topology starts produced five distinct fit-eligible models in 39 real generation requests. All five came from the fitted-parent branches. We evaluated every child and the separately fitted parent-equivalent control. T2-easy is the demonstrated scope of this configuration. [Frozen protocol](ICLR_2027_PHASE_C_METHOD_FREEZE.md)
+
+### Does a proposed meal-memory state improve forecasting?
+
+The parent generates plasma glucose $G_p$, insulin $I$ and total disposal $U$. The primary child `c15-3` adds a state $M$ with zero initial value, derivative `k_M_rise × meal_rate − M / tau_M`, and an additive `gain_M × M` inside insulin production. Its fitted time constant is 62.79 minutes. We verified that setting the coupling gain to zero recovers all shared equations and initial laws of the parent family, with the extra state disconnected. The control `c15-4-zero-basal` refits that parent family on the same training data and budget.
+
+Training NMSE was 0.16556 for the control and 0.11673 for the child. The primary comparison, all six parameter vectors and the evaluation protocol were frozen before this scoring pass. For each validation trajectory we inferred two hidden initial values from its first eight minutes, kept the training-fitted shared parameters fixed, and forecast minutes 9–300. The four public development schedules all have zero injected insulin. NMSE uses the training variance of each target and weights the three outputs equally.
+
+| Validation schedule | Refitted parent | Meal-memory child | Child minus parent | Child with memory coupling disabled |
+|---|---:|---:|---:|---:|
+| 75 g meal | 1.698 | 1.373 | −0.324 | 19.989 |
+| 105 g meal | 2.259 | 1.918 | −0.341 | 23.138 |
+| Split 105 g meal | 1.973 | 1.232 | −0.740 | 9.901 |
+| Fasting | 0.490 | 1.620 | +1.130 | 1.620 |
+| **Pooled** | **1.605** | **1.536** | **−0.069** | **13.662** |
+| **Trajectory median [MAD]** | **1.835 [0.281]** | **1.497 [0.194]** | **−0.333 [0.208]** | **14.945 [6.618]** |
+
+Insulin NMSE fell from 0.1575 to 0.0841 and total-disposal NMSE from 0.1505 to 0.1056. Each improved on all four schedules. Glucose improved on the three meal schedules and deteriorated during fasting, where the child's predicted glucose reached −15.91 mg/kg. The last-prefix-value persistence control had pooled NMSE 1.657 and glucose NMSE 1.673. The child's glucose NMSE was 4.418. The other structural revision `c15-2`, a glucose-dependent sigmoid secretion term, had the lowest pooled validation NMSE, 0.823, but worse insulin and disposal scores than the refitted parent. It was a secondary comparison.
+
+The final column is a follow-up ablation chosen after inspecting the primary result. We set only the fitted memory-to-insulin gain to zero and retained every other coefficient and each intact child's inferred initial values. Error increased on all three meal schedules. With no meal and $M(0)=0$, every predicted sample stayed identical. This establishes that the fitted model uses the learned memory pathway. The refitted parent measures how much of the loss can be recovered by recalibrating the restricted model. Neither experiment provides a direct physiological readout for $M$. Orion independently found that short- and long-memory training starts converge to time constants near 63 minutes and both predict the insulin peak 33–34 minutes early. [Training controls](../work/agent-comms/2026-11-09-t2-independent-start-fits.md)
+
+The [results report](../output/iclr-method-freeze-20261109/REPORT.html) includes every child's score, the measured and predicted trajectories, the deletion experiment, and the per-trajectory downloads. The primary forecast plan is `6d59f1496d619a3cd663aab89be5c2200a39076938071236585695c2a549254b`. Its completed summary is `98065f9f6a1ec8a7c82d79a3dec0d55d0db72a476675c89f43c491e7eec291e7`. The independent reconstruction reproduced each reported NMSE from the saved curves and training scales. The maximum discrepancy between DOP853 and Radau forecasts was below 3 × 10⁻¹⁰ training standard deviations.
+
+## Evidence from earlier experiments
+
+| Question | Actual comparison | Scope and qualification |
+|---|---|---|
+| Does allowing a latent state help recover the timing of a response? | Named T1-easy, paired seed 0. A 60 g meal at minute 60 produced a glucose peak at minute 129 in the reference, 122 with Full, and 61 with no latent state. Split-versus-single equal-mass meal response RSE was 0.277 with Full and 1.735 without latent states. | One of two planned no-latent seeds has a retained fit. Across both Full seeds, the isolated meal-appearance flux area was only 14–16% of the reference. |
+| Is the split-meal prediction competitive with other methods? | On the named T1 case, Full's two seed RSEs (0.277, 0.333) both beat every available seed of SINDy, PySR, native-increment D3 and GPT-5.6 Sol (three per method). Their median RSEs were 1.000, 1.180, 1.292 and 3.636. Full's median was 0.305 [0.028 MAD]. | Historical matched interventions with differing search budgets. On the obfuscated T1 case, Sol performed better than Full (median 0.366 vs 0.651). |
+| Do public mechanism instructions help when variable names carry little information? | On obfuscated T1, both paired seeds improved on the split-meal contrast with Full. Median RSE was 0.651 [0.026] with Full and 1.019 [0.116] with the prediction-only prompt. | Prediction-only removes both the mechanism specification and scientific background. This comparison measures their combined contribution. |
+| Do hidden states mediate an intervention in the submitted-era pipeline? | Historical T2-hard Full, two seeds. Holding the two hidden states on their fasting trajectories changed 48 g meal glucose-response RSE from 0.053 to 1.000 for seed 1 and left seed 0 at 0.481. | Across all 16 configurations, 16/16 beat a zero-change response for the meal and 0/16 for the short high insulin pulse. A direct physical correspondence for hidden insulin-dependent disposal was unavailable. |
+| Is there evidence for the critic/verifier? | In historical T2-hard Full seed 1 the 48 g meal RSE was 0.053 with both, 0.442 without the critic, 0.493 without the verifier and 0.445 without either. In seed 0 the same row was 0.481, 0.403, 0.464 and 0.442. | This is a seed-dependent component effect. The two development- and complexity-matched pairs admitted by the historical calipers also have better disposal-probe responses with both components; only 2/24 planned pairs qualified. |
+| Does providing training trajectories to the constructor help across domains? | Earlier one-round 20B Phase C pilot `21598e2`, eight cells × two seeds. Full had finite validation fits on 13/16 and brief-only on 12/16. With failures ranked worst, the case-balanced validation NMSE median [MAD] was 0.933 [0.402] vs 2.571 [2.222]. | Both prompts had the same public requirements. Full also received training trajectory evidence. Confirmed public-mechanism mean was 39.8% in both arms (across-case SD 40.8 and 33.1 percentage points). This pilot spans glucose, CSTR, the alien device and basins, using an earlier proposer. |
+
+RSE measures error in the *change* between matched forcing schedules, normalized by the reference change's energy. A prediction of no change scores one. The sources are the [historical T1 per-seed comparisons](../output/iclr-method-freeze-20261109/historical-t1-comparison.csv), [T2-hard clamp results](ICLR_2027_LOCAL_RESULTS.md), [conditional latent readouts](ICLR_2027_LATENT_REVIEW.md) and [eight-benchmark pilot summary](../output/phase-c-inspection-2026-09-30/summary.json).
+
+## Next experiment with the greatest value
+
+Compare Full to a fixed state representation on T2-hard and corrected CSTR-hard from an identical fitted starting model per seed. Both arms can revise equations. Only Full can revise the hidden state representation. The prepared roster has 12 endpoints, three paired seeds in each of two systems, and 15 visits per arm. Reuse the identical endpoints if the larger anchor campaign is already running. Freeze every endpoint before evaluating intervention timing, response RSE, target NMSE, and any hidden readout with a defensible correspondence. Record an unavailable correspondence explicitly. These are future measurements. [Two-anchor plan](../output/iclr-method-freeze-20261109/two-anchor-control/plan.json)
+
+This control uses the general 20B staged constructor and 120B advisory critic. To compare the improved 120B fitted-parent revision itself across benchmarks, its training evidence and fitting interface must first be qualified on each new anchor. A common release, initializer information, forecast horizon and scoring rule are also necessary before placing its numbers beside the Phase C external baselines. The official test set remains sealed.
