@@ -24,6 +24,8 @@ The inspection retains every branch and both rejected and accepted equations. Tw
 
 The archive includes the complete models in `results/`, the representative packets in `handoff/`, per-stage prompts and responses in `steps/`, `summary.json`, and a browsable `REPORT.html`. `inputs.json` contains the matched public training rows and both fitted parents, including the saved per-trajectory initial coordinates. Orion can independently replay training NMSE and compare positivity, fasting balance, timing, dose shifts and mechanism compliance under matched fitting resources.
 
+The completed run produced five distinct fitting packets in 39 calls. The equation audit and two-solver training replay identify `c15-4` as the first refit to prioritize. [Results and fitting handoff for Orion](../work/agent-comms/2026-11-08-t2-breadth-results-and-fitting-handoff.md)
+
 ## ACES
 
 Upload `phase-c-t2-breadth-v2.tar.gz` to the group scratch directory. From the ACES login shell:
