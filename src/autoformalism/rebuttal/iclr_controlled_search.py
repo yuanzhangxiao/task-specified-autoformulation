@@ -110,6 +110,8 @@ def prepare(
     prune: bool,
     calibration: tuple | None = None,
     max_parameters: int | None = None,
+    *,
+    development_pilot: bool = False,
 ) -> dict:
     """Seal the roster, public inputs, resource caps and runtime."""
     if max_parameters is not None and max_parameters < 1:
@@ -204,6 +206,7 @@ def prepare(
             root / "plan.json",
             {
                 "protocol": PROTOCOL,
+                **({"development_pilot": True} if development_pilot else {}),
                 "cells": cells,
                 "blocks": blocks,
                 "switch_manifest_sha256": switches["artifact_sha256"],

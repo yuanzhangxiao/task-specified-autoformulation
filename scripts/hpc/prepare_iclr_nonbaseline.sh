@@ -6,7 +6,7 @@ set -euo pipefail
 : "${AF_CAMPAIGN:?set a fresh writable ACES output parent}"
 : "${AF_PYTHON:?set the project Python executable}"
 cd "$AF_REPO_ROOT"
-export PYTHONPATH="$AF_REPO_ROOT/src:$AF_REPO_ROOT" PYTHONDONTWRITEBYTECODE=1
+export PYTHONPATH="$AF_REPO_ROOT/src:$AF_REPO_ROOT${AF_CASADI_ROOT:+:$AF_CASADI_ROOT}" PYTHONDONTWRITEBYTECODE=1
 export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1
 "$AF_PYTHON" - "$AF_INPUTS" "$AF_CAMPAIGN" <<'PY'
 import hashlib

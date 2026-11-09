@@ -98,6 +98,65 @@ def development(public_root: Path) -> dict:
     }
 
 
+def confirmed_scores(
+    fidelity: Path, bundles: list[str], selected: dict
+) -> tuple[dict, str]:
+    """Authenticate model identity and confirmation scores before joining outcomes."""
+    scores = {}
+    cohort = sealed_read(fidelity / "frozen_selection_manifest.json")
+    assessment = sealed_read(fidelity / "summary.json")
+    scored = sealed_read(fidelity / "scored_rows.json")
+    plan_id = cohort["artifact_sha256"]
+    roster_hashes = {m["source_bundle_sha256"] for m in cohort["roster"]}
+    rows = scored["rows"]
+    if (
+        not bundles
+        or not set(bundles) <= roster_hashes
+        or any(x["protocol"] != FIDELITY_VERSION for x in (cohort, assessment, scored))
+        or cohort["mode"] != "confirmation"
+        or scored["mode"] != "confirmation"
+        or assessment["source_mode"] != "confirmation"
+        or assessment["plan_sha256"] != plan_id
+        or scored["plan_sha256"] != plan_id
+        or set(scored["source_bundle_hashes"]) != roster_hashes
+        or assessment["scored_rows_sha256"] != scored["artifact_sha256"]
+        or assessment["metrics_sha256"] != scored["metrics_sha256"]
+        or public.content_sha256(rows) != scored["metrics_sha256"]
+        or assessment["row_count"] != len(rows)
+    ):
+        raise ValueError("unbound numerical results or missing confirmatory cohort")
+    fidelity_sha = assessment["artifact_sha256"]
+    for score in rows:
+        index = score["subject"]
+        if type(index) is not int or not 0 <= index < len(cohort["roster"]):
+            raise ValueError("score refers to an unknown subject")
+        model = cohort["roster"][index]
+        if any(
+            score[k] != model[k]
+            for k in (
+                "source_id",
+                "source_bundle_sha256",
+                "method",
+                "repetition",
+                "benchmark_id",
+            )
+        ) or score["source_benchmark_id"] != model.get(
+            "source_benchmark_id", model["benchmark_id"]
+        ):
+            raise ValueError("score subject identity differs from the frozen roster")
+        if model["source_bundle_sha256"] not in bundles:
+            continue
+        source = selected.get(model["source_id"])
+        if (
+            source is None
+            or any(source[k] != model[k] for k in ("method", "repetition", "status"))
+            or source["benchmark_id"] != score["source_benchmark_id"]
+        ):
+            raise ValueError("fidelity subject differs from the search export")
+        scores.setdefault(model["source_id"], []).append(score)
+    return scores, fidelity_sha
+
+
 def report(
     search: Path, public_root: Path, output: Path, fidelity: Path | None
 ) -> dict:
@@ -117,66 +176,9 @@ def report(
         verify_controlled_bundle(frozen, bundle)
         selected = {r["source_id"]: r for r in bundle["rows"]}
         bundles.append(bundle["artifact_sha256"])
-    scores = {}
-    fidelity_sha = None
-    if fidelity:
-        cohort = sealed_read(fidelity / "frozen_selection_manifest.json")
-        assessment = sealed_read(fidelity / "summary.json")
-        scored = sealed_read(fidelity / "scored_rows.json")
-        plan_id = cohort["artifact_sha256"]
-        roster_hashes = {m["source_bundle_sha256"] for m in cohort["roster"]}
-        rows = scored["rows"]
-        if (
-            not bundles
-            or not set(bundles) <= roster_hashes
-            or any(
-                x["protocol"] != FIDELITY_VERSION for x in (cohort, assessment, scored)
-            )
-            or cohort["mode"] != "confirmation"
-            or scored["mode"] != "confirmation"
-            or assessment["source_mode"] != "confirmation"
-            or assessment["plan_sha256"] != plan_id
-            or scored["plan_sha256"] != plan_id
-            or set(scored["source_bundle_hashes"]) != roster_hashes
-            or assessment["scored_rows_sha256"] != scored["artifact_sha256"]
-            or assessment["metrics_sha256"] != scored["metrics_sha256"]
-            or public.content_sha256(rows) != scored["metrics_sha256"]
-            or assessment["row_count"] != len(rows)
-        ):
-            raise ValueError("unbound numerical results or missing confirmatory cohort")
-        fidelity_sha = assessment["artifact_sha256"]
-        for score in rows:
-            index = score["subject"]
-            if type(index) is not int or not 0 <= index < len(cohort["roster"]):
-                raise ValueError("score refers to an unknown subject")
-            model = cohort["roster"][index]
-            if any(
-                score[k] != model[k]
-                for k in (
-                    "source_id",
-                    "source_bundle_sha256",
-                    "method",
-                    "repetition",
-                    "benchmark_id",
-                )
-            ) or score["source_benchmark_id"] != model.get(
-                "source_benchmark_id", model["benchmark_id"]
-            ):
-                raise ValueError(
-                    "score subject identity differs from the frozen roster"
-                )
-            if model["source_bundle_sha256"] not in bundles:
-                continue
-            source = selected.get(model["source_id"])
-            if (
-                source is None
-                or any(
-                    source[k] != model[k] for k in ("method", "repetition", "status")
-                )
-                or source["benchmark_id"] != score["source_benchmark_id"]
-            ):
-                raise ValueError("fidelity subject differs from the search export")
-            scores.setdefault(model["source_id"], []).append(score)
+    scores, fidelity_sha = (
+        confirmed_scores(fidelity, bundles, selected) if fidelity else ({}, None)
+    )
     # Scientific task mutations are only declared for the two hard anchors.
     rows = []
     effects = []

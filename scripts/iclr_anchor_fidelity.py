@@ -218,9 +218,13 @@ def canonicalize(row: dict, public_root: Path, stress_public_root: Path | None):
     return {**row, "source_benchmark_id": source_id, "benchmark_id": cell}
 
 
-def verify_controlled_bundle(source: Path, bundle: dict) -> None:
+def verify_controlled_bundle(
+    source: Path, bundle: dict, *, allow_development_pilot: bool = False
+) -> None:
     """Cross-check every planned task against the search and final freeze receipts."""
     source_plan = sealed_read(source.parent / "plan.json")
+    if source_plan.get("development_pilot") and not allow_development_pilot:
+        raise ValueError("development pilot is excluded from scientific evaluation")
     receipt = sealed_read(source.parent / "evaluation_freeze.json")
     rows = bundle["rows"]
     expected = [

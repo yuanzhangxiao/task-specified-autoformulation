@@ -86,7 +86,7 @@ image_sha="$(sha256sum "${AF_VLLM_IMAGE}")"
   exit 2
 }
 printf '%s\n' "${image_sha}" >"${runtime_root}/image-${SLURM_JOB_ID}.sha256"
-export PYTHONPATH="${AF_REPO_ROOT}/src"
+export PYTHONPATH="${AF_REPO_ROOT}/src:${AF_REPO_ROOT}${AF_CASADI_ROOT:+:$AF_CASADI_ROOT}"
 if [[ "$worker_script" == dalla_sign_repair.py ]]; then
   "$AF_PYTHON" "$AF_REPO_ROOT/scripts/$worker_script" verify --root "$AF_OUTPUT_ROOT"
 fi

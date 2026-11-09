@@ -20,6 +20,10 @@ from autoformalism.benchmarks.phase_b_public import _private_array
 from autoformalism.benchmarks.phase_c_protocols import phase_c_protocols
 from autoformalism.data import Trajectory
 from autoformalism.expressions import ValidationContext, compile_candidate
+from autoformalism.expressions.diagnostics import (
+    ModelValidationError,
+    RuntimeExpressionError,
+)
 from autoformalism.fitting import (
     FitConfig,
     simulate_trajectory,
@@ -30,7 +34,16 @@ from autoformalism.fitting import (
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.reference_integration import ReferenceSolver
 from autoformalism.schemas import CandidateModel
+from scripts import iclr_active_history as complexity
 from scripts import iclr_stress_data as data
+
+
+class SolverFailure(ValueError):
+    """A frozen forecast integration explicitly failed."""
+
+
+class SolverDisagreement(ValueError):
+    """Independent trajectories differed beyond the declared numerical tolerance."""
 
 
 def build_references(root: Path, cell: dict, data_root: Path) -> list[dict]:
@@ -146,7 +159,7 @@ def predict(endpoint: dict, cell: dict, pair: dict) -> tuple[dict, dict]:
                 reset_observed_states=False,
             )
             if not value.success:
-                raise ValueError(f"{solver} {key}: {value.message}")
+                raise SolverFailure(f"{solver} {key}: {value.message}")
             curves.append(value.predictions)
         results.append(curves)
     primary, control = results
@@ -159,7 +172,7 @@ def predict(endpoint: dict, cell: dict, pair: dict) -> tuple[dict, dict]:
         if abs_gap > 1e-4 * max(
             1.0, max(abs(obs)), max(abs(primary[0][c]))
         ) or effect_gap > 5e-3 * max(1e-8, max(abs(effect)), max(abs(truth_effect))):
-            raise ValueError(f"paired solver disagreement on {c}")
+            raise SolverDisagreement(f"paired solver disagreement on {c}")
     return primary[0], control[0]
 
 
@@ -167,6 +180,8 @@ def score(
     endpoint: dict, cell: dict, refs: list, scales: dict, predictor=predict
 ) -> dict:
     """Measure clean-target and paired response errors per trajectory."""
+    if not refs:
+        raise ValueError("empty frozen intervention design")
     records = []
     start = monotonic()
     for pair in refs:
@@ -195,6 +210,19 @@ def score(
                         )
                         if active
                         else None,
+                        "effect_status": "complete"
+                        if active
+                        else "negligible_reference",
+                        "reference_area": float(np.trapezoid(effect, t)),
+                        "predicted_area": float(np.trapezoid(diff, t)),
+                        "signed_peak_direction_correct": (
+                            bool(
+                                pred_active
+                                and np.sign(diff[pred_peak]) == np.sign(effect[peak])
+                            )
+                            if active
+                            else None
+                        ),
                         "reference_signed_peak": float(effect[peak]),
                         "predicted_signed_peak": float(diff[pred_peak]),
                         "peak_timing_error": float(t[pred_peak] - t[peak])
@@ -204,9 +232,26 @@ def score(
             records.append(
                 {"case": pair["case"], "status": "complete", "channels": channels}
             )
-        except (ArithmeticError, ValueError, RuntimeError, TimeoutError) as exc:
+        except (
+            ArithmeticError,
+            ValueError,
+            RuntimeError,
+            TimeoutError,
+            ModelValidationError,
+            RuntimeExpressionError,
+        ) as exc:
+            kind = "unclassified_evaluation_error"
+            if isinstance(exc, SolverFailure):
+                kind = "solver_failure"
+            elif isinstance(exc, SolverDisagreement):
+                kind = "solver_disagreement"
             records.append(
-                {"case": pair["case"], "status": "unresolved", "reason": str(exc)}
+                {
+                    "case": pair["case"],
+                    "status": "unresolved",
+                    "reason": str(exc),
+                    "failure_kind": kind,
+                }
             )
     all_ok = all(r["status"] == "complete" for r in records)
     effects = [
@@ -255,7 +300,9 @@ def reference_predict(endpoint: dict, cell: dict, pair: dict) -> tuple[dict, dic
         if not np.isfinite(predictions).all() or not np.allclose(
             *predictions, rtol=1e-4, atol=1e-5
         ):
-            raise ValueError("reference integration failed its refinement check")
+            raise SolverDisagreement(
+                "reference integration failed its refinement check"
+            )
         curves.append(dict(zip(names, predictions[0], strict=True)))
     return tuple(curves)
 
@@ -322,6 +369,7 @@ def evaluate(
             "design_sha256": manifest["artifact_sha256"],
             "search_sha256": bundle["artifact_sha256"],
             "evaluator_sha256": data.digest(Path(__file__)),
+            "complexity_source_sha256": data.digest(Path(complexity.__file__)),
             "source_sha256": public._source_identity(),
             "runtime": public._runtime(),
             "reference_cstr_sha256": data.digest(
@@ -400,6 +448,11 @@ def evaluate(
                 "validation_nmse": r.get("validation_nmse"),
                 "cost": r.get("cost", {}),
                 "evaluation_status": "model_unavailable",
+                "source_id": r.get("source_id"),
+                "model_sha256": r.get("model_sha256"),
+                "last_visit_status": r.get("last_visit_status"),
+                "optimizer_converged": r.get("optimizer_converged"),
+                **complexity.endpoint_complexity(r),
             }
             if r["status"] == "ready":
                 ref = out / "references" / f"{key}.json"
@@ -421,8 +474,6 @@ def evaluate(
                     raise ValueError("target has no training variation")
                 begin = monotonic()
                 record.update(score(r, cell, saved["records"], scales))
-                record["state_count"] = len(r["candidate"]["states"])
-                record["parameter_count"] = len(r["candidate"].get("parameters", ()))
                 record["evaluation_seconds"] = monotonic() - begin
             sealed_write(path, record)
         record = sealed_read(path)
@@ -489,6 +540,38 @@ def write_csv(path: Path, rows: list, columns: list[str]) -> None:
         writer.writerows(rows)
 
 
+def numerical_coverage(record: dict) -> dict:
+    """Separate unknown outcomes from the measured failure denominators."""
+    status = record.get("search_status")
+    optimizer = record.get("optimizer_converged")
+    if type(optimizer) is bool:
+        fit_status = "converged" if optimizer else "reported_nonconvergence"
+    elif status == "ready":
+        fit_status = "not_reported_in_endpoint"
+    elif status is None:
+        fit_status = "awaiting_frozen_model"
+    else:
+        fit_status = "no_selected_fit"
+    pairs = record.get("trajectories", [])
+    errors = Counter(
+        r.get("failure_kind", "unclassified_evaluation_error")
+        for r in pairs
+        if r["status"] != "complete"
+    )
+    ok = sum(r["status"] == "complete" for r in pairs)
+    attempted = ok + errors["solver_failure"] + errors["solver_disagreement"]
+    return {
+        "optimizer_status": fit_status,
+        "issued_test_pairs": len(pairs) if "trajectories" in record else None,
+        "solver_classified_pairs": attempted if pairs else None,
+        "solver_failure_pairs": errors["solver_failure"] if pairs else None,
+        "solver_disagreement_pairs": errors["solver_disagreement"] if pairs else None,
+        "unclassified_error_pairs": errors["unclassified_evaluation_error"]
+        if pairs
+        else None,
+    }
+
+
 def report(manifest: dict, evaluations: list[Path], out: Path) -> None:
     """Tabulate the complete frozen denominator; plot endpoints only when measured."""
     out.mkdir(parents=True, exist_ok=True)
@@ -530,6 +613,11 @@ def report(manifest: dict, evaluations: list[Path], out: Path) -> None:
             },
             "mask": "+".join(c.get("mask", [])),
             "search_status": record.get("search_status", "unavailable"),
+            **numerical_coverage(record),
+            "complexity_status": record.get(
+                "complexity_status",
+                ("not_recorded_on_endpoint" if record else "awaiting_frozen_model"),
+            ),
             "evaluation_status": record.get(
                 "evaluation_status", c.get("status", "awaiting_frozen_model")
             ),
@@ -542,6 +630,12 @@ def report(manifest: dict, evaluations: list[Path], out: Path) -> None:
                     "validation_nmse",
                     "state_count",
                     "parameter_count",
+                    "target_reachable_state_count",
+                    "target_reachable_latent_count",
+                    "expression_nodes",
+                    "source_id",
+                    "model_sha256",
+                    "last_visit_status",
                 )
             },
         }
@@ -557,12 +651,49 @@ def report(manifest: dict, evaluations: list[Path], out: Path) -> None:
             }
         )
         for sample in record.get("trajectories", []):
+            if sample["status"] != "complete":
+                effects.append(
+                    {
+                        **run,
+                        "case": sample["case"],
+                        "channel": None,
+                        "trajectory_status": sample["status"],
+                        "failure_kind": sample.get(
+                            "failure_kind", "unclassified_evaluation_error"
+                        ),
+                        "reason": sample.get("reason"),
+                    }
+                )
             for channel, score in sample.get("channels", {}).items():
                 effects.append(
-                    {**run, "case": sample["case"], "channel": channel, **score}
+                    {
+                        **run,
+                        "case": sample["case"],
+                        "channel": channel,
+                        "trajectory_status": sample["status"],
+                        **score,
+                    }
                 )
     if found:
         raise ValueError("evaluation contains unplanned identity")
+    complete = any(r["evaluation_status"] == "complete" for r in rows)
+    have_effect = any(r["response_rse"] is not None for r in rows)
+    have_scaling = any(
+        r["study"] == "scaling" and r["evaluation_status"] == "complete" for r in rows
+    )
+    measured_variants = any(
+        r["variant"] in {"double_recurrent_coupling", "wider_decay_spread"}
+        and r["evaluation_status"] == "complete"
+        for r in rows
+    )
+    files = {
+        "stress-curves.pdf": complete,
+        "stress-effect-curves.pdf": have_effect,
+        "scaling-cost-curves.pdf": have_scaling,
+        "fixed-dimension-sensitivity.pdf": measured_variants,
+    }
+    if any(not measured and (out / name).exists() for name, measured in files.items()):
+        raise ValueError("use a fresh report directory for an unevaluated roster")
     write_csv(out / "stress_metrics.csv", rows, list(rows[0]))
     write_csv(
         out / "stress_costs.csv",
@@ -584,6 +715,14 @@ def report(manifest: dict, evaluations: list[Path], out: Path) -> None:
             "reference_signed_peak",
             "predicted_signed_peak",
             "peak_timing_error",
+            "clean_scale_nmse",
+            "effect_status",
+            "reference_area",
+            "predicted_area",
+            "signed_peak_direction_correct",
+            "trajectory_status",
+            "failure_kind",
+            "reason",
         ],
     )
     for study, filename in (
@@ -631,9 +770,34 @@ def report(manifest: dict, evaluations: list[Path], out: Path) -> None:
     per_cell = []
     for (cell, arm), subject_rows in groups.items():
         ok = [r for r in subject_rows if r["evaluation_status"] == "complete"]
+        enrolled = sum(r["solver_classified_pairs"] or 0 for r in subject_rows)
+        failed = sum(r["solver_failure_pairs"] or 0 for r in subject_rows)
+        disagreements = sum(r["solver_disagreement_pairs"] or 0 for r in subject_rows)
+        opt = sum(
+            r["optimizer_status"] in {"converged", "reported_nonconvergence"}
+            for r in subject_rows
+        )
+        nonconverged = sum(
+            r["optimizer_status"] == "reported_nonconvergence" for r in subject_rows
+        )
         per_cell.append(
             {
                 "benchmark_id": cell,
+                "classified_solver_pairs": enrolled,
+                "solver_failure_count": failed,
+                "solver_disagreement_count": disagreements,
+                "solver_failure_fraction_among_classified": failed / enrolled
+                if enrolled
+                else None,
+                "solver_disagreement_fraction_among_classified": disagreements
+                / enrolled
+                if enrolled
+                else None,
+                "selected_fits_with_reported_convergence": opt,
+                "reported_optimizer_nonconvergence_count": nonconverged,
+                "nonconvergence_fraction_among_reported": nonconverged / opt
+                if opt
+                else None,
                 "arm": arm,
                 "complete": len(ok),
                 "planned": len(subject_rows),
@@ -655,18 +819,17 @@ def report(manifest: dict, evaluations: list[Path], out: Path) -> None:
         "cells": len(cells),
     }
     public._write(out / "summary.json", summary)
-    figures = (out / "stress-curves.pdf", out / "scaling-cost-curves.pdf")
-    if any(r["evaluation_status"] == "complete" for r in rows):
+    if complete:
         plot(rows, out)
-    elif any(p.exists() for p in figures):
-        raise ValueError("use a fresh report directory for an unevaluated roster")
-    if any(
-        r["evaluation_status"] == "complete" and r["study"] == "scaling" for r in rows
-    ):
+    if have_effect:
+        plot(rows, out, "response_rse")
+    if have_scaling:
         cost_plot(rows, costs, out)
+    if measured_variants:
+        fixed_dimension_plot(rows, costs, out)
 
 
-def plot(rows: list[dict], out: Path) -> None:
+def plot(rows: list[dict], out: Path, metric: str = "test_nmse") -> None:
     """Retain each seed and procedural draw on the reported response curves."""
     import matplotlib
 
@@ -688,7 +851,9 @@ def plot(rows: list[dict], out: Path) -> None:
             subset = [
                 r
                 for r in rows
-                if r["arm"] == arm and r["evaluation_status"] == "complete"
+                if r["arm"] == arm
+                and r["evaluation_status"] == "complete"
+                and r[metric] is not None
             ]
             if key == "noise":
                 subset = [
@@ -713,7 +878,7 @@ def plot(rows: list[dict], out: Path) -> None:
                         r[key]
                         if key != "mask"
                         else {"": 0, "C": 1, "Tj": 2, "C+Tj": 3}[r[key]],
-                        r["test_nmse"],
+                        r[metric],
                     )
                 )
             for i, series in enumerate(points.values()):
@@ -722,10 +887,17 @@ def plot(rows: list[dict], out: Path) -> None:
         if key == "mask":
             ax.set_xticks(range(4), ["none", "C", "Tj", "C+Tj"])
         ax.set_xlabel(label)
-        ax.set_ylabel("Clean-target NMSE")
+        ax.set_ylabel(
+            "Clean-target NMSE"
+            if metric == "test_nmse"
+            else "Intervention response RSE"
+        )
         if ax.lines:
             ax.legend(fontsize=8)
-    fig.savefig(out / "stress-curves.pdf")
+    fig.savefig(
+        out
+        / ("stress-curves.pdf" if metric == "test_nmse" else "stress-effect-curves.pdf")
+    )
     plt.close(fig)
 
 
@@ -736,13 +908,15 @@ def cost_plot(rows: list[dict], costs: list[dict], root: Path) -> None:
     matplotlib.use("Agg")
     from matplotlib import pyplot as plt
 
-    figures, axes = plt.subplots(2, 2, figsize=(8, 6), layout="constrained")
+    figures, axes = plt.subplots(2, 3, figsize=(12, 7), layout="constrained")
     for ax, (field, title) in zip(
         axes.flat,
         (
             ("visit_seconds", "Search wall time (s)"),
             ("observed_proposal_tokens", "Recorded proposal tokens"),
             ("state_count", "Selected state count"),
+            ("target_reachable_state_count", "Target-reachable state count"),
+            ("expression_nodes", "Executable expression nodes"),
             ("response_rse", "Intervention response RSE"),
         ),
         strict=True,
@@ -773,3 +947,71 @@ def cost_plot(rows: list[dict], costs: list[dict], root: Path) -> None:
             ax.legend(fontsize=8)
     figures.savefig(root / "scaling-cost-curves.pdf")
     plt.close(figures)
+
+
+def fixed_dimension_plot(rows: list[dict], costs: list[dict], out: Path) -> None:
+    """Show the paired draw and seed for both one-factor, eight-state interventions."""
+    from matplotlib.figure import Figure
+    from matplotlib.lines import Line2D
+
+    dims = [
+        (r | {"visit_seconds": c.get("visit_seconds")})
+        for r, c in zip(rows, costs, strict=True)
+        if r["dimension"] == 8
+    ]
+    generators = sorted({r["generator_seed"] for r in dims})
+    colors = {seed: f"C{i % 10}" for i, seed in enumerate(generators)}
+    figure = Figure(figsize=(10, 10), layout="constrained")
+    axes = figure.subplots(4, 2)
+    metrics = (
+        ("common_scale_test_nmse", "Common-scale test NMSE"),
+        ("response_rse", "Intervention response RSE"),
+        ("target_reachable_state_count", "Target-reachable state count"),
+        ("visit_seconds", "Search visit time (s)"),
+    )
+    for col, (variant, label) in enumerate(
+        (
+            ("double_recurrent_coupling", "Double recurrent coupling"),
+            ("wider_decay_spread", "Wider decay spread"),
+        )
+    ):
+        axes[0, col].set_title(label)
+        for i, (metric, title) in enumerate(metrics):
+            ax = axes[i, col]
+            series = defaultdict(list)
+            for r in dims:
+                if r["variant"] not in {"dimension", variant} or r.get(metric) is None:
+                    continue
+                series[r["generator_seed"], r["repetition"], r["arm"]].append(
+                    (int(r["variant"] == variant), r[metric])
+                )
+            for (draw, seed, arm), points in series.items():
+                x, y = zip(*sorted(points), strict=True)
+                ax.plot(
+                    x,
+                    y,
+                    color=colors[draw],
+                    linestyle="-" if arm == "full" else "--",
+                    marker=("o", "s", "^")[seed],
+                    alpha=0.72,
+                )
+            ax.set_xticks([0, 1], ["Original", "Modified"])
+            ax.set_ylabel(title)
+    handles = [
+        Line2D([], [], color=color, label=f"Draw {seed}")
+        for seed, color in colors.items()
+    ]
+    handles.extend(
+        Line2D(
+            [], [], color="0.3", marker=marker, linestyle="none", label=f"Seed {seed}"
+        )
+        for seed, marker in enumerate(("o", "s", "^"))
+    )
+    handles.extend(
+        Line2D([], [], color="0.3", linestyle=style, label=arm)
+        for arm, style in (("Full", "-"), ("Fixed state", "--"))
+    )
+    axes[-1, 1].legend(handles=handles, loc="best", fontsize=7, ncols=2)
+    figure.savefig(
+        out / "fixed-dimension-sensitivity.pdf", metadata={"CreationDate": None}
+    )
