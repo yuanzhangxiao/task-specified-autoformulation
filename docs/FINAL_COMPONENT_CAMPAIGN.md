@@ -106,7 +106,7 @@ make another personal-scratch clone. Use the full commit printed with the change
     printf '%s\n' "$AF_COMMIT" > "$AF_REPO_ROOT/SOURCE_COMMIT"
   fi
   [[ "$(cat "$AF_REPO_ROOT/SOURCE_COMMIT")" == "$AF_COMMIT" ]]
-  export AF_JUDGE_GATE_ROOT="$AF_GROUP/judge-jetstream-calibration-v1"
+  export AF_JUDGE_GATE_ROOT="$AF_GROUP/judge-jetstream-known-cases-v1"
   bash "$AF_REPO_ROOT/scripts/hpc/submit_final_components_aces.sh"
 )
 ```

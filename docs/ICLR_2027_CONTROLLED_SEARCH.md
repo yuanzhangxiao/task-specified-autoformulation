@@ -43,7 +43,7 @@ To run the budgeted data-quality and procedural-scaling comparison, initialize a
 The critic uses the original completed known-case calibration. Copy or point to its real `plan.json` and `summary.json`. The worker starts the pinned proposer on loopback in each H100 allocation, checks the configured serving-image digest and closes the server at job exit. The default paths for the vLLM SIF and pretrained model cache match the historical ACES campaign. Set `AF_VLLM_IMAGE` and `AF_HF_HOME` if the assets moved. The API key is inherited from the submitting shell. It is not passed to vLLM or written into run artifacts.
 
 ~~~bash
-export AF_JUDGE_GATE_ROOT="$AF_GROUP/judge-jetstream-calibration-v1"
+export AF_JUDGE_GATE_ROOT="$AF_GROUP/judge-jetstream-known-cases-v1"
 "$AF_PYTHON" -m scripts.iclr_controlled_search bind-critic --root "$AF_SEARCH_ROOT" \
     --calibration-plan "$AF_JUDGE_GATE_ROOT/plan.json" \
     --calibration-summary "$AF_JUDGE_GATE_ROOT/summary.json"

@@ -12,7 +12,7 @@ export AF_GROUP=/scratch/group/p.nairr260351.000/u.yx126462
 export AF_PYTHON=/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python
 export AF_INPUTS="$AF_GROUP/iclr-public-study-1"
 export AF_CAMPAIGN="$AF_GROUP/iclr-nonbaseline-study-1"
-export AF_JUDGE_GATE_ROOT="$AF_GROUP/judge-jetstream-calibration-v1"
+export AF_JUDGE_GATE_ROOT="$AF_GROUP/judge-jetstream-known-cases-v1"
 mkdir -p "$AF_INPUTS" "$AF_CAMPAIGN"
 unzip -oq "$AF_UPLOAD/iclr-nonbaseline-public.zip" -d "$AF_INPUTS"
 (cd "$AF_INPUTS" && sha256sum -c SHA256SUMS --quiet)

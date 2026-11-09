@@ -13,7 +13,7 @@ export AF_CAMPAIGN=${AF_CAMPAIGN:-$AF_GROUP/iclr-internal-${AF_COMMIT:0:12}}
 export AF_INPUTS="$AF_CAMPAIGN/public-inputs"
 export AF_HARMONY_ASSETS="$AF_REPO_ROOT/assets/harmony"
 export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
-export AF_JUDGE_GATE_ROOT=${AF_JUDGE_GATE_ROOT:-$AF_GROUP/judge-jetstream-calibration-v1}
+export AF_JUDGE_GATE_ROOT=${AF_JUDGE_GATE_ROOT:-$AF_GROUP/judge-jetstream-known-cases-v1}
 export AF_COMPUTE_CACHE_ROOT=${AF_COMPUTE_CACHE_ROOT:-$AF_GROUP/component-runtime-cache}
 export AF_IPC_TMP_ROOT=${AF_IPC_TMP_ROOT:-/tmp/af-ipc-u.yx126462}
 snap=hub/models--openai--gpt-oss-20b/snapshots/6cee5e81ee83917806bbde320786a8fb61efebee/config.json
@@ -96,10 +96,15 @@ case "${1:-}" in
         ;;
     submit)
         lane=${2:?pilot, anchors or stress}; lane_name "$lane" || exit 2
+        wave=${3:?wave name}
         limit=2
         if [[ "$lane" == pilot ]]; then limit=1; else qualify; fi
+        if [[ ! -s "$AF_CAMPAIGN/$lane/critic_authorization.json" ]]; then
+            echo "Missing critic authorization for $lane. Complete prepare with the compatible calibration before submitting." >&2
+            exit 1
+        fi
         credential
-        run iclr_aces_pilot submit --root "$AF_CAMPAIGN/$lane" --wave "${3:?wave name}" --account "$AF_GPU_ACCOUNT" --concurrency "$limit"
+        run iclr_aces_pilot submit --root "$AF_CAMPAIGN/$lane" --wave "$wave" --account "$AF_GPU_ACCOUNT" --concurrency "$limit"
         ;;
     status)
         squeue -u "$USER" -o '%.18i %.18j %.8T %.10M %R'

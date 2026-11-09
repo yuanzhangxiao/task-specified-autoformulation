@@ -38,15 +38,18 @@ with ZipFile(analyst) as z:
     for lane, folder in (('anchors','anchor-search-plan'), ('stress','stress-search-plan')):
         (dest / (lane + '-design.json')).write_bytes(z.read('plans/' + folder + '/plan.json'))
 PY
-python3 - "$release" <<'PY'
+python3 - "$release" "$stage/delivery.tar.gz" <<'PY'
 import hashlib
 import sys
+import tarfile
 from pathlib import Path
 root = Path(sys.argv[1])
 lines = [hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.relative_to(root).as_posix()
          for p in sorted(root.rglob('*')) if p.is_file()]
 (root / 'SHA256SUMS').write_text('\n'.join(lines)+'\n')
+# Package ordinary file data and Unix modes without the build host's extended attributes.
+with tarfile.open(sys.argv[2], "w:gz", format=tarfile.GNU_FORMAT) as archive:
+    archive.add(root, arcname=root.name)
 PY
-COPYFILE_DISABLE=1 tar -czf "$stage/delivery.tar.gz" -C "$stage" iclr-nonbaseline-aces
 mv "$stage/delivery.tar.gz" "$repo/output/iclr-nonbaseline-aces.tar.gz"
 printf 'Source %s\n%s\n' "$commit" "$repo/output/iclr-nonbaseline-aces.tar.gz"

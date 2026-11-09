@@ -17,6 +17,7 @@ On ACES, unpack the code at an archive-specific path. Keep this working director
 
 ~~~bash
 export AF_GROUP=/scratch/group/p.nairr260351.000/u.yx126462
+export AF_JUDGE_GATE_ROOT="$AF_GROUP/judge-jetstream-known-cases-v1"
 bundle="$AF_GROUP/iclr-upload/iclr-nonbaseline-aces.tar.gz"
 digest=$(sha256sum "$bundle" | cut -d' ' -f1)
 delivery="$AF_GROUP/iclr-deliveries/$digest"
@@ -27,7 +28,9 @@ export AF_CAMPAIGN="$AF_GROUP/iclr-internal-$(cut -c1-12 SOURCE_COMMIT)"
 bash scripts/hpc/iclr_aces.sh prepare
 ~~~
 
-Preparation checks the delivery and public-file hashes, the original scientific designs and their public file hashes, the installed fitting packages, the H100 image and the pinned 20B model cache. It binds each plan to the previously successful 140-orientation Jetstream calibration, using `$AF_GROUP/judge-jetstream-calibration-v1/{plan,summary}.json`. The historical environment is `/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python` with modules `GCCcore/13.2.0 Python/3.11.5`. Set `AF_JUDGE_GATE_ROOT`, `AF_HF_HOME`, `AF_VLLM_IMAGE` or `AF_PYTHON` before preparation if the verified assets have moved. An existing external installation of CasADi can be supplied via `AF_CASADI_ROOT`. If it is missing, this installs only the pinned CasADi wheel in group scratch. Keep this variable in every subsequent shell.
+For an existing deployment that stopped at critic binding, keep the same code directory and campaign. Export the gate path above and repeat `bash scripts/hpc/iclr_aces.sh prepare`. Preparation reuses the sealed plans. The ACES folder named `judge-jetstream-calibration-v1` contains the one-pair transport test. The 140-orientation gate in `judge-jetstream-known-cases-v1` has plan digest `f8436d40f99c35eaede0c97205918c3dbe2bedca1ec773e287c791a08b60a017`, matching the original final-components authorization.
+
+Preparation checks the delivery and public-file hashes, the original scientific designs and their public file hashes, the installed fitting packages, the H100 image and the pinned 20B model cache. It binds each plan to the previously successful 140-orientation Jetstream calibration, using `$AF_GROUP/judge-jetstream-known-cases-v1/{plan,summary}.json`. The historical environment is `/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python` with modules `GCCcore/13.2.0 Python/3.11.5`. Set `AF_JUDGE_GATE_ROOT`, `AF_HF_HOME`, `AF_VLLM_IMAGE` or `AF_PYTHON` before preparation if the verified assets have moved. An existing external installation of CasADi can be supplied via `AF_CASADI_ROOT`. If it is missing, this installs only the pinned CasADi wheel in group scratch. Keep this variable in every subsequent shell.
 
 ~~~bash
 module load GCCcore/13.2.0 Python/3.11.5 WebProxy
