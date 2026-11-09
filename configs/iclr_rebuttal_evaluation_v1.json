@@ -1,0 +1,23 @@
+{
+  "protocol": "iclr-nonbaseline-evidence-1",
+  "development": {
+    "data_allowed": ["public training", "public validation", "versioned public specification"],
+    "fit_parameters_on": "training",
+    "select_structure_and_pruning_on": "validation",
+    "initialization": "causal public initial readings and shared training-fitted coefficients",
+    "forbidden": ["future target forcing", "test-specific latent initialization", "evaluator-only states, equations or scores in proposal, repair, critic or selection"]
+  },
+  "prospective_cells": {
+    "acquisition_00": {"release": "phase-c-development-2", "targets": ["Gp", "I"], "auxiliaries": ["Uii"], "inputs": ["meal_rate_g_per_min", "insulin_pmol_per_kg_min"]},
+    "sensor_00": {"release": "phase-c-development-2", "targets": ["T"], "auxiliaries": [], "inputs": ["Cf", "Tf", "Tjf"]},
+    "cstr_easy_reference_events_v2": {"release": "reference-events-2", "targets": ["T"], "auxiliaries": ["C", "Tj"], "inputs": ["Cf", "Tf", "Tjf"]}
+  },
+  "official_or_confirmation": {
+    "boundary": "freeze every planned subject or explicit terminal unavailability before opening confirmation data",
+    "target_error": "free rollout normalized by training variance; average target channels with the study's declared aggregation",
+    "independent_endpoints": ["absolute target error", "paired response error relative to own control", "windowed direction", "integrated effect", "magnitude and peak time", "physical-unit hidden process when available", "separately labeled train-calibrated affine probe"],
+    "selection_using_these_endpoints": false
+  },
+  "accounting": {"prospective_algorithm_seeds": [0,1,2], "submitted_algorithm_seeds":[0,1], "record": ["requested and completed", "numerical unavailability", "admission failure", "infrastructure failure", "missing", "calls and tokens", "fit and scheduler resource cost"], "missing_is_zero": false},
+  "external_baseline_work": false
+}

@@ -110,6 +110,10 @@ def _bundle(cell, task, brief, topology, functions):
 
 def certificates(bundle: dict, cell: dict, task: dict) -> dict:
     """Actual equations determine checks; unknown semantics are never certified."""
+    if "controlled_treatment" in cell:
+        from autoformalism.rebuttal.iclr_search_controls import certificate
+
+        return certificate(bundle, cell, task)
     candidate = CandidateModel.model_validate(bundle["candidate"])
     context = ValidationContext.model_validate(bundle["initialization"]["context"])
     model = compile_candidate(candidate, context)
@@ -205,7 +209,12 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
     directory = io.round_path(root, task, index) / "calls"
     namespace = content_hash([plan["artifact_sha256"], task, index])
     _cache_records(directory, namespace)
-    settings = io.DeadlineConfig.model_validate(plan["config"]).model_settings
+    if plan.get("control_campaign"):
+        settings = io.StagedModelSettings.model_validate(
+            plan["config"]["model_settings"]
+        )
+    else:
+        settings = io.DeadlineConfig.model_validate(plan["config"]).model_settings
     if index and plan["protocol"] not in io.CONTENT_PROTOCOLS:
         settings = settings.model_copy(
             update={
@@ -256,6 +265,8 @@ def _client(root, plan, task, index, base_url, can_start, transport=None):
 def _certificate_feedback(certificate: dict, task: dict) -> dict:
     """Expose failed public predicates without leaking withheld ablation criteria."""
     if task.get("scientific_verifier") is False:
+        if "controlled_checks" in certificate:
+            return {"treatment_constraints": certificate["controlled_checks"]}
         return {}  # Offline certificates cannot leak into ablated repair feedback.
     targets = [
         p
@@ -274,6 +285,8 @@ def _certificate_feedback(certificate: dict, task: dict) -> dict:
             for p in certificate["mechanisms"]["mechanism_results"]
             if p["status"] == "failed"
         ]
+    if "controlled_checks" in certificate:
+        result["treatment_constraints"] = certificate["controlled_checks"]
     if not certificate["ablation_constraint_pass"]:
         result["no_latent_forbidden_states"] = certificate[
             "differential_states_outside_targets"

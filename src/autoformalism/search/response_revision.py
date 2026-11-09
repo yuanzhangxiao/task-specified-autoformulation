@@ -63,6 +63,14 @@ def propose(plan, task, parent, client, response):
         user = payload(
             bundle, packet, selected["fit"]["parameters"], response, feedback
         )
+        fixed = plan["cells"][task["cell"]].get("fixed_gamma")
+        if fixed is not None:
+            user["frozen_dynamic_representation"] = fixed
+            user["state_edit_policy"] = (
+                "Preserve the states, definitions, roles and observed identities. "
+                "You may revise their dynamics, processes, permitted initialization "
+                "coefficients and nonidentity algebraic readouts."
+            )
         if whole_model:
             edits.whole_model_contract(user)
         if plan["protocol"] in io.FRESH_PROTOCOLS and task.get(

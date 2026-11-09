@@ -61,6 +61,11 @@ def certificate(request: PublicFitRequest, cell: dict, task: dict) -> dict:
     model, _, _ = public._lower(request)
     return certificates(
         {
+            **(
+                {"lowered_pruning_request": True}
+                if "controlled_treatment" in cell
+                else {}
+            ),
             "candidate": model.validated.candidate.model_dump(mode="json"),
             "initialization": {
                 "context": model.validated.context.model_dump(mode="json")

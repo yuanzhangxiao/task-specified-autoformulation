@@ -1,0 +1,15 @@
+reviewer,question,measurement,evidence_path,status,limit
+7pHK,Which numbers came from validation?,Nine-case six-visit validation median and unscaled MAD,submission/reconstructed_nmse.csv,reproduced,Official held-out NMSE for our method unavailable in the submission archive
+7pHK,Where does compliance come from?,Endpoint and prompt identity for each manuscript value,submission/submitted_compliance_provenance.csv,reconstructed,85 percent prose value untraced
+7pHK,Does this test memorization?,Four named or obfuscated and canonical or perturbed cells,submission/per_case_results.csv,measured,One glucose system and two prompt variants
+7pHK,Did missed forcing affect CSTR?,Old-versus-corrected temperature per schedule,submission/cstr_reference_differences.csv,measured,Corrected same-method search requires ACES
+Ewor,What changes during model construction?,Accepted and rejected fits with equations and initialization,search-history/candidate_lineages.md,measured,Verbatim critique absent from the historical archive
+Ewor,Are structures stable across random seeds?,Matched seed pairs at the six-visit cutoff,search-history/seed_stability.csv,measured,Four of nine cases have full model structures locally
+Ewor,How much do state revisions help?,Shared initial full versus fixed representation,plans/anchor-search-plan/ablation_switch_manifest.json,production_ready,Three paired seeds await ACES
+Ewor,How do erroneous mechanisms extrapolate?,Development-fit and complexity calipers followed by paired interventions,fidelity/matched_fit_pairs.csv,measured,Development cohort; new-model confirmation is separate
+Ewor,Do hidden quantities respond correctly?,Independent disposal/production/appearance and reactor heat readouts,fidelity/hidden_process_metrics.csv,measured,Missing correspondences remain unresolved
+Ewor,How close is a supplied structure?,Validation-fitted canonical structure transfer,reference/literature_transfer_results.csv,measured,Privileged equations and parameter scales
+pp8W,What if the specification is wrong?,Jacket-invariance witness on matched public training trajectories,specification/reactor_training_pairs.csv,measured,Independent diagnostic on a noiseless reactor; search responses await ACES
+pp8W,How do noise sampling and sensor identity affect performance?,Paired acquisitions with the same forcing schedules,stress/data_robustness_manifest.json,production_ready,Conditioned reference controls measured; discovery outcomes await ACES
+pp8W,How do cost and performance scale?,Two draws per dimension and one-factor coupling and decay sweeps,stress/scaling_system_manifest.json,production_ready,Qualified generator family; learned dimension need not equal simulator dimension
+all,What would establish identifiability?,Coordinate rescaling example and required assumptions,docs/ICLR_2027_IDENTIFIABILITY.md,interpretation,Finite interventions measure behavioral fidelity

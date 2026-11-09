@@ -25,7 +25,13 @@ REVISION = "b5c939de8f754692c1647ca79fbf85e8c1e70f8a"
 def authorize(root: Path, calibration_plan: Path, summary_path: Path) -> dict:
     """Admit the tested managed transport without claiming fresh calibration."""
     io.require_open(root)
-    plan = io.verify(root)
+    return bind_calibration(root, io.verify(root), calibration_plan, summary_path)
+
+
+def bind_calibration(
+    root: Path, plan: dict, calibration_plan: Path, summary_path: Path
+) -> dict:
+    """Verify the original calibration against the supplied immutable campaign."""
     calibration = sealed_read(calibration_plan)
     summary = json.loads(summary_path.read_text())
     expected = judge.judge_protocol(sign_policy=SIGN_POLICY)
@@ -181,7 +187,10 @@ def review_one(
         previous,
         candidate,
         ValidationContext.model_validate(bundle["initialization"]["context"]),
-        (root / "public/phase_b_v1" / task["cell"] / "proposer_prompt.txt").read_text(),
+        plan.get("cells", {}).get(task["cell"], {}).get("active_prompt")
+        or (
+            root / "public/phase_b_v1" / task["cell"] / "proposer_prompt.txt"
+        ).read_text(),
         task["seed"],
         REVISION,
         sign_policy=SIGN_POLICY,
@@ -281,7 +290,10 @@ def review_final(root: Path, plan: dict, task: dict, key_supplier, *, performer=
         CandidateModel.model_validate(selected["bundle"]["candidate"]),
         candidate,
         model.validated.context,
-        (root / "public/phase_b_v1" / task["cell"] / "proposer_prompt.txt").read_text(),
+        plan.get("cells", {}).get(task["cell"], {}).get("active_prompt")
+        or (
+            root / "public/phase_b_v1" / task["cell"] / "proposer_prompt.txt"
+        ).read_text(),
         task["seed"],
         REVISION,
         sign_policy=SIGN_POLICY,
