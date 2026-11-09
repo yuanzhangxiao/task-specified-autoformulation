@@ -2,6 +2,22 @@
 
 Carry forward `c15-3` for its overall fit and `c15-2` for insulin peak timing. The meal-memory model has the lowest verified three-target training NMSE, 0.11673. The sigmoid model has the lowest insulin NMSE, 0.05592. All three outputs of both models stay positive on the dense training grid. The two equations still have distinct, measurable shortcomings.
 
+## How close were the fits to convergence?
+
+Eight of ten stages for the five children reached the 1,000-evaluation cap. The sigmoid's second stage and Candidate 21's unconstrained first stage stopped on small relative reduction in the objective. Each stage screened its starting points and optimized the one with the lowest starting objective. This leaves sensitivity to independently optimized starts unresolved.
+
+I continued each child's best available domain-passing fit for up to 512 additional evaluations using the frozen training data, original equations and original parameter bounds. For the two leaders I also checked a different joint parameter update using a local linear approximation, three step sizes and actual rollouts. For the two affine models I separately held all shared coefficients fixed and solved the constrained least-squares problem for the 32 training initial values. All 16 trajectory-specific inner solves satisfied the numerical optimality checks for that restricted problem. Every endpoint below passed the original-equation Radau/DOP853 replay and the dense output-domain check.
+
+| Child | Starting training NMSE | Best after these checks | Interpretation |
+| --- | ---: | ---: | --- |
+| `c15-3` | 0.116731101 | 0.116730917 | Stable at the reported precision. Optimizing only the initials improved NMSE by less than $10^{-11}$. The shifted peaks remain 33–34 minutes early. |
+| `c15-2` | 0.129409345 | 0.129409321 | Stable at the reported precision. The late insulin excess on the 150 g trajectory persists. |
+| `c15-4` | 0.160272944 | 0.159978686 | The basal amplitude moved from 112,580 to 3.99 million for a 0.18% improvement. Its numerical magnitude is poorly constrained by the training fit. |
+| `c15-0` | 0.939712464 | 0.828136533 | Continuing the separately recovered checkpoint improved the error by 11.9%. |
+| `c21-2` | 2.842942651 | 2.822172138 | Solving only for the training initials improved the fit with all shared coefficients fixed. The best achievable error for this equation is still open. |
+
+The evidence supports a local plateau in training error for the two leaders. Before attributing their remaining error to a missing mechanism or evaluating a final forecast comparison, optimize independently from different meal-memory timescales and different sigmoid thresholds and slopes. Check whether the peak timing and late-recovery discrepancies persist across those fits. The matched comparison below and its sealed package retain their original budgets. [Supplementary checks and fitted parameter vectors](../../output/t2-breadth-fitting-20261108/convergence-check/convergence-evidence.json)
+
 ## Matched training fits
 
 All rows use the 16 corrected public T2-easy trajectories, the same pooled target scales and the same maximum search allowance. The zero-basal control shares the Candidate 15 parent equations. The fitted vectors use the original shared coefficient names and two hidden initial values per training trajectory.
