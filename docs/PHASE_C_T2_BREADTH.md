@@ -36,6 +36,8 @@ Each task reserves up to 1,000 whole-training evaluations and 900 numerical seco
 
 The domain check samples all three targets at 0.125-minute spacing, accepting numerical undershoot of up to `1e-8` times that target's pooled training standard deviation. Peak times, rates at zero insulin, and a 30-minute zero-input extension from the 150 g meal are reported separately. Training ends at minute 300.
 
+A paired replay on two public training schedules found that both leading fits reverse the early plasma-insulin response to infused insulin. The comparison holds the model state fixed at minute 29 and replays the recorded infusion and no-infusion schedules. [Fitted equations, pulse evidence and construction feedback](../work/agent-comms/2026-11-09-t2-fitted-insulin-pulse.md)
+
 ### Reproducing the fits on Delta
 
 The verified local results and fitted models are available in the [numerical handoff](../work/agent-comms/2026-11-08-t2-breadth-fitting-results.md). For an independent Delta run, upload the bundle from your local terminal.
