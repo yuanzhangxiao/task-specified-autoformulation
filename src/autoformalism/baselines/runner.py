@@ -118,7 +118,11 @@ def _run_baseline_selection(
         if llm_client is None:
             raise ValueError("llm_feature_sindy requires one configured LLM client")
         proposed_expressions, rejected_feature_count = _propose_features(
-            llm_client, proposer_prompt, context, names
+            llm_client,
+            proposer_prompt,
+            context,
+            names,
+            feature_count=config.llm_feature_count,
         )
         extra_train = _feature_functions(proposed_expressions, context)
         extra_validation = extra_train
@@ -395,12 +399,15 @@ def _propose_features(
     task_prompt: str,
     context: ValidationContext,
     numeric_names: tuple[str, ...],
+    *,
+    feature_count: int = 4,
 ) -> tuple[dict[str, str], int]:
     allowed = (*numeric_names, context.time_symbol)
     prompt = (
         f"{task_prompt}\n\nPropose one ProposerCandidateV2 using exactly the "
-        f"observed target states {context.targets}, each with rhs `0`. Put 1 to 4 "
-        "useful causal algebraic feature transformations in `algebraics`. Every "
+        f"observed target states {context.targets}, each with rhs `0`. Put 1 to "
+        f"{feature_count} useful causal algebraic feature transformations in "
+        "`algebraics`. Every "
         "feature must be independently computable directly from the allowed symbols; "
         "do not reference another proposed algebraic and do not copy a single input "
         "symbol unchanged. Declare "
@@ -416,6 +423,10 @@ def _propose_features(
     seen_expressions: set[str] = set()
     rejected = 0
     for process in candidate.processes:
+        if len(features) == feature_count:
+            # The call asked for at most this many; any more are not used.
+            rejected += 1
+            continue
         try:
             parsed = parser.parse(
                 process.expression, location=f"feature:{process.name}"

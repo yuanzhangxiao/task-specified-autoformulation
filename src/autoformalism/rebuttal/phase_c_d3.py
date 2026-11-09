@@ -386,8 +386,12 @@ class EndpointChat:
     is: lossless normalization of its parameter list, then strict validation.
     Every reply is kept under ``conversation/`` by generation and call, with a
     digest of the request it answers; a resumed task re-reads it instead of
-    asking again, and the log records that as a cache hit.
+    asking again, and the log records that as a cache hit. A loop whose
+    replies may carry more, such as HDTwinGen's, sets `reply_type`.
     """
+
+    #: The format a model reply is requested in and read against.
+    reply_type: type[D3ModelReply] = D3ModelReply
 
     def __init__(
         self,
@@ -406,7 +410,7 @@ class EndpointChat:
             self._log, patience_seconds=patience_seconds, bypass_cache=bypass_cache
         )
         self._schema = _ollama_compatible_schema(
-            D3ModelReply.model_json_schema(mode="validation")
+            self.reply_type.model_json_schema(mode="validation")
         )
 
     def _body(self, messages: list[dict[str, str]], *, structured: bool) -> dict:
@@ -424,7 +428,7 @@ class EndpointChat:
             body["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": D3ModelReply.__name__,
+                    "name": self.reply_type.__name__,
                     "strict": True,
                     "schema": self._schema,
                 },
@@ -483,7 +487,7 @@ class EndpointChat:
             model, _ = normalize_proposer_candidate_v2_payload(value["model"])
             value = {**value, "model": model}
         try:
-            return D3ModelReply.model_validate(value)
+            return self.reply_type.model_validate(value)
         except ValidationError as exc:
             raise LLMResponseError(f"the model reply failed its format: {exc}") from exc
 

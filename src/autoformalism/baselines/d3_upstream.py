@@ -39,7 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -57,6 +57,7 @@ from autoformalism.baselines.d3_native import (
     raw_state_losses,
     validate_native_candidate,
 )
+from autoformalism.baselines.hybrid_networks import TorchNetworks, check_networks
 from autoformalism.baselines.models import BaselineDevelopmentResult
 from autoformalism.data import DevelopmentDataset
 from autoformalism.expressions import ModelValidationError, ValidationContext
@@ -248,7 +249,9 @@ def first_task_prompt(
     )
 
 
-def _completion(record: Mapping[str, Any]) -> str:
+def _completion(
+    record: Mapping[str, Any], reply_type: type[D3ModelReply] = D3ModelReply
+) -> str:
     """``generate_reflection_competition_for_generation_dict()``."""
     shares = ", ".join(
         f"{state} val loss: {value:.3g}"
@@ -256,17 +259,19 @@ def _completion(record: Mapping[str, Any]) -> str:
     )
     # Upstream shows the code as the model wrote it. The model as written is
     # shown here without the fields left at their defaults, which keeps 16 of
-    # them well inside a served context window.
-    reply = D3ModelReply.model_validate(record["reply"]).model_dump(
+    # them well inside a served context window. A hybrid model's networks are
+    # part of what it wrote; their fitted weights are not shown, as upstream
+    # shows only top-level parameters.
+    reply = reply_type.model_validate(record["reply"]).model_dump(
         mode="json", exclude_defaults=True
     )
-    model = json.dumps(
-        {
-            "model": reply["model"],
-            "parameter_initial_values": reply.get("parameter_initial_values", []),
-        },
-        ensure_ascii=False,
-    )
+    written: dict[str, Any] = {
+        "model": reply["model"],
+        "parameter_initial_values": reply.get("parameter_initial_values", []),
+    }
+    if "networks" in reply_type.model_fields:
+        written["networks"] = reply.get("networks", [])
+    model = json.dumps(written, ensure_ascii=False)
     return "\n".join(
         [
             "",
@@ -297,10 +302,7 @@ def reflection_prompt(
         f"Model description: {item['reply']['model_description']}"
         for index, item in enumerate(history_best)
     )
-    completions = "\n".join(
-        _completion(item)
-        for item in sorted(programs, key=lambda item: item["fitness"], reverse=True)
-    )
+    completions = completions_text(programs)
     return "\n".join(
         [
             "",
@@ -352,6 +354,50 @@ def regenerate_prompt(form: str, *, iteration: int, generations: int) -> str:
             "",
         ]
     )
+
+
+def completions_text(
+    programs: Sequence[Mapping[str, Any]],
+    reply_type: type[D3ModelReply] = D3ModelReply,
+) -> str:
+    """The kept models as the reflection shows them, the lowest loss last."""
+    return "\n".join(
+        _completion(item, reply_type)
+        for item in sorted(programs, key=lambda item: item["fitness"], reverse=True)
+    )
+
+
+@dataclass(frozen=True)
+class LoopVariant:
+    """What one released loop of this family fixes: its prompts and reply format.
+
+    D3 and HDTwinGen release the same loop (``D3._run`` and ``NSDT._run``)
+    with the same search settings; they differ in the prompts, and in what a
+    reply may contain. `revision` names the variant in checkpoints, so one
+    variant's checkpoint is never resumed by another.
+    """
+
+    name: str
+    revision: str
+    system_prompt: str
+    reply_type: type[D3ModelReply]
+    model_format: Callable[[ValidationContext, Sequence[str]], str]
+    first_task_prompt: Callable[..., str]
+    reflection_prompt: Callable[..., str]
+    regenerate_prompt: Callable[..., str]
+
+
+#: D3's own loop and prompts, which ``run_d3_upstream`` runs by default.
+D3_LOOP = LoopVariant(
+    name="upstream_reflection",
+    revision="d3-upstream-1",
+    system_prompt=SYSTEM_PROMPT,
+    reply_type=D3ModelReply,
+    model_format=model_format,
+    first_task_prompt=first_task_prompt,
+    reflection_prompt=reflection_prompt,
+    regenerate_prompt=regenerate_prompt,
+)
 
 
 # --- the search -------------------------------------------------------------
@@ -433,23 +479,28 @@ def run_d3_upstream(
     seed: int,
     work_directory: Path,
     identity: Mapping[str, object],
+    variant: LoopVariant | None = None,
 ) -> BaselineDevelopmentResult:
     """Run D3's loop on development data and return its selected model.
 
     Each finished generation is checkpointed, so an interrupted task resumes
     after its last one; `identity` names the run and must match on resume.
-    Test data are never read.
+    Test data are never read. `variant` runs another loop of the family, such
+    as HDTwinGen's (``hdtwingen.HDTWINGEN``); by default this is D3's.
     """
+    variant = D3_LOOP if variant is None else variant
     work_directory.mkdir(parents=True, exist_ok=True)
     checkpoint = work_directory / "d3_checkpoint.json"
-    fingerprint = _fingerprint(dataset, settings, seed, identity)
+    fingerprint = _fingerprint(dataset, settings, seed, identity, variant.revision)
     records = _load(checkpoint, fingerprint)
     observed = (*context.targets, *context.auxiliaries)
     available = _numeric_available_inputs(dataset, context)
-    form = model_format(context, available)
-    first = first_task_prompt(task_prompt, form, generations=settings.generations)
+    form = variant.model_format(context, available)
+    first = variant.first_task_prompt(
+        task_prompt, form, generations=settings.generations
+    )
     base = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": variant.system_prompt},
         {"role": "user", "content": first},
     ]
     while True:
@@ -471,7 +522,7 @@ def run_d3_upstream(
                     *base,
                     {
                         "role": "user",
-                        "content": reflection_prompt(
+                        "content": variant.reflection_prompt(
                             programs,
                             history,
                             iteration=generation,
@@ -486,7 +537,7 @@ def run_d3_upstream(
                     {"role": "assistant", "content": record["reflection"]},
                     {
                         "role": "user",
-                        "content": regenerate_prompt(
+                        "content": variant.regenerate_prompt(
                             form,
                             iteration=generation,
                             generations=settings.generations,
@@ -496,7 +547,7 @@ def run_d3_upstream(
             elif generation == 0:
                 messages = list(base)
             else:
-                again = first_task_prompt(
+                again = variant.first_task_prompt(
                     task_prompt,
                     form,
                     generations=settings.generations,
@@ -504,6 +555,11 @@ def run_d3_upstream(
                 )
                 messages = [base[0], {"role": "user", "content": again}]
             reply = chat.write_model(messages, generation=generation)
+            if not isinstance(reply, variant.reply_type):
+                raise TypeError(
+                    f"the reply is a {type(reply).__name__}, not the variant's "
+                    f"{variant.reply_type.__name__}"
+                )
             record["reply"] = reply.model_dump(mode="json")
             key = _canonical(record["reply"])
             if key in fitted:
@@ -516,12 +572,12 @@ def run_d3_upstream(
         atomic_json(
             checkpoint,
             {
-                "protocol_version": "d3-upstream-1",
+                "protocol_version": variant.revision,
                 "fingerprint": fingerprint,
                 "records": records,
             },
         )
-    return _selected(records, dataset, context, settings, seed, observed)
+    return _selected(records, dataset, context, settings, seed, observed, variant)
 
 
 def _fit(
@@ -533,12 +589,38 @@ def _fit(
     available: tuple[str, ...],
     seed: int,
 ) -> None:
-    """Fit one new model and score it as D3 does, filling in its record."""
+    """Fit one new model and score it as D3 does, filling in its record.
+
+    A hybrid reply's declared networks are built, fitted with the parameters
+    and scored with them; their fitted weights go in the record.
+    """
     candidate = enrich_proposal_v2(reply.model, context.targets)
     record["candidate"] = candidate.model_dump(mode="json")
     starts = initial_values(reply)
     record["initial_values"] = starts
-    validate_native_candidate(candidate, observed, available)
+    networks = tuple(getattr(reply, "networks", ()))
+    hybrid: dict[str, Any] = {}
+    if networks:
+        names = {item.name for item in candidate.parameters}
+        parsed = check_networks(
+            networks,
+            input_symbols={*observed, *available, *names, "t"},
+            taken={
+                *observed,
+                *available,
+                *names,
+                *(item.name for item in candidate.processes),
+                "t",
+            },
+        )
+
+        def build(torch, weights=None):
+            return TorchNetworks(networks, parsed, torch, weights)
+
+        hybrid = {"networks": build}
+    validate_native_candidate(
+        candidate, observed, (*available, *(item.name for item in networks))
+    )
     fit = fit_native_d3(
         candidate,
         dataset.train,
@@ -546,8 +628,15 @@ def _fit(
         targets=context.targets,
         seed=seed + record["generation"],
         initial_values=starts,
+        **hybrid,
     )
-    loss, per_state = raw_state_losses(candidate, dataset.validation, fit.parameters)
+    if networks:
+        weights = fit.network_weights
+        record["network_weights"] = weights
+        hybrid = {"networks": lambda torch: build(torch, weights)}
+    loss, per_state = raw_state_losses(
+        candidate, dataset.validation, fit.parameters, **hybrid
+    )
     record.update(
         parameters=dict(fit.parameters),
         fitness=loss,
@@ -566,6 +655,7 @@ def _selected(
     settings: D3Settings,
     seed: int,
     observed: tuple[str, ...],
+    variant: LoopVariant,
 ) -> BaselineDevelopmentResult:
     """D3's choice: the kept model with the lowest validation loss."""
     programs, _, _ = replay(records, settings.keep_top_samples)
@@ -579,7 +669,7 @@ def _selected(
     best = programs[0]
     candidate = CandidateModel.model_validate(best["candidate"])
     hyperparameters: dict[str, float | int | str] = {
-        "loop": "upstream_reflection",
+        "loop": variant.name,
         "upstream_revision": D3_UPSTREAM_REVISION,
         "generations_completed": len(records),
         "selected_generation": int(best["generation"]),
@@ -599,6 +689,12 @@ def _selected(
         "modeled_observed_channels": json.dumps(observed),
         "selected_epochs_completed": int(best["epochs_completed"]),
     }
+    hybrid: dict[str, object] = {}
+    if best["reply"].get("networks"):
+        hybrid = {
+            "networks": best["reply"]["networks"],
+            "network_weights": best["network_weights"],
+        }
     return BaselineDevelopmentResult(
         method="d3_native_no_tools",
         benchmark_id=dataset.benchmark_id,
@@ -614,6 +710,7 @@ def _selected(
             "initial_values": dict(best["initial_values"]),
             "validation_loss": float(best["fitness"]),
             "model_description": best["reply"]["model_description"],
+            **hybrid,
         },
         training_normalized_mse=float(best["training_mse"]),
         validation_normalized_mse=float(best["validation_mse"]),
@@ -626,6 +723,7 @@ def _fingerprint(
     settings: D3Settings,
     seed: int,
     identity: Mapping[str, object],
+    revision: str = "d3-upstream-1",
 ) -> str:
     payload = {
         "benchmark_id": dataset.benchmark_id,
@@ -635,7 +733,7 @@ def _fingerprint(
         "settings": asdict(settings),
         "seed": seed,
         "identity": dict(identity),
-        "loop_revision": "d3-upstream-1",
+        "loop_revision": revision,
     }
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 

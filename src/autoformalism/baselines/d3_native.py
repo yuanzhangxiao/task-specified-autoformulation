@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import copy
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,6 +25,8 @@ class NativeD3Fit:
     validation_mse: float
     epochs_completed: int
     target_scales: dict[str, float]
+    #: A hybrid model's fitted network weights; None for a white-box model.
+    network_weights: dict[str, list[dict]] | None = None
 
 
 class NativeD3Error(RuntimeError):
@@ -91,12 +93,19 @@ def fit_native_d3(
     validation_interval: int = 10,
     patience_checks: int = 100,
     initial_values: Mapping[str, float] | None = None,
+    networks: Callable[[Any], Any] | None = None,
 ) -> NativeD3Fit:
     """Fit with Adam and teacher-forced one-step Euler updates like upstream D3.
 
     A parameter starts from `initial_values` when it is named there, as in
     upstream D3, whose model code sets each starting value; otherwise from the
     midpoint of its declared initialization range, or 1.
+
+    `networks` builds a hybrid model's declared networks from torch, as a
+    ``hybrid_networks.TorchNetworks``; it is called after torch is seeded, so
+    their starting weights follow from `seed`. Their outputs enter every
+    evaluation under their names, and their weights are fitted with the
+    parameters and kept at the same early-stopping checkpoint.
     """
     torch = _import_torch()
     torch.manual_seed(seed)
@@ -121,23 +130,36 @@ def fit_native_d3(
         )
         for item in candidate.parameters
     }
-    if not parameters:
-        train_mse = _target_mse(candidate, training, {}, targets, scales, torch)
-        validation_mse = _target_mse(
-            candidate, validation, {}, targets, scales, torch
+    built = None if networks is None else networks(torch)
+    extra = network_outputs(built)
+    trainable = list(parameters.values())
+    if built is not None:
+        trainable += built.parameters()
+    if not trainable:
+        train_mse = _target_mse(
+            candidate, training, {}, targets, scales, torch, extra
         )
-        return NativeD3Fit({}, train_mse, validation_mse, 0, scales)
+        validation_mse = _target_mse(
+            candidate, validation, {}, targets, scales, torch, extra
+        )
+        return NativeD3Fit(
+            {},
+            train_mse,
+            validation_mse,
+            0,
+            scales,
+            None if built is None else built.export(),
+        )
 
-    optimizer = torch.optim.Adam(
-        list(parameters.values()), lr=learning_rate, weight_decay=0.0
-    )
+    optimizer = torch.optim.Adam(trainable, lr=learning_rate, weight_decay=0.0)
     best_state: dict[str, Any] | None = None
+    best_networks: Any = None
     best_validation = float("inf")
     stale_checks = 0
     epochs_completed = 0
     for epoch in range(epochs):
         optimizer.zero_grad(set_to_none=True)
-        loss = _raw_state_loss(candidate, training, parameters, torch)
+        loss = _raw_state_loss(candidate, training, parameters, torch, extra)
         if not bool(torch.isfinite(loss)):
             raise NativeD3Error("native D3 training loss became nonfinite")
         loss.backward()
@@ -147,7 +169,9 @@ def fit_native_d3(
             continue
         with torch.no_grad():
             validation_loss = float(
-                _raw_state_loss(candidate, validation, parameters, torch).item()
+                _raw_state_loss(
+                    candidate, validation, parameters, torch, extra
+                ).item()
             )
         if not np.isfinite(validation_loss):
             raise NativeD3Error("native D3 validation loss became nonfinite")
@@ -157,6 +181,8 @@ def fit_native_d3(
                 name: copy.deepcopy(value.detach())
                 for name, value in parameters.items()
             }
+            if built is not None:
+                best_networks = built.snapshot()
             stale_checks = 0
         else:
             stale_checks += 1
@@ -165,14 +191,24 @@ def fit_native_d3(
     if best_state is not None:
         for name, value in parameters.items():
             value.data.copy_(best_state[name])
+        if best_networks is not None:
+            built.restore(best_networks)
     fitted = {name: float(value.detach().item()) for name, value in parameters.items()}
     return NativeD3Fit(
         fitted,
-        _target_mse(candidate, training, fitted, targets, scales, torch),
-        _target_mse(candidate, validation, fitted, targets, scales, torch),
+        _target_mse(candidate, training, fitted, targets, scales, torch, extra),
+        _target_mse(candidate, validation, fitted, targets, scales, torch, extra),
         epochs_completed,
         scales,
+        None if built is None else built.export(),
     )
+
+
+def network_outputs(networks: Any):
+    """The hook that adds declared networks' outputs to an evaluation, if any."""
+    if networks is None:
+        return None
+    return lambda environment: networks.outputs(environment, _evaluate)
 
 
 def evaluate_native_d3(
@@ -198,21 +234,26 @@ def raw_state_losses(
     candidate: CandidateModel,
     split: DatasetSplit,
     parameters: dict[str, float],
+    *,
+    networks: Callable[[Any], Any] | None = None,
 ) -> tuple[float, dict[str, float]]:
     """D3's validation loss and each modeled state's share of it.
 
     The one-step squared error over every state the model advances, in the
     data's own units, as upstream D3 scores a model and as the fit's early
     stopping does: averaged within each trajectory, then over trajectories.
-    The overall loss is the mean of the per-state losses.
+    The overall loss is the mean of the per-state losses. `networks` builds a
+    hybrid model's networks with their fitted weights, as ``fit_native_d3``
+    takes a builder.
     """
     torch = _import_torch()
+    extra = network_outputs(None if networks is None else networks(torch))
     states = observed_state_names(candidate)
     shares: dict[str, list[float]] = {name: [] for name in states}
     with torch.no_grad():
         for trajectory in split.trajectories:
             predictions, truth = _predict_trajectory(
-                candidate, trajectory, parameters, torch
+                candidate, trajectory, parameters, torch, extra
             )
             squared = torch.mean((predictions - truth) ** 2, dim=0)
             for index, name in enumerate(states):
@@ -224,19 +265,21 @@ def raw_state_losses(
     return loss, per_state
 
 
-def _raw_state_loss(candidate, split, parameters, torch):
+def _raw_state_loss(candidate, split, parameters, torch, extra=None):
     pieces = []
     for trajectory in split.trajectories:
         predictions, truth = _predict_trajectory(
-            candidate, trajectory, parameters, torch
+            candidate, trajectory, parameters, torch, extra
         )
         pieces.append(torch.mean((predictions - truth) ** 2))
     return torch.mean(torch.stack(pieces))
 
 
-def _target_mse(candidate, split, parameters, targets, scales, torch) -> float:
+def _target_mse(
+    candidate, split, parameters, targets, scales, torch, extra=None
+) -> float:
     errors = _per_target_squared_errors(
-        candidate, split, parameters, targets, scales, torch
+        candidate, split, parameters, targets, scales, torch, extra
     )
     return float(
         np.mean([np.mean(np.concatenate(values)) for values in errors.values()])
@@ -244,7 +287,7 @@ def _target_mse(candidate, split, parameters, targets, scales, torch) -> float:
 
 
 def _per_target_squared_errors(
-    candidate, split, parameters, targets, scales, torch
+    candidate, split, parameters, targets, scales, torch, extra=None
 ):
     states = observed_state_names(candidate)
     indexes = {name: states.index(name) for name in targets}
@@ -252,7 +295,7 @@ def _per_target_squared_errors(
     with torch.no_grad():
         for trajectory in split.trajectories:
             predictions, truth = _predict_trajectory(
-                candidate, trajectory, parameters, torch
+                candidate, trajectory, parameters, torch, extra
             )
             for target, index in indexes.items():
                 residual = (
@@ -282,7 +325,9 @@ def _target_scales(split: DatasetSplit, targets: tuple[str, ...]) -> dict[str, f
     }
 
 
-def _predict_trajectory(candidate, trajectory: Trajectory, parameters, torch):
+def _predict_trajectory(
+    candidate, trajectory: Trajectory, parameters, torch, extra=None
+):
     state_names = observed_state_names(candidate)
     state_columns = [
         trajectory.targets.get(name, trajectory.auxiliaries.get(name))
@@ -328,6 +373,9 @@ def _predict_trajectory(candidate, trajectory: Trajectory, parameters, torch):
             for name, value in parameters.items()
         }
     )
+    if extra is not None:
+        # A hybrid model's networks, from the states, inputs and parameters.
+        environment.update(extra(environment))
     parser = baseline_parser()
     for process in _ordered_processes(candidate, set(environment)):
         tree = parser.parse(

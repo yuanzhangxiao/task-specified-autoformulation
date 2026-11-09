@@ -41,6 +41,8 @@ class BaselineConfig(BaseModel):
     d3_generations: int = Field(default=20, ge=1)
     d3_patience: int = Field(default=20, ge=1)
     wall_timeout_seconds: float = Field(default=1_800.0, gt=0.0)
+    #: How many features one llm_feature_sindy design call may propose.
+    llm_feature_count: int = Field(default=4, ge=1, le=16)
 
     @field_validator("sindy_thresholds")
     @classmethod

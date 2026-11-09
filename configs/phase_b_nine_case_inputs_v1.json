@@ -1,0 +1,85 @@
+{
+  "schema_version": "phase-b-nine-case-inputs-1",
+  "purpose": "The public development inputs of the nine-case Phase B comparison, as its campaign recorded them, so that further baselines run on exactly those training and validation trajectories and prompts. Test data are not part of it.",
+  "source_campaign_plan_sha256": "cdfbd68d07a88f510a869c595c457dfcdf6595d42cf6fb8983bf10a901d5b950",
+  "cells": {
+    "phase_b_dalla_man_t1_canonical_named_easy": {
+      "tier": "easy",
+      "files": {
+        "train.csv": "d652fd6d2cccd1ebffd4278e99a9646de5c03c23099a2b71d8940208738153b0",
+        "validation.csv": "e2224144b00990e863787e4d9d48f1a15c08754380a385d5e5d6e7285d1b450e",
+        "proposer_prompt.txt": "b8ec7ca58d32da32652894397ca708b8058d533826d8be6dc994096c5fda92d4"
+      }
+    },
+    "phase_b_anonymous_system_t1_canonical_obfuscated_easy": {
+      "tier": "easy",
+      "files": {
+        "train.csv": "d3c6ca74e8ebfeed5837e19ab992e34ff055f4b2f607512f33bd421bc3f50677",
+        "validation.csv": "22191234ddc9eb304de6068aca80a1b23ce4bfa8260710387eacac40c2e62add",
+        "proposer_prompt.txt": "a1e89f8846c33085730df3d67708aa45a8412554b3f85df0626e57bc32be36bb"
+      },
+      "header_renames": {
+        "u06": "u01"
+      }
+    },
+    "phase_b_dalla_man_t1_perturbed_named_easy": {
+      "tier": "easy",
+      "files": {
+        "train.csv": "9e6a647b47996cba6e079fb70a8c07e446c542796ec88c125588de4f97d5d0ef",
+        "validation.csv": "4fd0265e3dd71c37a227c26f94131193043c19c13c5cde2d233aa467bc432465",
+        "proposer_prompt.txt": "b8ec7ca58d32da32652894397ca708b8058d533826d8be6dc994096c5fda92d4"
+      }
+    },
+    "phase_b_anonymous_system_t1_perturbed_obfuscated_easy": {
+      "tier": "easy",
+      "files": {
+        "train.csv": "39de1c33aa525f981a9a03944abbd72b1b9b5436c06a458a8dc1591b531a51cc",
+        "validation.csv": "cb62e75822592542b03d7bce17600ef66fa3536be9da43b82531964be649fcbb",
+        "proposer_prompt.txt": "a1e89f8846c33085730df3d67708aa45a8412554b3f85df0626e57bc32be36bb"
+      },
+      "header_renames": {
+        "u06": "u01"
+      }
+    },
+    "phase_b_dalla_man_t1_canonical_named_hard": {
+      "tier": "hard",
+      "files": {
+        "train.csv": "a4e94ea53e43fa5598fdc6667f9076d0e814a6c8de6508c6cd07ebf11b79df12",
+        "validation.csv": "cedc92ab099335200fd54530841c951d830b56d369462e1ea6bbdcf3a535bbef",
+        "proposer_prompt.txt": "ede5a1db0a828a8d6582bb80614d536897941b6e6164f59e2a426b0c905a2fe3"
+      }
+    },
+    "phase_b_dalla_man_t2_canonical_named_easy": {
+      "tier": "easy",
+      "files": {
+        "train.csv": "c01583030010c99c68284c49f17e0593fbaeffc6a003c024a5867d1e66c4262e",
+        "validation.csv": "31e963c8da43e688ad428506a9ade8faee91eedb7c8f81eb4eae8977cf502979",
+        "proposer_prompt.txt": "f8268dff206d6337dd284f98a48f26d50bb114877336561fff7548c69c94d8cd"
+      }
+    },
+    "phase_b_dalla_man_t2_canonical_named_hard": {
+      "tier": "hard",
+      "files": {
+        "train.csv": "10a537483f7efd3eba9326c6092ea3a51cdfbadfb83bac0e6d2f6e8099c9a8f1",
+        "validation.csv": "d2ba03abf3a074ac4d90ef88327cc127898f6f2a8fb2189380b3e589cc9cdcac",
+        "proposer_prompt.txt": "563356816ed4d6f33ed4bbe12538ba077232455588eab46b8fe7a8801ebbf210"
+      }
+    },
+    "phase_b_cstr_controlled_reactor_mechanism_canonical_named_easy": {
+      "tier": "easy",
+      "files": {
+        "train.csv": "0b9fa01085fd838e1d5702020d03102253204260baed0f1a957ba5afa345671e",
+        "validation.csv": "552251097051472afd1d92e1b205759e067fd0b2f055c915a2269dc8905f304c",
+        "proposer_prompt.txt": "0a3b4c055402ed26352363c4d367b791c41460ea21e8ca42043c495ea68eb99c"
+      }
+    },
+    "phase_b_alien_device_unknown_device_mechanism_canonical_functional_easy": {
+      "tier": "easy",
+      "files": {
+        "train.csv": "5b3c44112a9ac08371b1113ea21d935c407b8256e1b0097c800c6b2c26f3903f",
+        "validation.csv": "c18fa31b6a703cfc451fe008640973c7af82f77a85e3fa245b570180cfe374ae",
+        "proposer_prompt.txt": "7663bba9e84752550781f617b31f5f3391caf9967c77695fcfc5fff5423ab9a9"
+      }
+    }
+  }
+}

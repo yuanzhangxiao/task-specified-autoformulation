@@ -1,0 +1,24 @@
+{
+  "schema_version": "phase-b-nine-case-d3-plan-1",
+  "status": "frozen_before_calls",
+  "purpose": "Plumbing check before the full nine-case HDTwinGen campaign: one two-target cell, one repetition, three generations (five requests) against the hosted model. The user approved these baselines, settings and three repetitions on 2026-11-09 (HST).",
+  "development_only": true,
+  "inputs_protocol": "phase-b-nine-case-inputs-1",
+  "endpoint": "jetstream2_hosted",
+  "model": "gpt-oss-120b",
+  "method": "hdtwingen",
+  "cells": [
+    {
+      "benchmark_id": "phase_b_dalla_man_t2_canonical_named_hard",
+      "tier": "hard",
+      "public_prompt_sha256": "563356816ed4d6f33ed4bbe12538ba077232455588eab46b8fe7a8801ebbf210"
+    }
+  ],
+  "repetitions": [
+    0
+  ],
+  "generations": 3,
+  "patience": 3,
+  "test_data_opened": false,
+  "private_reference_opened": false
+}
