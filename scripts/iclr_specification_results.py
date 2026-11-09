@@ -245,7 +245,13 @@ def report(
         },
     )
     table(output / "spec_sensitivity.csv", rows)
-    table(output / "independent_spec_effects.csv", effects)
+    effects_path = output / "independent_spec_effects.csv"
+    if effects:
+        table(effects_path, effects)
+    else:
+        effects_path.write_text(
+            "cell_alias,arm,seed,source_id,case,quantity,readout,effect_rse,status\n"
+        )
     table(output / "reactor_training_pairs.csv", witness["restricted"])
     largest = max(
         (r["abs_temperature_gap_K"] for r in witness["restricted"]), default=0.0

@@ -72,3 +72,10 @@ Offline verification uses schema-valid deterministic synthetic replies, the subm
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 "$AF_PYTHON" -m scripts.smoke_iclr_controlled_search
 "$AF_PYTHON" -m pytest -q tests/test_iclr_controlled_search.py
 ~~~
+
+After the 48-row anchor export, render both seed-0 Full models and each paired treatment’s equation and fitted-coefficient changes. Terminal failures remain visible.
+
+~~~bash
+"$AF_PYTHON" -m scripts.iclr_equation_examples --search "$AF_SEARCH_ROOT" \
+    --output "$AF_SEARCH_ROOT/paired-equations-seed0.md"
+~~~

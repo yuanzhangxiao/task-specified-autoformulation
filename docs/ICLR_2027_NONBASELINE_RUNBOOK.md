@@ -70,6 +70,8 @@ cd "$AF_REPO_ROOT"
 "$AF_PYTHON" -m scripts.plot_iclr_anchor_fidelity --root "$AF_EVAL/fidelity"
 "$AF_PYTHON" -m scripts.iclr_specification_results --search "$AF_CAMPAIGN/anchors" \
   --public "$AF_EVIDENCE/stress/public" --fidelity "$AF_EVAL/fidelity" --output "$AF_EVAL/specification"
+"$AF_PYTHON" -m scripts.iclr_equation_examples --search "$AF_CAMPAIGN/anchors" \
+  --output "$AF_EVAL/specification/paired-equations-seed0.md"
 for lane in anchors stress; do
   if [[ "$lane" == anchors ]]; then
     reference_root="$AF_EVIDENCE/reference"
