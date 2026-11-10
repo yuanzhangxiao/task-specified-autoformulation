@@ -213,7 +213,8 @@ def test_reprepared_design_checks_data_and_all_scientific_fields(tmp_path):
         pilot.verify_design(folder, tmp_path / "wrong.json", roster)
 
 
-def test_historical_proposer_inherits_its_casadi_and_project_paths(tmp_path):
+@pytest.mark.parametrize("job_local", [True, False])
+def test_historical_proposer_inherits_its_casadi_and_project_paths(tmp_path, job_local):
     """Exercise path propagation across both native proposer launchers."""
     import hashlib
     import json
@@ -276,7 +277,10 @@ def test_historical_proposer_inherits_its_casadi_and_project_paths(tmp_path):
             "AF_OUTPUT_ROOT": str(jobs),
             "AF_COMMIT": commit,
             "AF_HF_HOME": str(tmp_path),
-            "AF_COMPUTE_CACHE_ROOT": str(tmp_path / "cache"),
+            "TMPDIR": str(tmp_path / "node"),
+            "AF_COMPUTE_CACHE_ROOT": "job-local"
+            if job_local
+            else str(tmp_path / "cache"),
             "AF_IPC_TMP_ROOT": ipc,
             "SLURM_JOB_ID": "999",
             "AF_VLLM_IMAGE": str(image),
@@ -295,3 +299,4 @@ def test_historical_proposer_inherits_its_casadi_and_project_paths(tmp_path):
         )
     assert proc.returncode == 41, proc.stderr
     assert verification.read_text().splitlines() == [f"{code}/src:{code}:{casadi}"] * 2
+    assert (tmp_path / ("node" if job_local else "cache") / "999").is_dir()

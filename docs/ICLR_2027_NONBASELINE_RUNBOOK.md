@@ -101,7 +101,7 @@ export AF_CSTR_RUN="$AF_GROUP/iclr-corrected-historical-cstr"
 export AF_GPU_ACCOUNT="$AF_ACCOUNT" AF_CPU_ACCOUNT="${AF_CPU_ACCOUNT:-$AF_ACCOUNT}"
 export AF_VLLM_IMAGE="${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}"
 export AF_HF_HOME="${AF_HF_HOME:-/scratch/user/u.yx126462/huggingface-cache}"
-export AF_COMPUTE_CACHE_ROOT="$AF_GROUP/component-runtime-cache"
+export AF_COMPUTE_CACHE_ROOT=job-local
 export AF_IPC_TMP_ROOT=/tmp/af-ipc-u.yx126462
 "$AF_PYTHON" -m scripts.iclr_cstr_correction --original "$AF_ORIGINAL" \
   --corrected "$AF_EVIDENCE/corrected-easy" --output "$AF_CSTR_PUBLIC"

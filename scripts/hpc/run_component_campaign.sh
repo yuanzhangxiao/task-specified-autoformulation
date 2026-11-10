@@ -18,6 +18,9 @@ fi
 case "${1:?stage}" in
   propose)
     unset AF_JETSTREAM_API_KEY
+    if [[ ${AF_COMPUTE_CACHE_ROOT:-} == job-local ]]; then
+      export AF_COMPUTE_CACHE_ROOT="${TMPDIR:?Set by Slurm on the ACES compute node}"
+    fi
     if [[ "${AF_SITE:-aces}" == aces ]]; then module load WebProxy; fi
     exec bash scripts/hpc/run_staged_topology_server.sh
     ;;

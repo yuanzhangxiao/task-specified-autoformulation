@@ -14,7 +14,8 @@ export AF_INPUTS="$AF_CAMPAIGN/public-inputs"
 export AF_HARMONY_ASSETS="$AF_REPO_ROOT/assets/harmony"
 export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
 export AF_JUDGE_GATE_ROOT=${AF_JUDGE_GATE_ROOT:-$AF_GROUP/judge-jetstream-known-cases-v1}
-export AF_COMPUTE_CACHE_ROOT=${AF_COMPUTE_CACHE_ROOT:-$AF_GROUP/component-runtime-cache}
+# Resolve job-local on the compute node, where Slurm supplies TMPDIR.
+export AF_COMPUTE_CACHE_ROOT=${AF_COMPUTE_CACHE_ROOT:-job-local}
 export AF_IPC_TMP_ROOT=${AF_IPC_TMP_ROOT:-/tmp/af-ipc-u.yx126462}
 snap=hub/models--openai--gpt-oss-20b/snapshots/6cee5e81ee83917806bbde320786a8fb61efebee/config.json
 if [[ -z ${AF_HF_HOME:-} ]]; then
