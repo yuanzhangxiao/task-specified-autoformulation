@@ -75,6 +75,15 @@ bash scripts/hpc/run_iclr_cached_pilot_aces.sh submit cpu-recovery1
 
 The worker checks the sealed plan, scientific runtime, cached visit identities and actual fit and pruning directories. It disables proposer transport. A final prune that changes the selected equations can still require the Jetstream critic, so the launcher accepts the key at its hidden prompt. The original fit budget counts a started child with no final fit receipt as interrupted and retains its eligible parent. Search and pruning use the frozen selection rules. The worker runs the normal qualification audit after the block completes. Read the fixed-arm visit disposition before using any numerical result. Scheduler accounting includes the CPU wave under its own array ID.
 
+For job `2334957_0`, a separate engineering replay at `$AF_GROUP/iclr-pilot-fit-r1-2334957` starts the fixed-state fit from its identical frozen request and warm start. The replay carries the three completed visits, all recorded proposer calls, all six successful critic responses and the two preceding array IDs. Its `engineering-fit-replay.json` records the inherited artifacts and the original interrupted optimizer files. The complete original attempt also has a verified on-cluster archive. Charge the extra bounded CPU fit to this engineering replay. The seed-97 endpoints are excluded from the research comparison.
+
+~~~bash
+campaign=/scratch/group/p.nairr260351.000/u.yx126462/iclr-pilot-fit-r1-2334957
+env -u AF_JETSTREAM_API_KEY bash "$campaign/resume.sh"
+source "$campaign/activate.sh"
+iclr status pilot
+~~~
+
 The pilot receipt covers the sealed shared coefficients, model, initialization and critic identities, the fixed-state revision prompt, actual provider responses, pruning, pre-freeze restart and frozen export. Restart rechecks scientific and call checkpoint hashes with the proposer disabled. The GPU and token ledgers give measured costs for this small workload. Later visits, scientific rejection, serving restarts and the number of critique units change those costs.
 
 If `finish pilot` writes `qualified=false` and returns an error, inspect `pilot_receipt.json`, `shared_initial_receipts.json`, `search_visits.csv`, `paired_ablation_results.csv`, and the Slurm job logs. A frozen pilot with no finite shared start is a recorded outcome of the bounded search. It leaves fit-dependent critique or pruning paths unexercised. A transport or configuration error, by contrast, needs diagnosis from the provider or scheduler receipts. Once the roster is frozen, another wave on that root cannot produce a new model. Retain that pilot and its cost. If a specific engineering defect is identified, document its fix and prospectively version a separate engineering study in a fresh root. Changing seeds or budgets in response to the outcome would change the study. Production checks the relevant operational coverage without imposing an NMSE threshold.
