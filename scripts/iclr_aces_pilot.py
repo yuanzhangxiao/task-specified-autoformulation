@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -157,8 +158,8 @@ def pending_ids(root: Path) -> list[int]:
     ]
 
 
-def finish(root: Path) -> dict:
-    """Check idempotent resume, then freeze and audit the engineering pilot."""
+def checked_pilot_plan(root: Path) -> dict:
+    """Require the declared engineering pilot and its calibrated critic."""
     plan = sealed_read(root / "plan.json")
     if (
         plan["protocol"] != study.PROTOCOL
@@ -172,6 +173,77 @@ def finish(root: Path) -> dict:
     ):
         raise ValueError("not the declared two-visit development pilot")
     critic.checked_authorization(root, plan)
+    return plan
+
+
+def check_cached_pilot(root: Path) -> None:
+    """Verify cached model calls and test writes in the remaining fit directories."""
+    plan = checked_pilot_plan(root)
+    if (
+        plan["source_sha256"] != public._source_identity()
+        or plan["runtime"] != public._runtime()
+    ):
+        raise ValueError("controlled-search implementation or runtime changed")
+    with io.execution_lease(root, exclusive=True):
+        io.require_open(root)
+        destinations = {root, root / "logs"}
+        for task in plan["blocks"][0]["tasks"]:
+            pruning = root / "pruning" / task["task_id"]
+            destinations.update((pruning, pruning / "control", pruning / "pruned"))
+            for visit in range(plan["visits"]):
+                if io.read_round(root, task, visit) is not None:
+                    continue
+                directory = io.round_path(root, task, visit)
+                proposal_path = directory / "proposal.json"
+                review_path = directory / "critic.json"
+                if not proposal_path.is_file() or not review_path.is_file():
+                    raise ValueError(
+                        f"missing saved proposal or critic review at {directory}"
+                    )
+                proposal, review = sealed_read(proposal_path), sealed_read(review_path)
+                if (
+                    proposal["task"] != task
+                    or proposal["round"] != visit
+                    or review["task"] != task
+                    or review["round"] != visit
+                    or review["identity"] != plan["artifact_sha256"]
+                    or review["proposal_sha256"] != proposal["artifact_sha256"]
+                ):
+                    raise ValueError(f"cached visit lineage differs at {directory}")
+                destinations.update((directory, directory / "fit"))
+        for directory in sorted(destinations):
+            directory.mkdir(parents=True, exist_ok=True)
+            # Sibling directories on ACES can have different Lustre metadata targets.
+            with tempfile.NamedTemporaryFile(
+                dir=directory, prefix=".resume-write-"
+            ) as probe:
+                probe.write(b"checkpoint\n")
+                probe.flush()
+                os.fsync(probe.fileno())
+
+
+def run_cached_pilot(root: Path, seconds: int) -> dict:
+    """Resume cached proposals on CPUs and use Jetstream for new final reviews."""
+    check_cached_pilot(root)
+    if not os.environ.get("AF_JETSTREAM_API_KEY"):
+        raise ValueError("supply the critic credential before any final review starts")
+
+    def no_proposer(*args):
+        raise RuntimeError("CPU resume attempted a new proposer call")
+
+    return study.run_block(
+        root,
+        0,
+        "http://127.0.0.1:1",
+        seconds,
+        transport=no_proposer,
+        token_transport=no_proposer,
+    )
+
+
+def finish(root: Path) -> dict:
+    """Check idempotent resume, then freeze and audit the engineering pilot."""
+    plan = checked_pilot_plan(root)
     resume_path = root / "pilot_resume.json"
     if not resume_path.exists():
         if pending_ids(root):
@@ -320,7 +392,9 @@ def finish(root: Path) -> dict:
     )
 
 
-def submit(root: Path, wave: str, account: str, concurrency: int) -> str:
+def submit(
+    root: Path, wave: str, account: str, concurrency: int, *, cached_pilot: bool = False
+) -> str:
     """Submit unfinished blocks once per wave and prevent overlapping waves."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", wave) or concurrency not in (1, 2):
         raise ValueError("use a named wave and concurrency one or two")
@@ -350,6 +424,10 @@ def submit(root: Path, wave: str, account: str, concurrency: int) -> str:
             if set(ids.split()).intersection(prior):
                 raise ValueError("a previous wave is active; wait for it to exit")
         io.require_open(root)
+        if cached_pilot:
+            if concurrency != 1:
+                raise ValueError("cached pilot requires concurrency one")
+            check_cached_pilot(root)
         indices = pending_ids(root)
         if not indices:
             return "no pending blocks"
@@ -357,18 +435,25 @@ def submit(root: Path, wave: str, account: str, concurrency: int) -> str:
         (root / "logs").mkdir(exist_ok=True)
         array = ",".join(map(str, indices)) + f"%{concurrency}"
         os.environ["AF_SEARCH_ROOT"] = str(root.resolve())
+        worker = io.REPO / "scripts/hpc/run_iclr_controlled_search_aces.sh"
+        partition = "gpu"
+        if cached_pilot:
+            helper = Path(__file__).resolve()
+            os.environ["AF_PILOT_RESUME_CLI"] = str(helper)
+            worker = helper.parent / "hpc/run_iclr_cached_pilot_aces.sh"
+            partition = "cpu"
         return submit_job(
             folder,
             "array",
             [
                 f"--account={account}",
-                "--partition=gpu",
+                f"--partition={partition}",
                 f"--array={array}",
                 "--export=ALL",
                 f"--output={root}/logs/{wave}-%A_%a.out",
                 f"--error={root}/logs/{wave}-%A_%a.err",
             ],
-            io.REPO / "scripts/hpc/run_iclr_controlled_search_aces.sh",
+            worker,
             "run",
             0,
         )
@@ -377,7 +462,14 @@ def submit(root: Path, wave: str, account: str, concurrency: int) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     p = parser.add_subparsers(dest="stage", required=True)
-    for cmd in ("prepare", "finish", "check-design", "submit"):
+    for cmd in (
+        "prepare",
+        "finish",
+        "check-design",
+        "submit",
+        "check-cached",
+        "run-cached",
+    ):
         sub = p.add_parser(cmd)
         sub.add_argument("--root", type=Path, required=True)
         if cmd == "prepare":
@@ -386,9 +478,12 @@ def main() -> None:
             sub.add_argument("--original", type=Path, required=True)
             sub.add_argument("--roster", type=Path, required=True)
         if cmd == "submit":
+            sub.add_argument("--cached-pilot", action="store_true")
             sub.add_argument("--wave", required=True)
             sub.add_argument("--account", required=True)
             sub.add_argument("--concurrency", type=int, default=2)
+        if cmd == "run-cached":
+            sub.add_argument("--seconds", type=int, required=True)
     a = parser.parse_args()
     if a.stage == "prepare":
         result = study.prepare(
@@ -404,8 +499,21 @@ def main() -> None:
         )
         print(result["artifact_sha256"])
     elif a.stage == "submit":
-        print(submit(a.root, a.wave, a.account, a.concurrency))
-    elif a.stage == "finish":
+        print(
+            submit(
+                a.root, a.wave, a.account, a.concurrency, cached_pilot=a.cached_pilot
+            )
+        )
+    elif a.stage == "check-cached":
+        check_cached_pilot(a.root)
+        print("Cached pilot verified. Remaining checkpoint directories are writable.")
+    elif a.stage in ("run-cached", "finish"):
+        if a.stage == "run-cached":
+            progress = run_cached_pilot(a.root, a.seconds)
+            print(json.dumps(progress))
+            if progress["status"] != "complete":
+                return
+            os.environ.pop("AF_JETSTREAM_API_KEY", None)
         result = finish(a.root)
         print(json.dumps(result, indent=2))
         if not result["qualified"]:

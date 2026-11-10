@@ -92,6 +92,118 @@ def test_pilot_finish_requires_engineering_plan(tmp_path):
         pilot.finish(tmp_path)
 
 
+@pytest.fixture
+def cached_visit(tmp_path, monkeypatch):
+    block = initial_pair(tmp_path, monkeypatch)
+    monkeypatch.setattr(public, "_source_identity", lambda: "source")
+    monkeypatch.setattr(public, "_runtime", lambda: {})
+    plan = sealed_write(
+        tmp_path / "plan.json",
+        {
+            "protocol": pilot.study.PROTOCOL,
+            "development_pilot": True,
+            "arms": pilot.PILOT_ARMS,
+            "visits": 2,
+            "critic_enabled": True,
+            "pruning_enabled": True,
+            "blocks": [block],
+            "source_sha256": "source",
+            "runtime": {},
+        },
+    )
+    sealed_write(
+        tmp_path / "critic_authorization.json",
+        {
+            "identity": plan["artifact_sha256"],
+            "known_case_gate_passed": True,
+        },
+    )
+    full, fixed = block["tasks"]
+    sealed_write(
+        io.round_path(tmp_path, full, 1) / "result.json", {"task": full, "round": 1}
+    )
+    directory = io.round_path(tmp_path, fixed, 1)
+    proposal = sealed_write(directory / "proposal.json", {"task": fixed, "round": 1})
+    sealed_write(
+        directory / "critic.json",
+        {
+            "task": fixed,
+            "round": 1,
+            "identity": plan["artifact_sha256"],
+            "proposal_sha256": proposal["artifact_sha256"],
+        },
+    )
+    return directory
+
+
+@pytest.mark.parametrize("problem", ["missing", "mismatched", "quota"])
+def test_cached_resume_refuses_missing_receipts_or_unwritable_fit(
+    tmp_path, cached_visit, monkeypatch, problem
+):
+    path = cached_visit / "critic.json"
+    if problem == "quota":
+        real = pilot.tempfile.NamedTemporaryFile
+
+        def guarded(**kwargs):
+            if kwargs["dir"] == cached_visit / "fit":
+                raise OSError(122, "Disk quota exceeded")
+            return real(**kwargs)
+
+        monkeypatch.setattr(pilot.tempfile, "NamedTemporaryFile", guarded)
+        with pytest.raises(OSError, match="Disk quota exceeded"):
+            pilot.check_cached_pilot(tmp_path)
+    else:
+        review = sealed_read(path)
+        path.unlink()
+        if problem == "mismatched":
+            review.pop("artifact_sha256")
+            sealed_write(path, {**review, "proposal_sha256": "other"})
+        with pytest.raises(ValueError, match=r"missing saved|lineage differs"):
+            pilot.check_cached_pilot(tmp_path)
+    assert not list(tmp_path.rglob(".resume-write-*"))
+
+
+def test_cached_worker_blocks_proposer_and_uses_cpu_accounting(
+    tmp_path, cached_visit, monkeypatch
+):
+    monkeypatch.setenv("AF_JETSTREAM_API_KEY", "fixture")
+    submission = []
+
+    def fake_submit(directory, key, options, worker, stage, index):
+        submission.append((options, worker.name))
+        (directory / "array.id").write_text("1234\n")
+        return "1234"
+
+    monkeypatch.setattr(pilot, "submit_job", fake_submit)
+    monkeypatch.setattr(pilot, "pending_ids", lambda root: [0])
+    assert pilot.submit(tmp_path, "cpu-wave", "test", 1, cached_pilot=True) == "1234"
+    assert pilot.submit(tmp_path, "cpu-wave", "test", 1, cached_pilot=True) == "1234"
+    assert len(submission) == 1
+    assert "--partition=cpu" in submission[0][0] and "--array=0%1" in submission[0][0]
+    assert submission[0][1] == "run_iclr_cached_pilot_aces.sh"
+
+    def run_block(root, number, url, seconds, *, transport, token_transport):
+        for send in (transport, token_transport):
+            with pytest.raises(RuntimeError, match="new proposer call"):
+                send()
+        return {"status": "complete", "block": number}
+
+    monkeypatch.setattr(pilot.study, "run_block", run_block)
+    assert pilot.run_cached_pilot(tmp_path, 30)["status"] == "complete"
+    monkeypatch.delenv("AF_JETSTREAM_API_KEY")
+    with pytest.raises(ValueError, match="critic credential"):
+        pilot.run_cached_pilot(tmp_path, 30)
+
+
+def test_cached_preflight_waits_for_active_worker(tmp_path, cached_visit):
+    with (
+        io.execution_lease(tmp_path),
+        pytest.raises(ValueError, match="active campaign"),
+    ):
+        pilot.check_cached_pilot(tmp_path)
+    assert not (tmp_path / "pruning").exists()
+
+
 def test_submission_resume_and_uncertain_slurm_reply(tmp_path, monkeypatch):
     plan = sealed_write(tmp_path / "plan.json", {"protocol": pilot.study.PROTOCOL})
     sealed_write(

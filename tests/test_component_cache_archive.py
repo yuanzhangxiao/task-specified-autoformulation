@@ -27,6 +27,40 @@ def completed(_jobs):
     pass
 
 
+@pytest.mark.parametrize(
+    ("profile", "name"),
+    [("legacy-review", "review-cache"), ("sign-repair", "sign-repair-cache")],
+)
+def test_old_compiler_roots_require_named_jobs_and_keep_verified_files(
+    paths, profile, name
+):
+    root, destination, protected = paths
+    with pytest.raises(ValueError, match="expected existing"):
+        cache.run(
+            root, destination, ["123"], profile=profile, apply=True, guard=completed
+        )
+    old_root = root.rename(root.with_name(name))
+    with pytest.raises(ValueError, match="--all-jobs"):
+        cache.run(
+            old_root,
+            destination,
+            apply=True,
+            profile=profile,
+            all_jobs=True,
+            guard=completed,
+        )
+    before = cache.snapshot(old_root, "123")
+    cache.run(
+        old_root, destination, ["123"], profile=profile, apply=True, guard=completed
+    )
+    receipt = json.loads((destination / "123.json").read_text())
+    assert (
+        cache.verify_archive(destination / "123.tar", before)
+        == receipt["archive_sha256"]
+    )
+    assert (old_root / "456").is_dir() and (protected / "response.json").is_file()
+
+
 def test_archive_roundtrip_and_idempotent_removal(paths, tmp_path):
     root, destination, protected = paths
     before = cache.snapshot(root, "123")

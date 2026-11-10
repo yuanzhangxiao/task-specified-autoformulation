@@ -3,9 +3,9 @@
 
 Default is a read-only plan. --apply retains a tar archive and a per-file checksum
 receipt for every explicitly named job. Scientific call caches are not accepted.
-The default component profile requires successful component proposer jobs. The
-explicit phase-c and review profiles require an empty user queue and terminal
-accounting. Only review supports bounded discovery of numeric job directories.
+The default component profile requires successful component proposer jobs.
+Other profiles require an empty user queue and terminal accounting. Only
+runtime-cache/review supports bounded discovery of numeric job directories.
 This script is outside the frozen experiment runtime.
 """
 
@@ -37,6 +37,8 @@ PROFILES = {
     ),
     "phase-c": ("phase-c-runtime-cache", "finished-phase-c-cache-archive-1"),
     "review": ("runtime-cache/review", "finished-review-cache-archive-1"),
+    "legacy-review": ("review-cache", "finished-legacy-review-cache-archive-1"),
+    "sign-repair": ("sign-repair-cache", "finished-sign-repair-cache-archive-1"),
 }
 TERMINAL_STATES = {
     "BOOT_FAIL",
