@@ -17,6 +17,8 @@ Visit 2 adds a fourth declared state and reroutes the disposal expression throug
 
 ## Variation across seeds
 
+The [worked search histories and seed comparison](ICLR_2027_SEARCH_EXAMPLES_AND_STABILITY.md) add an exact name-invariant alignment of direct fitted dependencies, relate seed differences to validation and functional outcomes, and trace an archived critic instruction through a pruned alien-device model.
+
 Both equations were available for 38 of 80 planned pairs. Fifteen pairs had equal target-reachable state dimension. Eight of the 78 recovered retained models contained at least one state without a dynamic path to a target. Seventeen pairs shared the same set of public-input-to-target dependencies, although none had an identical full signed topology under the original canonical fingerprints. The active-graph calculation uses the project's restricted equation simplifier after substituting fitted coefficients. It follows processes and differential dependencies from every output. Reachability gives an upper bound on how many states could affect these outputs. It does not test minimal dynamic order, excitation on the study's schedules, or all possible algebraic cancellations.
 
 The public functional tests yielded exactly the same per-requirement status in 23 of 38 pairs. Fifteen pairs disagreed on at least one. Fitted coefficients and named roles alone do not establish that an active state is a physical glucose or insulin compartment.
