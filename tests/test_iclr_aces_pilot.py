@@ -1,6 +1,8 @@
 """Operational evidence, scope and scheduling checks for the separate ACES pilot."""
 
 import copy
+import io as streams
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -202,6 +204,100 @@ def test_cached_preflight_waits_for_active_worker(tmp_path, cached_visit):
     ):
         pilot.check_cached_pilot(tmp_path)
     assert not (tmp_path / "pruning").exists()
+
+
+@pytest.mark.parametrize(
+    "value", [None, "", "   ", "abc\ndef", "abc\rdef", "source ./activate.sh"]
+)
+def test_malformed_credential_stops_before_worker_preflight(
+    tmp_path, monkeypatch, value
+):
+    if value is None:
+        monkeypatch.delenv("AF_JETSTREAM_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("AF_JETSTREAM_API_KEY", value)
+    monkeypatch.setattr(
+        pilot, "check_cached_pilot", lambda _: pytest.fail("worker started")
+    )
+    with pytest.raises(ValueError, match="single-line"):
+        pilot.run_cached_pilot(tmp_path, 10)
+
+
+def test_catalog_validation_uses_get_without_disclosing_credential(monkeypatch, capsys):
+    seen = []
+    fixture_key = "fixture-value"
+
+    def get(request, timeout):
+        seen.append((request.get_method(), request.full_url))
+        assert request.get_header("Authorization") == "Bearer " + fixture_key
+        return streams.BytesIO(b'{"data":[{"id":"gpt-oss-120b"}]}')
+
+    class Opener:
+        open = staticmethod(get)
+
+    monkeypatch.setattr(pilot.urllib.request, "build_opener", lambda *a: Opener())
+    pilot.verify_critic_access(fixture_key)
+    assert seen == [("GET", pilot.jetstream.BASE_URL + "/models")]
+    assert fixture_key not in capsys.readouterr().err
+
+    def denied(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 401, fixture_key, {}, None)
+
+    monkeypatch.setattr(Opener, "open", staticmethod(denied))
+    with pytest.raises(ValueError, match="HTTP 401") as exc:
+        pilot.verify_critic_access(fixture_key)
+    assert fixture_key not in str(exc.value)
+
+
+def test_denied_compute_credential_preserves_unstarted_review(tmp_path, monkeypatch):
+    monkeypatch.setenv("AF_JETSTREAM_API_KEY", "fixture")
+
+    def denied(_key):
+        raise ValueError("Jetstream model catalog returned HTTP 401.")
+
+    monkeypatch.setattr(pilot, "verify_critic_access", denied)
+    monkeypatch.setattr(
+        pilot, "check_cached_pilot", lambda _: pytest.fail("pilot entered")
+    )
+    with pytest.raises(ValueError, match="HTTP 401"):
+        pilot.run_cached_pilot(tmp_path, 60, confirm_critic_access=True)
+    assert not list(tmp_path.iterdir())
+
+
+def test_fresh_wave_authenticates_before_submit_and_repeat_skips_prompt(
+    tmp_path, cached_visit, monkeypatch
+):
+    monkeypatch.delenv("AF_JETSTREAM_API_KEY", raising=False)
+    monkeypatch.setattr(pilot, "pending_ids", lambda root: [0])
+    actions = []
+
+    def prompt():
+        actions.append("prompt")
+        return "fixture-token"
+
+    def refused(_key):
+        raise ValueError("Jetstream model catalog returned HTTP 401.")
+
+    def submit_job(directory, key, options, worker, stage, index):
+        actions.append("submit")
+        (directory / "array.id").write_text("2468\n")
+        return "2468"
+
+    monkeypatch.setattr(pilot, "read_critic_key", prompt)
+    monkeypatch.setattr(pilot, "verify_critic_access", refused)
+    monkeypatch.setattr(pilot, "submit_job", submit_job)
+    options = {"cached_pilot": True, "confirm_critic_access": True}
+    with pytest.raises(ValueError, match="HTTP 401"):
+        pilot.submit(tmp_path, "review", "account", 1, **options)
+    assert actions == ["prompt"]
+    assert not (tmp_path / "submissions/review").exists()
+    monkeypatch.setattr(
+        pilot, "verify_critic_access", lambda key: actions.append("verified")
+    )
+    assert pilot.submit(tmp_path, "review", "account", 1, **options) == "2468"
+    monkeypatch.delenv("AF_JETSTREAM_API_KEY")
+    assert pilot.submit(tmp_path, "review", "account", 1, **options) == "2468"
+    assert actions == ["prompt", "prompt", "verified", "submit"]
 
 
 def test_submission_resume_and_uncertain_slurm_reply(tmp_path, monkeypatch):

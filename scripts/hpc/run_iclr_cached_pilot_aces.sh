@@ -20,12 +20,8 @@ case "${1:-submit}" in
     submit)
         helper="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/iclr_aces_pilot.py"
         cd "$AF_REPO_ROOT"
-        if [[ -z ${AF_JETSTREAM_API_KEY:-} ]]; then
-            read -r -s -p 'Jetstream critic key: ' AF_JETSTREAM_API_KEY </dev/tty
-            printf '\n' >/dev/tty
-            export AF_JETSTREAM_API_KEY
-        fi
-        "$AF_PYTHON" "$helper" submit --cached-pilot --root "$AF_CAMPAIGN/pilot" \
+        module load WebProxy
+        "$AF_PYTHON" "$helper" submit --cached-pilot --confirm-critic-access --root "$AF_CAMPAIGN/pilot" \
             --wave "${2:-cpu-recovery1}" --concurrency 1 \
             --account "${AF_CPU_ACCOUNT:-${AF_ACCOUNT:-156264627414}}"
         ;;
@@ -35,7 +31,8 @@ case "${1:-submit}" in
         [[ ${SLURM_ARRAY_TASK_ID:?} == 0 && ${AF_SEARCH_ROOT:?} == "$AF_CAMPAIGN/pilot" ]]
         cd "$AF_REPO_ROOT"
         module load WebProxy
-        "$AF_PYTHON" "$AF_PILOT_RESUME_CLI" run-cached --root "$AF_SEARCH_ROOT" --seconds 9900
+        "$AF_PYTHON" "$AF_PILOT_RESUME_CLI" run-cached --confirm-critic-access \
+            --root "$AF_SEARCH_ROOT" --seconds 9900
         ;;
     *) echo 'Use submit [WAVE] from the login shell.' >&2; exit 2 ;;
 esac

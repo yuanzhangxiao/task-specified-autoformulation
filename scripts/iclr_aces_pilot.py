@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import argparse
 import csv
+import getpass
 import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
+import termios
+import urllib.error
+import urllib.request
+import warnings
 from pathlib import Path
 from urllib.parse import urlparse
 
 from autoformalism.fitting import public_fitting as public
+from autoformalism.llm import jetstream
 from autoformalism.rebuttal import component_critic as critic
 from autoformalism.rebuttal import iclr_controlled_search as study
 from autoformalism.rebuttal import iclr_search_controls as controls
@@ -24,6 +31,54 @@ from scripts.submit_review_continuation import submit_job
 PILOT_CELL = "acquisition_00"
 PILOT_SEED = 97
 PILOT_ARMS = ["full", "fixed_gamma"]
+
+
+def checked_critic_key(value: str | None) -> str:
+    """Validate an HTTP bearer credential without including it in diagnostics."""
+    key = (value or "").strip(" \t")
+    if (
+        not key
+        or not key.isascii()
+        or not key.isprintable()
+        or any(c.isspace() for c in key)
+    ):
+        raise ValueError(
+            "Enter a nonempty, single-line Jetstream critic credential without spaces."
+        )
+    return key
+
+
+def read_critic_key() -> str:
+    """Discard prior terminal input, then read a fresh line with echo disabled."""
+    try:
+        with open("/dev/tty", "w") as terminal, warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            termios.tcflush(terminal.fileno(), termios.TCIFLUSH)
+            return getpass.getpass("Jetstream critic key (hidden): ", stream=terminal)
+    except (OSError, EOFError, getpass.GetPassWarning, termios.error):
+        raise ValueError(
+            "Run the launch command by itself in an interactive ACES terminal."
+        ) from None
+
+
+def verify_critic_access(key: str) -> None:
+    """Verify access to the critic's authenticated catalog without model inference."""
+    request = urllib.request.Request(
+        jetstream.BASE_URL + "/models", headers={"Authorization": "Bearer " + key}
+    )
+    opener = urllib.request.build_opener(jetstream._NoRedirect())
+    try:
+        with opener.open(request, timeout=20) as response:
+            catalog = json.load(response)
+    except urllib.error.HTTPError as error:
+        raise ValueError(
+            f"Jetstream model catalog returned HTTP {error.code}."
+        ) from None
+    except (OSError, ValueError):
+        raise ValueError("Could not read the Jetstream model catalog.") from None
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("data"), list):
+        raise ValueError("Unexpected Jetstream model catalog response.")
+    print("Jetstream accepted the credential.", file=sys.stderr)
 
 
 def verify_design(root: Path, original: Path, roster_path: Path) -> dict:
@@ -222,11 +277,15 @@ def check_cached_pilot(root: Path) -> None:
                 os.fsync(probe.fileno())
 
 
-def run_cached_pilot(root: Path, seconds: int) -> dict:
+def run_cached_pilot(
+    root: Path, seconds: int, *, confirm_critic_access: bool = False
+) -> dict:
     """Resume cached proposals on CPUs and use Jetstream for new final reviews."""
+    key = checked_critic_key(os.environ.get("AF_JETSTREAM_API_KEY"))
+    if confirm_critic_access:
+        verify_critic_access(key)
+    os.environ["AF_JETSTREAM_API_KEY"] = key
     check_cached_pilot(root)
-    if not os.environ.get("AF_JETSTREAM_API_KEY"):
-        raise ValueError("supply the critic credential before any final review starts")
 
     def no_proposer(*args):
         raise RuntimeError("CPU resume attempted a new proposer call")
@@ -393,7 +452,13 @@ def finish(root: Path) -> dict:
 
 
 def submit(
-    root: Path, wave: str, account: str, concurrency: int, *, cached_pilot: bool = False
+    root: Path,
+    wave: str,
+    account: str,
+    concurrency: int,
+    *,
+    cached_pilot: bool = False,
+    confirm_critic_access: bool = False,
 ) -> str:
     """Submit unfinished blocks once per wave and prevent overlapping waves."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", wave) or concurrency not in (1, 2):
@@ -402,14 +467,14 @@ def submit(
     if plan["protocol"] != study.PROTOCOL:
         raise ValueError("expected a controlled campaign")
     critic.checked_authorization(root, plan)
-    if not os.environ.get("AF_JETSTREAM_API_KEY"):
-        raise ValueError("set the critic credential in the submitting shell")
     submissions = root / "submissions"
     with public._lock(submissions):
         folder = submissions / wave
         jobfile = folder / "array.id"
         if jobfile.exists() and jobfile.read_text().strip().isdecimal():
-            return jobfile.read_text().strip()
+            job = jobfile.read_text().strip()
+            print(f"Wave {wave} was already submitted as job {job}.", file=sys.stderr)
+            return job
         for intent in submissions.glob("*/array.intent.json"):
             ident = intent.with_name("array.id")
             if not ident.exists() or not ident.read_text().strip().isdecimal():
@@ -431,6 +496,13 @@ def submit(
         indices = pending_ids(root)
         if not indices:
             return "no pending blocks"
+        supplied = os.environ.get("AF_JETSTREAM_API_KEY")
+        if confirm_critic_access and not supplied:
+            supplied = read_critic_key()
+        key = checked_critic_key(supplied)
+        if confirm_critic_access:
+            verify_critic_access(key)
+        os.environ["AF_JETSTREAM_API_KEY"] = key
         folder.mkdir(parents=True, exist_ok=True)
         (root / "logs").mkdir(exist_ok=True)
         array = ",".join(map(str, indices)) + f"%{concurrency}"
@@ -477,6 +549,8 @@ def main() -> None:
         if cmd == "check-design":
             sub.add_argument("--original", type=Path, required=True)
             sub.add_argument("--roster", type=Path, required=True)
+        if cmd in ("submit", "run-cached"):
+            sub.add_argument("--confirm-critic-access", action="store_true")
         if cmd == "submit":
             sub.add_argument("--cached-pilot", action="store_true")
             sub.add_argument("--wave", required=True)
@@ -501,7 +575,12 @@ def main() -> None:
     elif a.stage == "submit":
         print(
             submit(
-                a.root, a.wave, a.account, a.concurrency, cached_pilot=a.cached_pilot
+                a.root,
+                a.wave,
+                a.account,
+                a.concurrency,
+                cached_pilot=a.cached_pilot,
+                confirm_critic_access=a.confirm_critic_access,
             )
         )
     elif a.stage == "check-cached":
@@ -509,7 +588,9 @@ def main() -> None:
         print("Cached pilot verified. Remaining checkpoint directories are writable.")
     elif a.stage in ("run-cached", "finish"):
         if a.stage == "run-cached":
-            progress = run_cached_pilot(a.root, a.seconds)
+            progress = run_cached_pilot(
+                a.root, a.seconds, confirm_critic_access=a.confirm_critic_access
+            )
             print(json.dumps(progress))
             if progress["status"] != "complete":
                 return

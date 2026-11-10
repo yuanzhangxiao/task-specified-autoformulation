@@ -84,6 +84,14 @@ source "$campaign/activate.sh"
 iclr status pilot
 ~~~
 
+Job `2336267_0` completed the fixed-state fit, all four pilot visits and Full-arm pruning. The pruned equations required a fresh Jetstream review. The worker rejected the credential format before opening a transport attempt. The original logical start marker and request are preserved in `credential-recovery-2336267` under the replay campaign. The same sealed request is ready for its first HTTP call.
+
+Paste this launch command on its own in the ACES terminal. Wait for the hidden prompt, then paste the working key. For a fresh CPU wave, the launcher checks the credential against Jetstream's authenticated model catalog before calling Slurm. A repeated wave name returns the recorded job ID before prompting. The CPU allocation can perform final critic calls when pruning changes the equations. [Jetstream2 API authentication](https://docs.jetstream-cloud.org/inference-service/api/)
+
+~~~bash
+env -u AF_JETSTREAM_API_KEY bash /scratch/group/p.nairr260351.000/u.yx126462/iclr-pilot-fit-r1-2334957/resume.sh final-review1
+~~~
+
 The pilot receipt covers the sealed shared coefficients, model, initialization and critic identities, the fixed-state revision prompt, actual provider responses, pruning, pre-freeze restart and frozen export. Restart rechecks scientific and call checkpoint hashes with the proposer disabled. The GPU and token ledgers give measured costs for this small workload. Later visits, scientific rejection, serving restarts and the number of critique units change those costs.
 
 If `finish pilot` writes `qualified=false` and returns an error, inspect `pilot_receipt.json`, `shared_initial_receipts.json`, `search_visits.csv`, `paired_ablation_results.csv`, and the Slurm job logs. A frozen pilot with no finite shared start is a recorded outcome of the bounded search. It leaves fit-dependent critique or pruning paths unexercised. A transport or configuration error, by contrast, needs diagnosis from the provider or scheduler receipts. Once the roster is frozen, another wave on that root cannot produce a new model. Retain that pilot and its cost. If a specific engineering defect is identified, document its fix and prospectively version a separate engineering study in a fresh root. Changing seeds or budgets in response to the outcome would change the study. Production checks the relevant operational coverage without imposing an NMSE threshold.
