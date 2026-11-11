@@ -212,13 +212,28 @@ def test_compiled_model_rejects_runtime_shape_parameters_and_missing_forcing() -
         model.rhs(0.0, [1.0, 1.0], parameters, missing_forcing)
 
 
+#: The one declared exception, agreed on 2026-10-09 and stated in
+#: docs/PHASE_C_LLM_SR.md: the worker that runs a program LLM-SR selected,
+#: after the allowlist, in its own confined process. It may make one such
+#: call, and no other file in the package may make any.
+DYNAMIC_EXECUTION_EXCEPTIONS = {"rebuttal/llm_sr_program_worker.py": 1}
+
+
 def test_source_contains_no_dynamic_code_execution_calls() -> None:
     source_root = Path(__file__).resolve().parents[1] / "src/autoformalism"
-    compact_sources = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in sorted(source_root.rglob("*.py"))
-    ).replace(" ", "")
-
     forbidden_call_names = ("ev" + "al(", "ex" + "ec(")
+    exempt: dict[str, int] = {}
+    compact: list[str] = []
+    for path in sorted(source_root.rglob("*.py")):
+        text = path.read_text(encoding="utf-8").replace(" ", "")
+        relative = path.relative_to(source_root).as_posix()
+        if relative in DYNAMIC_EXECUTION_EXCEPTIONS:
+            exempt[relative] = sum(text.count(name) for name in forbidden_call_names)
+        else:
+            compact.append(text)
+    compact_sources = "\n".join(compact)
+
     for call_name in forbidden_call_names:
         assert call_name not in compact_sources
+    # The exception exists, and is exactly as wide as declared.
+    assert exempt == DYNAMIC_EXECUTION_EXCEPTIONS

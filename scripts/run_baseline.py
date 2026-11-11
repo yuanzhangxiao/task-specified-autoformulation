@@ -31,6 +31,8 @@ from autoformalism.llm import (
     VLLMReasoningEffort,
     create_llm_client,
 )
+from autoformalism.rebuttal.phase_c_baselines import load_cell as load_phase_c_cell
+from autoformalism.rebuttal.phase_c_baselines import tier_of
 
 # Retain the private import used by older tests and external experiment scripts.
 _baseline_validation_context = baseline_validation_context
@@ -46,6 +48,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--benchmark-id", default="original_b1")
     parser.add_argument("--tier", choices=("easy", "medium", "hard"), default="easy")
+    parser.add_argument(
+        "--phase-c-release",
+        type=Path,
+        help=(
+            "read --benchmark-id as a cell of this Phase C development release "
+            "instead of the legacy registry; the tier comes from the cell name"
+        ),
+    )
     parser.add_argument(
         "--method",
         required=True,
@@ -136,6 +146,10 @@ def main() -> None:
     args = parser.parse_args()
     if args.wall_timeout_seconds <= 0:
         parser.error("--wall-timeout-seconds must be positive")
+    if args.phase_c_release is not None:
+        if not args.development_only:
+            parser.error("Phase C has no released test split; pass --development-only")
+        args.tier = tier_of(args.benchmark_id)
     if not args._worker:
         _supervise(args)
         return
@@ -190,17 +204,29 @@ def _execute_baseline(
 ):
     """Load leakage-safe inputs and dispatch one configured baseline method."""
 
-    root = args.data_root.expanduser().resolve()
-    registry = BenchmarkRegistry()
-    spec = registry.get(args.benchmark_id)
-    loader = BenchmarkLoader(registry)
-    data_config = DataConfig(root=root, benchmark_id=args.benchmark_id, tier=args.tier)
-    dataset = loader.load_development(data_config)
-    if not args.development_only:
-        loader.validate_test_paths(data_config)
-    context = baseline_validation_context(dataset, spec)
-    prompt_path = _baseline_prompt_path(root, spec, args.tier)
-    prompt = prompt_path.read_text(encoding="utf-8")
+    if args.phase_c_release is not None:
+        public = load_phase_c_cell(
+            args.phase_c_release.expanduser().resolve(), args.benchmark_id
+        )
+        dataset, context, prompt = public.dataset, public.context, public.prompt
+        (output / "phase_c_identity.json").write_text(
+            json.dumps(public.identity, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    else:
+        root = args.data_root.expanduser().resolve()
+        registry = BenchmarkRegistry()
+        spec = registry.get(args.benchmark_id)
+        loader = BenchmarkLoader(registry)
+        data_config = DataConfig(
+            root=root, benchmark_id=args.benchmark_id, tier=args.tier
+        )
+        dataset = loader.load_development(data_config)
+        if not args.development_only:
+            loader.validate_test_paths(data_config)
+        context = baseline_validation_context(dataset, spec)
+        prompt_path = _baseline_prompt_path(root, spec, args.tier)
+        prompt = prompt_path.read_text(encoding="utf-8")
     config_values: dict[str, object] = {
         "method": args.method,
         "seed": args.seed,

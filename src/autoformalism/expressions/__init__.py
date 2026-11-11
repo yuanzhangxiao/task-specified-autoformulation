@@ -28,6 +28,7 @@ from autoformalism.expressions.validation import (
     CandidateValidator,
     ValidatedCandidate,
     ValidationContext,
+    baseline_validator,
     repair_protected_declarations,
 )
 
@@ -46,6 +47,7 @@ __all__ = [
     "ValidatedCandidate",
     "ValidationContext",
     "ValidationDiagnostic",
+    "baseline_validator",
     "certify_reciprocal_transformations",
     "compile_candidate",
     "infer_effective_observability",

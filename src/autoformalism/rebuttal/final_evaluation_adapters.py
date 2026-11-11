@@ -340,6 +340,14 @@ def _adapt_vendored_campaign(
     if not result.method.startswith(prefix):
         raise ValueError(f"baseline method {result.method!r} is not {prefix}")
     payload = result.selection_payload
+    if "programs" in payload:
+        # LLM-SR selected a program that reads the history: no candidate
+        # expresses it, and the ODE replay would not be its rollout.
+        raise ValueError(
+            f"{sealed} selects programs, run by {payload.get('execution')}; "
+            "score them with llm_sr_programs on the observation grid, not "
+            "with the shared ODE replay"
+        )
     candidate = CandidateModel.model_validate(payload["candidate"])
     parameters = _numeric_mapping(payload.get("parameters", {}))
     return _subject(

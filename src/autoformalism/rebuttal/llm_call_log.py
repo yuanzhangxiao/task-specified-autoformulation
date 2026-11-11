@@ -67,17 +67,31 @@ class CallLog:
             handle.flush()
             os.fsync(handle.fileno())
 
-    def response(self, payload: Any, *, attempts: int = 1) -> None:
-        """Record one successful call and whatever usage it reported."""
+    def response(
+        self,
+        payload: Any,
+        *,
+        attempts: int = 1,
+        finish_reasons: list[str] | None = None,
+        cache_hit: bool = False,
+    ) -> None:
+        """Record one successful call and whatever usage it reported.
+
+        ``finish_reasons``, when given, records why each choice stopped, so how
+        often a token limit cut a reply off can be counted afterwards.
+        ``cache_hit`` marks an answer a gateway replayed rather than generated;
+        the accounting rule counts it apart from the requests that cost work.
+        """
         tokens = usage_tokens(payload)
-        self._append(
-            {
-                "event": "llm_response",
-                "provider_attempts": int(attempts),
-                "cache_hit": False,
-                "usage": {} if tokens is None else {"total_tokens": tokens},
-            }
-        )
+        event = {
+            "event": "llm_response",
+            "provider_attempts": int(attempts),
+            "cache_hit": bool(cache_hit),
+            "usage": {} if tokens is None else {"total_tokens": tokens},
+        }
+        if finish_reasons is not None:
+            event["finish_reasons"] = list(finish_reasons)
+        self._append(event)
 
     def failure(self, reason: str, *, attempts: int = 1) -> None:
         """A failed call still cost the provider work, so it is counted."""

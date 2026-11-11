@@ -24,6 +24,7 @@ from autoformalism.expressions.parser import (
     APPROVED_FUNCTION_ARITY,
     ParsedExpression,
     RestrictedParser,
+    baseline_parser,
 )
 from autoformalism.schemas import (
     CandidateModel,
@@ -411,11 +412,30 @@ def repair_protected_declarations(
     return CandidateModel.model_validate(payload), tuple(repairs)
 
 
+#: Static domain risks a baseline's model may carry into evaluation.
+DEFERRABLE_DOMAIN_RISKS = frozenset({"DOMAIN_LOG_NONPOSITIVE", "DOMAIN_SQRT_NEGATIVE"})
+
+
 class CandidateValidator:
     """Validate expression syntax, semantics, dependencies, and domains."""
 
-    def __init__(self, parser: RestrictedParser | None = None) -> None:
+    def __init__(
+        self,
+        parser: RestrictedParser | None = None,
+        *,
+        domain_risks_refuse: bool = True,
+    ) -> None:
         self._parser = parser or RestrictedParser()
+        # Our method must be safe by construction, so a logarithm or root that
+        # may leave its domain is refused before fitting. An external baseline
+        # is judged by what its model does: the risk is recorded and a rollout
+        # that actually leaves the domain fails when it is evaluated.
+        self._domain_risks_refuse = domain_risks_refuse
+
+    @property
+    def parser(self) -> RestrictedParser:
+        """The grammar this validator reads expressions with."""
+        return self._parser
 
     def validate(
         self,
@@ -647,8 +667,15 @@ class CandidateValidator:
         warnings = tuple(
             item for item in diagnostics if item.code == "DOMAIN_DIVISION_ZERO"
         )
+        deferred = tuple(
+            item
+            for item in diagnostics
+            if item.code in DEFERRABLE_DOMAIN_RISKS and not self._domain_risks_refuse
+        )
         diagnostics[:] = [
-            item for item in diagnostics if item.code != "DOMAIN_DIVISION_ZERO"
+            item
+            for item in diagnostics
+            if item.code != "DOMAIN_DIVISION_ZERO" and item not in deferred
         ]
         if diagnostics:
             raise ModelValidationError(tuple(diagnostics))
@@ -679,6 +706,14 @@ class CandidateValidator:
                     f"{item.message}; runtime uses a sign-preserving epsilon guard",
                 )
                 for item in warnings
+            )
+            + tuple(
+                ValidationDiagnostic(
+                    item.code,
+                    item.location,
+                    f"{item.message}; deferred to evaluation for a baseline",
+                )
+                for item in deferred
             ),
         )
 
@@ -1142,3 +1177,13 @@ class CandidateValidator:
                     min(constraint.bounds.upper, interval.upper),
                 )
         return interval
+
+
+def baseline_validator() -> CandidateValidator:
+    """Validate an external baseline's model under the baseline grammar.
+
+    Every path that selects, freezes, evaluates or assesses an external
+    baseline's model uses this, so a model is read the same way throughout.
+    Our own method's models never are.
+    """
+    return CandidateValidator(baseline_parser(), domain_risks_refuse=False)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import math
+from fractions import Fraction
 from typing import Literal
 
 from pydantic import Field
@@ -12,10 +13,11 @@ from autoformalism.expressions import (
     ModelValidationError,
     RuntimeExpressionError,
     ValidationContext,
+    baseline_validator,
     compile_candidate,
 )
 from autoformalism.expressions.compiler import _evaluate
-from autoformalism.expressions.parser import RestrictedParser
+from autoformalism.expressions.parser import grammar_parser
 from autoformalism.rebuttal import basin_algebra as algebra
 from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.base import StrictSchema
@@ -66,8 +68,8 @@ def _finite_mapping(values: dict | None) -> dict[str, float] | None:
     return result
 
 
-def _value(node: ast.AST, environment: dict) -> float:
-    parsed = RestrictedParser(max_length=40000, max_nodes=4096).parse(
+def _value(node: ast.AST, environment: dict, grammar: str = "default") -> float:
+    parsed = grammar_parser(grammar, max_length=40000, max_nodes=4096).parse(
         ast.unparse(node), location="public static probe"
     )
     if parsed.symbols - environment.keys():
@@ -81,21 +83,44 @@ def _environment(survey: dict, parameters: dict | None) -> dict:
     return {**survey, **parameters, "inflow_up": 0.0, "inflow_down": 0.0, "t": 0.0}
 
 
-def _input_check(polynomial, state, input_name, area, surveys, parameters):
-    coefficient = algebra.coefficient(polynomial, input_name)
+def _input_check(
+    polynomial,
+    state,
+    input_name,
+    area,
+    surveys,
+    parameters,
+    *,
+    grammar: str = "default",
+    increment_step: float | None = None,
+):
+    """Require the volumetric input's depth conversion, ``area * coefficient = 1``.
+
+    For a native one-step map ``x[k+1] = x[k] + increment`` the input acts over
+    one sample interval, so the discrete identity is ``area * coefficient =
+    increment_step``: the explicit-Euler image of the same conversion, with
+    the increment never divided by the interval.
+    """
+    coefficient = algebra.coefficient(polynomial, input_name, grammar)
     if coefficient is None:
         return finding(
             f"inflow_conversion:{state}",
             "unverified",
             "Input occurs nonlinearly; a constant depth conversion was not proved.",
         )
-    residual = algebra.add(algebra.multiply(algebra.atom(area), coefficient), {(): -1})
+    required = 1 if increment_step is None else Fraction(repr(float(increment_step)))
+    residual = algebra.add(
+        algebra.multiply(algebra.atom(area), coefficient), {(): -required}
+    )
     evidence = {
-        "required_identity": f"{area} * coefficient({input_name}) = 1",
+        "required_identity": f"{area} * coefficient({input_name}) = {required}",
         "coefficient": algebra.render(coefficient),
         "residual": algebra.render(residual),
         "structurally_enforced": not residual,
     }
+    if increment_step is not None:
+        evidence["equation_semantics"] = "native_increment"
+        evidence["increment_step"] = float(increment_step)
     if not residual:
         return finding(
             f"inflow_conversion:{state}",
@@ -106,10 +131,10 @@ def _input_check(polynomial, state, input_name, area, surveys, parameters):
     samples = []
     for survey in surveys:
         env = {**survey, **(parameters or {})}
-        if algebra.symbols(residual) - env.keys():
+        if algebra.symbols(residual, grammar) - env.keys():
             continue
         try:
-            value = algebra.number(residual, env)
+            value = algebra.number(residual, env, grammar)
             if math.isfinite(value):
                 samples.append({"survey": survey, "dimensionless_residual": value})
         except UNVERIFIED_ERRORS:
@@ -129,7 +154,17 @@ def _input_check(polynomial, state, input_name, area, surveys, parameters):
     )
 
 
-def _transfer(up, down, up_poly, down_poly, up_name, down_name, surveys, parameters):
+def _transfer(
+    up,
+    down,
+    up_poly,
+    down_poly,
+    up_name,
+    down_name,
+    surveys,
+    parameters,
+    grammar: str = "default",
+):
     total = algebra.add(
         algebra.multiply(algebra.atom("area_up"), up_poly),
         algebra.multiply(algebra.atom("area_down"), down_poly),
@@ -137,13 +172,13 @@ def _transfer(up, down, up_poly, down_poly, up_name, down_name, surveys, paramet
     affected = {
         key: value
         for key, value in total.items()
-        if any(up_name in algebra.factor_symbols(n) for n, _ in key)
+        if any(up_name in algebra.factor_symbols(n, grammar) for n, _ in key)
     }
     evidence = {
         "total_storage_derivative": algebra.render(total),
         "upstream_dependent_terms": algebra.render(affected),
     }
-    if up_name not in algebra.symbols(down_poly):
+    if up_name not in algebra.symbols(down_poly, grammar):
         return finding(
             "internal_transfer_cancellation",
             "unverified",
@@ -169,8 +204,8 @@ def _transfer(up, down, up_poly, down_poly, up_name, down_name, surveys, paramet
             for height in (low, high):
                 env[up_name] = height
                 values.append(
-                    survey["area_up"] * _value(up, env)
-                    + survey["area_down"] * _value(down, env)
+                    survey["area_up"] * _value(up, env, grammar)
+                    + survey["area_down"] * _value(down, env, grammar)
                 )
             delta = values[1] - values[0]
             if abs(delta) > TOLERANCE * max(1.0, *map(abs, values)):
@@ -198,8 +233,17 @@ def _transfer(up, down, up_poly, down_poly, up_name, down_name, surveys, paramet
     )
 
 
-def _outlet(down, polynomial, down_name, up_name, surveys, parameters, states):
-    symbols = algebra.symbols(polynomial)
+def _outlet(
+    down,
+    polynomial,
+    down_name,
+    up_name,
+    surveys,
+    parameters,
+    states,
+    grammar: str = "default",
+):
+    symbols = algebra.symbols(polynomial, grammar)
     if down_name not in symbols:
         ambiguous = bool(symbols & (set(states) - {down_name, up_name}))
         return [
@@ -234,7 +278,7 @@ def _outlet(down, polynomial, down_name, up_name, surveys, parameters, states):
             derivatives = []
             for height in levels:
                 env[down_name] = height
-                derivatives.append(_value(down, env))
+                derivatives.append(_value(down, env, grammar))
             probes.append(
                 {
                     "survey": survey,
@@ -284,11 +328,28 @@ def assess(
     case: str,
     surveys: list[dict],
     parameters: dict | None,
+    *,
+    grammar: str = "default",
+    increment_step: float | None = None,
 ) -> dict:
-    """Assess final assembled equations without interpreting scientific-role prose."""
+    """Assess final assembled equations without interpreting scientific-role prose.
+
+    ``grammar`` is the grammar the model was selected under. ``increment_step``
+    marks a native one-step map, whose right-hand sides are increments over
+    one sample interval of that length: only the input conversions change
+    (see ``_input_check``); the sign and cancellation probes are the same.
+    """
     if case not in {"coupled", "independent"}:
         raise ValueError("unknown basin public contract")
-    model = compile_candidate(candidate, context)
+    if increment_step is not None and not (
+        math.isfinite(increment_step) and increment_step > 0
+    ):
+        raise ValueError("a native increment step must be positive and finite")
+    model = compile_candidate(
+        candidate,
+        context,
+        validator=baseline_validator() if grammar == "baseline" else None,
+    )
     parameters = _finite_mapping(parameters)
     if parameters is not None and set(parameters) != set(model.parameter_names):
         raise ValueError("saved parameter vector differs from candidate")
@@ -336,6 +397,9 @@ def assess(
         "trajectory_values_used": False,
         "validation_used": False,
     }
+    if increment_step is not None:
+        evidence["equation_semantics"] = "native_increment"
+        evidence["increment_step"] = float(increment_step)
     if not down_name:
         return {
             **evidence,
@@ -352,11 +416,18 @@ def assess(
     rhs = {e.state: e.rhs for e in candidate.state_equations}
     checks = []
     try:
-        down = algebra.expanded(rhs[down_name], processes)
+        down = algebra.expanded(rhs[down_name], processes, grammar)
         down_poly = algebra.formal(down)
         checks.append(
             _input_check(
-                down_poly, down_name, "inflow_down", "area_down", surveys, parameters
+                down_poly,
+                down_name,
+                "inflow_down",
+                "area_down",
+                surveys,
+                parameters,
+                grammar=grammar,
+                increment_step=increment_step,
             )
         )
         checks.extend(
@@ -368,14 +439,22 @@ def assess(
                 surveys,
                 parameters,
                 model.state_names,
+                grammar,
             )
         )
         if case == "coupled" and up_name:
-            up = algebra.expanded(rhs[up_name], processes)
+            up = algebra.expanded(rhs[up_name], processes, grammar)
             up_poly = algebra.formal(up)
             checks.append(
                 _input_check(
-                    up_poly, up_name, "inflow_up", "area_up", surveys, parameters
+                    up_poly,
+                    up_name,
+                    "inflow_up",
+                    "area_up",
+                    surveys,
+                    parameters,
+                    grammar=grammar,
+                    increment_step=increment_step,
                 )
             )
             checks.append(
@@ -388,6 +467,7 @@ def assess(
                     down_name,
                     surveys,
                     parameters,
+                    grammar,
                 )
             )
         elif case == "coupled":
@@ -403,7 +483,7 @@ def assess(
         for state in (down_name, up_name):
             if not state:
                 continue
-            node = algebra.expanded(rhs[state], processes)
+            node = algebra.expanded(rhs[state], processes, grammar)
 
             def summands(n):
                 if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Add | ast.Sub):
@@ -414,7 +494,7 @@ def assess(
             uses = [
                 ast.unparse(n)
                 for n in summands(node)
-                if input_name in algebra.symbols(algebra.formal(n))
+                if input_name in algebra.symbols(algebra.formal(n), grammar)
             ]
             if len(uses) > 1:
                 checks.append(

@@ -3,9 +3,11 @@
 The search is not reimplemented. Upstream's per-variable searcher receives our
 trajectories, and upstream's own `System` evaluates the assembled candidates.
 This module supplies data, applies the declared prompt adaptation, reproduces
-upstream's selection rule, and seals the result.
+upstream's selection rule, and seals the result. Phase C cells enter through
+``prepare_phase_c`` and ``run_phase_c``, which read a verified release rather
+than the registry and change nothing after the data are loaded.
 
-Three accommodations are forced by the benchmark and are declared in the plan
+Four accommodations are forced by the benchmark and are declared in the plan
 rather than hidden here:
 
 * Upstream's driver builds its data by integrating a ground-truth equation it
@@ -15,16 +17,25 @@ rather than hidden here:
   derivatives are estimated within each trajectory and the rows stacked. The
   regression is pointwise, so stacking is sound; differentiating across a
   join would not be.
-* Upstream's selection hands its evaluator the sealed test trajectory. Ours
-  cannot see it, so selection uses the same rule -- product of the per-variable
-  Pareto frontiers, ranked by rolled-out error -- over development data only.
+* Upstream's selection rolls each assembled system out over its one training
+  trajectory, the part the equations were fitted on and the validation part
+  after it, and ranks by that error; the test error it computes beside it is
+  only reported. A cell has many trajectories, so selection uses the same rule
+  -- the product of the per-variable Pareto frontiers, ranked by the rollout
+  error in the data's own units -- over every development trajectory, and the
+  test error is never computed.
+* Upstream's systems are autonomous: every variable is a state and nothing
+  forces them. A cell supplies auxiliaries, measured inputs and fixed
+  covariates over the horizon, so all of them are variables to the search
+  and only the targets are searched. Withholding the inputs would make a meal
+  or an inflow unrepresentable, which would measure this adapter rather than
+  the method; every other baseline receives them.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from itertools import product
 from pathlib import Path
 from typing import Protocol
 
@@ -32,20 +43,34 @@ import numpy as np
 from numpy.typing import NDArray
 
 from autoformalism.baselines.models import BaselineDevelopmentResult
-from autoformalism.data import BenchmarkRegistry, DatasetSplit
+from autoformalism.data import BenchmarkRegistry, DatasetSplit, Trajectory
 from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.baseline_validation import load_public
 from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
+from autoformalism.rebuttal.phase_c_baselines import PhaseCBaselineCell, load_cell
+from autoformalism.rebuttal.phase_c_vendored_campaign import (
+    PhaseCVendoredCampaignPlan,
+    endpoint_environment,
+    exclusive_attempt,
+    load_development,
+    load_phase_c_vendored_plan,
+    require_endpoint,
+    verify_plan_release,
+)
 from autoformalism.rebuttal.prefit_replay import (
     content_hash,
     sealed_read,
     sealed_write,
 )
-from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.rebuttal.vendored_campaign import VendoredCampaignPlan
 
 #: Upstream differentiates with findiff at fourth order; keep that choice.
 DERIVATIVE_ACCURACY = 4
+
+#: What LLM-ODE's released code ranks its systems by, its ``mse_train_val``:
+#: the error of a rollout over the training trajectory, the part the equations
+#: were fitted on and the validation part after it, in the data's own units.
+SELECTION_METRIC = "train_val_rollout_mse"
 
 
 class SearcherFactory(Protocol):
@@ -89,12 +114,24 @@ class CellArrays:
             raise ValueError("require at least one trajectory")
 
 
+def _channel_names(trajectory: Trajectory) -> tuple[str, ...]:
+    return (
+        *trajectory.targets,
+        *trajectory.auxiliaries,
+        *trajectory.external_inputs,
+        *trajectory.fixed_covariates,
+    )
+
+
 def observed_channels(split: DatasetSplit) -> tuple[str, ...]:
-    """Name the channels upstream will treat as system variables."""
-    first = split.trajectories[0]
-    channels = (*first.targets, *first.auxiliaries)
+    """Name the channels upstream will treat as system variables.
+
+    Targets first, then everything supplied over the horizon: auxiliaries,
+    measured inputs and fixed covariates, in the order the data declares them.
+    """
+    channels = _channel_names(split.trajectories[0])
     for trajectory in split.trajectories:
-        if (*trajectory.targets, *trajectory.auxiliaries) != channels:
+        if _channel_names(trajectory) != channels:
             raise ValueError("channel identities differ across trajectories")
     return channels
 
@@ -135,11 +172,20 @@ def cell_arrays(split: DatasetSplit) -> CellArrays:
     bounds: list[tuple[int, int]] = []
     start = 0
     for trajectory in split.trajectories:
-        measured = {**trajectory.targets, **trajectory.auxiliaries}
+        time = np.asarray(trajectory.time, dtype=float)
+        measured = {
+            **trajectory.targets,
+            **trajectory.auxiliaries,
+            **trajectory.external_inputs,
+            # A covariate is constant over its trajectory: a constant column.
+            **{
+                name: np.full(time.shape, float(value))
+                for name, value in trajectory.fixed_covariates.items()
+            },
+        }
         block = np.column_stack(
             [np.asarray(measured[name], float) for name in channels]
         )
-        time = np.asarray(trajectory.time, dtype=float)
         steps = np.diff(time)
         if not np.allclose(steps, steps[0]):
             raise ValueError("fourth-order differences require a uniform grid")
@@ -184,6 +230,32 @@ def specification_block(
 SPECIFICATION_SECTIONS = ("A. Task specification", "B. Available data")
 SPECIFICATION_END = "C. Modeling requirements"
 
+#: The detention-basin prompts are laid out differently, and every section
+#: before E is science: the task, the observations, the surveyed geometry and
+#: the required mechanisms. E is the evaluation protocol, which is withheld
+#: just as the other layout withholds its requirements.
+BASIN_SPECIFICATION_SECTIONS = (
+    "## A. Scientific task",
+    "## B. Observations and known forcing",
+    "## C. Surveyed geometry and preparation",
+    "## D. Required mechanisms",
+)
+BASIN_SPECIFICATION_END = "## E. Evaluation boundaries"
+
+#: The independent-basin negative control is unsectioned. Its paragraphs are
+#: the task, the required mechanisms and the observations, then a closing
+#: paragraph of evaluation protocol -- the same content as the basin section E,
+#: and withheld for the same reason.
+INDEPENDENT_BASIN_SECTIONS = ("# Independent stormwater basins",)
+INDEPENDENT_BASIN_END = "Fit using training only."
+
+#: Each released layout: the sections passed on, then the heading ending them.
+SPECIFICATION_LAYOUTS = (
+    (SPECIFICATION_SECTIONS, SPECIFICATION_END),
+    (BASIN_SPECIFICATION_SECTIONS, BASIN_SPECIFICATION_END),
+    (INDEPENDENT_BASIN_SECTIONS, INDEPENDENT_BASIN_END),
+)
+
 
 def public_prompt_text(root: Path, benchmark: str, tier: str) -> str:
     """Read the rendered public proposer prompt for one cell."""
@@ -200,60 +272,88 @@ def public_task_specification(prompt: str) -> str:
     Pasting the whole prompt would hand a vendored baseline our modelling
     requirements, our response format and our restrictions. Taking a prefix by
     position would silently pass everything if the prompt were ever reordered,
-    so each boundary is required to be present.
+    so each boundary is required to be present, once, and in order.
     """
-    for heading in (*SPECIFICATION_SECTIONS, SPECIFICATION_END):
-        if heading not in prompt:
-            raise ValueError(
-                f"public prompt has no {heading!r} section; the specification "
-                "boundary must be re-established before it can be supplied"
-            )
-    return prompt[: prompt.index(SPECIFICATION_END)].strip()
-
-
-def select_system(
-    frontiers: tuple[tuple[str, ...], ...],
-    score: Callable[[tuple[str, ...]], float | None],
-    *,
-    maximum_combinations: int = 10_000,
-) -> tuple[str, ...] | None:
-    """Rank the product of per-variable frontiers, as upstream's driver does.
-
-    Upstream sorts assembled systems by their rolled-out error and keeps the
-    best. The cap exists because the product grows multiplicatively and a
-    truncated search would otherwise be reported as a completed one.
-    """
-    if not frontiers or any(not item for item in frontiers):
-        return None
-    total = 1
-    for item in frontiers:
-        total *= len(item)
-    if total > maximum_combinations:
+    layouts = [
+        layout for layout in SPECIFICATION_LAYOUTS if layout[0][0] in prompt
+    ]
+    if len(layouts) != 1:
         raise ValueError(
-            f"{total} assembled systems exceed the {maximum_combinations} cap; "
-            "record the truncation rather than silently ranking a subset"
+            "public prompt matches no single known section layout; the "
+            "specification boundary must be re-established before it can be "
+            "supplied"
         )
-    best: tuple[str, ...] | None = None
-    best_score = np.inf
-    for combination in product(*frontiers):
-        value = score(combination)
-        if value is None or not np.isfinite(value):
-            continue
-        if value < best_score:
-            best_score, best = float(value), combination
-    return best
+    sections, end = layouts[0]
+    positions = []
+    for heading in (*sections, end):
+        if prompt.count(heading) != 1:
+            raise ValueError(
+                f"public prompt has no single {heading!r} section; the "
+                "specification boundary must be re-established before it can "
+                "be supplied"
+            )
+        positions.append(prompt.index(heading))
+    if positions != sorted(positions):
+        raise ValueError(
+            "public prompt sections are out of order; the specification "
+            "boundary must be re-established before it can be supplied"
+        )
+    return prompt[: prompt.index(end)].strip()
+
+
+def phase_c_rows(
+    plan: PhaseCVendoredCampaignPlan,
+    release: Path,
+    *,
+    features: Callable[[PhaseCBaselineCell], tuple[str, ...]] | None = None,
+) -> tuple[str, list[dict]]:
+    """Check a Phase C release against the plan, then freeze one row per task.
+
+    Rows keep the Phase B shape, so the search, selection and sealed result
+    are unchanged. Each identity also names the release receipt, and the
+    specification is cut from the released prompt by the same rule.
+    `features` names a cell's channels; by default, `observed_channels`.
+    """
+    receipt = verify_plan_release(plan, release)
+    rows: list[dict] = []
+    for cell in plan.cells:
+        loaded = load_cell(release, cell.benchmark_id)
+        channels = (
+            observed_channels(loaded.dataset.train)
+            if features is None
+            else features(loaded)
+        )
+        specification = (
+            public_task_specification(loaded.prompt)
+            if plan.prompt_policy.supplies_public_task_specification
+            else ""
+        )
+        for repetition in plan.repetitions:
+            rows.append(
+                {
+                    "index": len(rows),
+                    "benchmark_id": cell.benchmark_id,
+                    "tier": cell.tier,
+                    "repetition": repetition,
+                    "public_identity": loaded.identity,
+                    "channels": list(channels),
+                    "searched_targets": list(loaded.context.targets),
+                    "prompt": specification,
+                }
+            )
+    return receipt, rows
 
 
 PROTOCOL = "phase-b-llm-ode-campaign-1"
+PHASE_C_PROTOCOL = "phase-c-llm-ode-campaign-1"
 
 
 def environment_identity() -> dict:
-    """Bind resume to the code and endpoint kind, never to a per-job port."""
-    return {
-        "runtime_source_sha256": runtime_source_hash(),
-        "provider": "vllm",
-        "endpoint_kind": "job-local vllm endpoint",
-    }
+    """Bind resume to the code and endpoint kind, never to a per-job port.
+
+    Phase B campaigns always ran against a job-local vLLM.
+    """
+    return endpoint_environment("job_local_vllm")
 
 
 def target_indices(
@@ -331,6 +431,36 @@ def prepare(config_path: Path, public_root: Path, root: Path) -> dict:
     )
 
 
+def prepare_phase_c(config_path: Path, release: Path, root: Path) -> dict:
+    """Freeze a Phase C campaign against one verified release, before any call."""
+    plan = load_phase_c_vendored_plan(config_path)
+    if plan.method != "llm_ode":
+        raise ValueError(f"expected an llm_ode plan, not {plan.method!r}")
+    release = release.expanduser().resolve()
+    receipt, rows = phase_c_rows(plan, release)
+    root.mkdir(parents=True, exist_ok=True)
+    return sealed_write(
+        root / "plan.json",
+        {
+            "protocol": PHASE_C_PROTOCOL,
+            "plan": plan.model_dump(mode="json"),
+            "release": str(release),
+            "release_summary_sha256": receipt,
+            "environment": endpoint_environment(plan.endpoint),
+            "reporting_qualifications": list(plan.reporting_qualifications()),
+            "search_config": {"n_islands": plan.islands},
+            "maximum_logical_calls": (
+                len(rows) * plan.budget.declared * plan.islands * max(
+                    len(row["searched_targets"]) for row in rows
+                )
+            ),
+            "rows": rows,
+            "test_data_opened": False,
+            "private_reference_opened": False,
+        },
+    )
+
+
 def run(
     root: Path,
     index: int,
@@ -348,20 +478,58 @@ def run(
             f"checkout that froze it, or delete {root / 'plan.json'} and its "
             "results to re-freeze at the current code."
         )
+    row, directory, finished = _task(sealed, root, index)
+    if finished is not None:
+        return finished
+    development, context, identity = load_public(
+        Path(sealed["public_root"]), row["benchmark_id"], row["tier"]
+    )
+    if identity != row["public_identity"]:
+        raise ValueError("public development input drift")
+    return _search_and_seal(sealed, row, directory, development, context, search)
+
+
+def run_phase_c(
+    root: Path,
+    index: int,
+    *,
+    endpoint: str,
+    search: SearcherFactory | None = None,
+) -> dict:
+    """Resume one Phase C task, only against the endpoint kind it was frozen for."""
+    sealed = sealed_read(root / "plan.json")
+    if sealed["protocol"] != PHASE_C_PROTOCOL:
+        raise ValueError(f"{root / 'plan.json'} is not a Phase C LLM-ODE plan")
+    require_endpoint(sealed, root, endpoint)
+    with exclusive_attempt(root, index):
+        row, directory, finished = _task(sealed, root, index)
+        if finished is not None:
+            return finished
+        development, context = load_development(sealed, row)
+        return _search_and_seal(sealed, row, directory, development, context, search)
+
+
+def _task(sealed: dict, root: Path, index: int) -> tuple[dict, Path, dict | None]:
+    """Locate one task, and its sealed result when it already finished."""
     if not 0 <= index < len(sealed["rows"]):
         raise ValueError("task index out of range")
     row = sealed["rows"][index]
     directory = root / "results" / str(index)
     directory.mkdir(parents=True, exist_ok=True)
     result_path = directory / "result.json"
-    if result_path.exists():
-        return sealed_read(result_path)
+    return row, directory, sealed_read(result_path) if result_path.exists() else None
 
-    development, context, identity = load_public(
-        Path(sealed["public_root"]), row["benchmark_id"], row["tier"]
-    )
-    if identity != row["public_identity"]:
-        raise ValueError("public development input drift")
+
+def _search_and_seal(
+    sealed: dict,
+    row: dict,
+    directory: Path,
+    development,
+    context,
+    search: SearcherFactory | None,
+) -> dict:
+    """Run upstream's search on development data and seal what it selected."""
+    result_path = directory / "result.json"
     if search is None:  # pragma: no cover - requires the vendored checkout
         raise ValueError(
             "supply a searcher factory bound to the pinned LLM-ODE checkout"
@@ -394,7 +562,7 @@ def run(
             selected_hyperparameters={
                 "iterations": int(sealed["plan"]["budget"]["declared"]),
                 "n_islands": int(sealed["search_config"]["n_islands"]),
-                "selection": "development_rollout_error",
+                "selection": SELECTION_METRIC,
             },
             selection_payload={
                 "candidate": equation_candidate(
@@ -422,16 +590,18 @@ def run(
                 key: row[key]
                 for key in ("index", "benchmark_id", "tier", "repetition")
             },
-            "protocol": PROTOCOL,
+            "protocol": sealed["protocol"],
             "plan_sha256": sealed["artifact_sha256"],
             "status": outcome["status"],
             "error": outcome.get("error"),
             "equations": outcome.get("equations"),
+            SELECTION_METRIC: outcome.get(SELECTION_METRIC),
+            # The normalized validation error, recorded; it chooses nothing.
             "development_rollout_error": outcome.get("development_rollout_error"),
             "accounting": outcome.get("accounting", {}),
             "test_data_opened": False,
             "private_reference_opened": False,
-            "selection_metric": "development_rollout_error",
+            "selection_metric": SELECTION_METRIC,
         },
     )
 
@@ -455,7 +625,8 @@ def report(root: Path) -> dict:
     expected = len(sealed["rows"])
     complete = counts.get("complete", 0)
     value = {
-        "protocol": PROTOCOL,
+        # The plan's own protocol, so one report serves Phase B and Phase C.
+        "protocol": sealed["protocol"],
         "status": "complete" if complete == expected else "pending",
         "expected": expected,
         "terminal_success": complete,
@@ -465,7 +636,8 @@ def report(root: Path) -> dict:
             for status, count in counts.items()
             if status in {"inexpressible", "rollout_failed", "no_candidates"}
         ),
-        "infrastructure_failure": counts.get("product_too_large", 0),
+        "infrastructure_failure": counts.get("product_too_large", 0)
+        + counts.get("endpoint_unavailable", 0),
         "frozen_models": sum(
             1
             for task in sealed["rows"]

@@ -9,6 +9,7 @@ from pydantic import model_validator
 from autoformalism.data import DevelopmentDataset
 from autoformalism.expressions import (
     ValidationContext,
+    baseline_validator,
     compile_candidate,
     repair_protected_declarations,
 )
@@ -60,7 +61,7 @@ def evaluate_common_refit(
 ) -> CommonRefitResult:
     """Evaluate one frozen structure without pruning, judging, or test access."""
     repaired, repairs = repair_protected_declarations(candidate, context)
-    compiled = compile_candidate(repaired, context)
+    compiled = compile_candidate(repaired, context, validator=baseline_validator())
     screening = fit_candidate(
         compiled,
         dataset.train,

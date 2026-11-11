@@ -5,21 +5,52 @@ specification file their runner is always pointed at, and a transport: their
 sampler posts a bespoke payload to a hardcoded local URL, and this answers it
 from the vLLM endpoint the other methods use.
 
+A plan may declare an adaptation to a reasoning model: a longer generation
+limit than their engine's 512 tokens, and a function header the model split
+over several lines read as one (`llm_sr_shim.join_split_header`). Both act in
+the transport; without a declaration the transport behaves as their engine.
+Against an endpoint that replays stored answers, every request asks it to
+generate afresh, as their engine always does. A plan may also declare the
+settings the LLM-SR paper states where their released code differs: the
+sampling temperature, which their client leaves unset, and two fields of their
+own configuration, the cluster-sampling period and the number of evaluators.
+
 Their evaluator executes each synthesized program to score it. That is what
 program synthesis is, and it cannot be removed without removing the method, so
-the job confines it rather than preventing it. Nothing in the recovery path
-here executes anything: the selected program is parsed, its coefficients are
-refitted over a numeric evaluator, and the result is scored by our own rollout.
+the job confines it rather than preventing it. The recovery path first reads
+the selected program without running it: if it is an equation of the current
+values, its coefficients are refitted as their evaluator fits them, and the
+result is scored by the shared rollout. A plan with a program rollout runs a
+selected program that reads the history instead (``llm_sr_programs``): after
+an allowlist check, in a separate process, with their fit, rolled out along
+each trajectory's grid. In a cell where any target's program reads the
+history, every target is run as its program, so the cell is rolled out as one
+system.
+
+Each target is its own LLM-SR run, so a cell's targets can be searched by
+separate processes at once. A finished search leaves a record beside its
+samples and is never run again; one that stopped part-way is set aside and
+starts over, because their search cannot resume. The cell's model is assembled
+once every target has finished.
 
 The one behaviour that must be guarded is `_draw_samples_local`, which wraps
 its request loop in `while True: except Exception: continue`. An endpoint fault
-would otherwise spin until the job's walltime with nothing recorded.
+would otherwise spin until the job's walltime with nothing recorded, so the
+search is stopped once the endpoint has failed for longer than the campaign's
+patience.
 """
 
 from __future__ import annotations
 
+import ast
+import json
 import logging
+import time
+from collections import Counter
+from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -28,58 +59,140 @@ import numpy as np
 
 from autoformalism.data import DatasetSplit
 from autoformalism.expressions import ValidationContext
+from autoformalism.llm.staged_topology import atomic_json
 from autoformalism.rebuttal.llm_call_log import CallLog
-from autoformalism.rebuttal.llm_sr_shim import ShimAccounting, complete
+from autoformalism.rebuttal.llm_ode_upstream import InexpressibleEquation
+from autoformalism.rebuttal.llm_sr_programs import (
+    EXECUTION,
+    CheckedProgram,
+    ProgramRefused,
+    check_program,
+    observation_step,
+    program_rollout_error,
+    refit,
+    training_outputs,
+)
+from autoformalism.rebuttal.llm_sr_shim import (
+    DEFAULT_MAX_TOKENS,
+    ShimAccounting,
+    complete,
+)
 from autoformalism.rebuttal.llm_sr_upstream import (
+    MAX_NPARAMS,
     InexpressibleProgram,
     best_sample,
     build_specification,
     convert_program,
     equation_body,
-    refit_parameters,
+    evaluate_expression,
+    refit_program,
+    sample_yield,
+    single_expression_refusal,
+    training_error,
 )
 from autoformalism.rebuttal.phase_b_d3 import accounting as d3_accounting
 
 LOGGER = logging.getLogger(__name__)
 
-#: Consecutive transport failures after which the sampler is stopped. Their
-#: retry loop catches Exception, so escaping it needs BaseException.
-STALL_LIMIT = 20
+#: How far an equation read from a fitted program may stray from the
+#: program's own outputs, as a fraction of the largest; past it, the reading
+#: is not the program and the program is run instead.
+EQUATION_TOLERANCE = 1e-9
+
+#: How long the endpoint may go on failing, from the first failure in a row,
+#: before the search is stopped. A vLLM started inside the job does not come
+#: back once it has died; a campaign against a service that does come back
+#: passes a longer patience. Their retry loop catches Exception, so escaping it
+#: needs BaseException.
+DEFAULT_PATIENCE_SECONDS = 15 * 60.0
+
+#: First and longest pause before their sampler retries a failed request. The
+#: pause doubles per consecutive failure: a blip costs seconds, and a long
+#: outage is retried about once a minute until it ends or patience runs out.
+BACKOFF_SECONDS = (1.0, 60.0)
+
+#: What a finished target search leaves beside its samples: what it cost and
+#: when it ran. A target with one is never searched again.
+SEARCH_RECORD = "search.json"
+
+#: The shared accounting rule's counts, summed over a task's target searches.
+CALL_COUNTS = ("physical_requests", "observed_tokens", "unknown_usage_requests",
+               "cache_hits")
 
 
 class SamplerStalled(BaseException):
     """Raised through upstream's `except Exception` to end a wedged search."""
 
 
+def _pause(seconds: float) -> None:
+    """Wait before the next attempt; a seam so tests need not sleep."""
+    time.sleep(seconds)
+
+
+def _clock() -> float:
+    """Seconds on a monotonic clock; a seam so tests can move time on."""
+    return monotonic()
+
+
 @contextmanager
-def _transport(module: Any, base_url: str, model: str, accounting: ShimAccounting):
+def _transport(
+    module: Any,
+    base_url: str,
+    model: str,
+    accounting: ShimAccounting,
+    *,
+    patience: float = DEFAULT_PATIENCE_SECONDS,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    join_headers: bool = False,
+    bypass_cache: bool = False,
+    temperature: float | None = None,
+):
     """Answer their sampler's requests from the OpenAI-compatible endpoint.
 
     Replaces the request method rather than the URL, which avoids running a
     second server inside the job; the payload and reply are theirs unchanged.
+    `max_tokens` and `join_headers` are what a plan declares for a reasoning
+    model; their defaults are their engine's behaviour. `temperature` is the
+    paper's, when a plan declares it; their client sends none. `bypass_cache`
+    follows the endpoint kind.
     """
     original = module.LocalLLM._do_request
-    state = {"consecutive": 0}
+    first, longest = BACKOFF_SECONDS
+    state = {"consecutive": 0, "since": 0.0, "pause": first}
 
     def _do_request(self, content: str) -> list[str]:
         payload = {
             "prompt": content.strip("\n").strip(),
             "repeat_prompt": self._samples_per_prompt if self._batch_inference else 1,
-            "params": {"do_sample": True, "temperature": None, "top_k": None,
+            "params": {"do_sample": True, "temperature": temperature, "top_k": None,
                        "top_p": None, "add_special_tokens": False,
                        "skip_special_tokens": True},
         }
         try:
             answer = complete(
-                payload, base_url=base_url, model=model, accounting=accounting
+                payload,
+                base_url=base_url,
+                model=model,
+                max_tokens=max_tokens,
+                join_headers=join_headers,
+                bypass_cache=bypass_cache,
+                accounting=accounting,
             )
         except Exception:
+            now = _clock()
+            if state["consecutive"] == 0:
+                state["since"], state["pause"] = now, first
             state["consecutive"] += 1
-            if state["consecutive"] >= STALL_LIMIT:
+            if now - state["since"] >= patience:
                 raise SamplerStalled(
-                    f"{STALL_LIMIT} consecutive endpoint failures; their sampler "
-                    "retries forever, so the search is stopped here"
+                    f"the endpoint failed {state['consecutive']} times in a row "
+                    f"over {(now - state['since']) / 60:.0f} minutes; their "
+                    "sampler retries forever, so the search is stopped here"
                 ) from None
+            # Their loop retries at once; without a pause an outage would be
+            # met with a stream of requests.
+            _pause(state["pause"])
+            state["pause"] = min(longest, 2 * state["pause"])
             raise
         state["consecutive"] = 0
         return answer["content"]
@@ -91,6 +204,51 @@ def _transport(module: Any, base_url: str, model: str, accounting: ShimAccountin
         module.LocalLLM._do_request = original
 
 
+def _evolved_source(program: str, function: str) -> str:
+    """The evolved function's text inside one of their runnable programs."""
+    try:
+        module = ast.parse(program)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return ""
+    return next(
+        (
+            ast.unparse(node)
+            for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name == function
+        ),
+        "",
+    )
+
+
+def single_expression_sandbox(
+    base: type, inputs: dict[str, str], refused: Counter
+) -> type:
+    """Their sandbox, run only on a sample that is one expression of the present.
+
+    The paper's "w/o Program" form. Their evaluator scores a sample by calling
+    ``sandbox.run`` and treats ``(None, False)`` as a program that failed,
+    which it never registers. A sample whose evolved function is not one return
+    statement that the non-executing reader turns into an equation of the
+    current values (``single_expression_refusal``) gets that answer before
+    anything runs; every other sample runs in their sandbox unchanged. Refusals
+    are counted by reason in ``refused``.
+    """
+
+    class SingleExpressionSandbox(base):
+        def run(self, program, function_to_run, function_to_evolve, inputs_,
+                test_input, timeout_seconds, **kwargs):
+            reason = single_expression_refusal(
+                _evolved_source(program, function_to_evolve), inputs
+            )
+            if reason is not None:
+                refused[reason.split(":")[0]] += 1
+                return None, False
+            return super().run(program, function_to_run, function_to_evolve,
+                               inputs_, test_input, timeout_seconds, **kwargs)
+
+    return SingleExpressionSandbox
+
+
 def build_searcher(
     *,
     upstream_root: Path,
@@ -98,8 +256,32 @@ def build_searcher(
     model: str,
     samples: int,
     seconds_per_rollout: float = 60.0,
+    patience_seconds: float = DEFAULT_PATIENCE_SECONDS,
+    max_new_tokens: int = DEFAULT_MAX_TOKENS,
+    join_split_headers: bool = False,
+    bypass_cache: bool = False,
+    before_search: Callable[[], None] | None = None,
+    temperature: float | None = None,
+    cluster_sampling_temperature_period: int | None = None,
+    num_evaluators: int | None = None,
+    program_rollout: bool = False,
+    single_expression: bool = False,
 ):
-    """Bind the pinned checkout to our data; returns a campaign searcher."""
+    """Bind the pinned checkout to our data; returns a campaign searcher.
+
+    `max_new_tokens` and `join_split_headers` come from a plan's declared
+    reasoning-model adaptation; the defaults are upstream's own behaviour.
+    `temperature`, `cluster_sampling_temperature_period` and `num_evaluators`
+    are the paper's values where a plan declares them; left out, their code's
+    own apply. `bypass_cache` is for an endpoint that replays stored answers.
+    `before_search` runs before each target search that actually starts, so a
+    run that only assembles finished searches contacts no endpoint.
+    `program_rollout` follows a plan's declaration: a selected program that
+    reads the history is run as one rather than refused. `single_expression`
+    is the paper's "w/o Program" form, which a plan declares
+    (``HypothesisForm``): a one-line starting program, a docstring asking for
+    one, and only such samples evaluated.
+    """
     import sys
 
     resolved = upstream_root.expanduser().resolve()
@@ -110,47 +292,101 @@ def build_searcher(
     from llmsr import config as config_lib
     from llmsr import evaluator, pipeline, sampler
 
+    settings: dict[str, Any] = {}
+    if cluster_sampling_temperature_period is not None:
+        settings["experience_buffer"] = config_lib.ExperienceBufferConfig(
+            cluster_sampling_temperature_period=cluster_sampling_temperature_period
+        )
+    if num_evaluators is not None:
+        settings["num_evaluators"] = num_evaluators
+
     def search(
         *,
         channels: tuple[str, ...],
         targets: tuple[str, ...],
         values: np.ndarray,
-        derivatives: np.ndarray,
+        labels: np.ndarray,
         description: str,
         directory: Path,
         development: tuple[DatasetSplit, DatasetSplit],
         context: ValidationContext,
         score_rollout,
+        score_programs=program_rollout_error,
+        only: str | None = None,
     ) -> dict:
-        """One LLM-SR run per target, as their specification format requires."""
-        accounting = ShimAccounting(log=CallLog(directory / "llm_calls.jsonl"))
-        equations: dict[str, str] = {}
-        inexpressible: list[str] = []
-        started = monotonic()
-        for target in targets:
-            specification, mapping = build_specification(
-                description, channels, target
-            )
-            log_dir = directory / f"llmsr-{target}"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            (log_dir / "specification.txt").write_text(specification, encoding="utf-8")
+        """One LLM-SR run per target, as their specification format requires.
 
-            column = channels.index(target)
+        `values` holds one row per training point over `channels`, and
+        `labels` the derivative of each of `targets` at that row. A target
+        whose search has finished is not searched again. `only` searches that
+        one target and returns without assembling a model. `score_rollout`
+        scores equations and `score_programs` programs, on development data.
+        """
+        if only is not None and only not in targets:
+            raise ValueError(f"{only!r} is not among the searched targets {targets}")
+        if labels.shape != (values.shape[0], len(targets)):
+            raise ValueError("one derivative label per row and target is required")
+        equations: dict[str, str] = {}
+        selected: dict[str, dict] = {}
+        inexpressible: list[str] = []
+        # The search this process is running, counted if it stalls.
+        running: dict[str, Any] = {"accounting": ShimAccounting(), "started": None}
+
+        def spent() -> dict:
+            return _accounting(directory, targets, inexpressible, running)
+
+        for target in targets if only is None else (only,):
+            log_dir = directory / f"llmsr-{target}"
+            if (log_dir / SEARCH_RECORD).is_file():
+                continue
+            if before_search is not None:
+                before_search()
+            set_aside_unfinished_search(log_dir)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            specification, mapping = build_specification(
+                description, channels, target, single_expression=single_expression
+            )
+            (log_dir / "specification.txt").write_text(specification, encoding="utf-8")
+            refused: Counter = Counter()
+
             dataset = {
                 "data": {
                     "inputs": values,
-                    "outputs": derivatives[:, column].reshape(-1),
+                    "outputs": labels[:, targets.index(target)].reshape(-1),
                 }
             }
             class_config = config_lib.ClassConfig(
-                llm_class=sampler.LocalLLM, sandbox_class=evaluator.LocalSandbox
+                llm_class=sampler.LocalLLM,
+                sandbox_class=(
+                    single_expression_sandbox(evaluator.LocalSandbox, mapping, refused)
+                    if single_expression
+                    else evaluator.LocalSandbox
+                ),
             )
+            accounting = ShimAccounting(log=CallLog(log_dir / "llm_calls.jsonl"))
+            started_utc = _utc_now()
+            running.update(accounting=accounting, started=monotonic())
+            # Their sampler counts samples on its class, which only a new
+            # process resets; their runner gives each problem a new process.
+            # Without this, a second target searched here would stop at once,
+            # its budget spent by the first.
+            sampler.Sampler._global_samples_nums = 1
             try:
-                with _transport(sampler, base_url, model, accounting):
+                with _transport(
+                    sampler,
+                    base_url,
+                    model,
+                    accounting,
+                    patience=patience_seconds,
+                    max_tokens=max_new_tokens,
+                    join_headers=join_split_headers,
+                    bypass_cache=bypass_cache,
+                    temperature=temperature,
+                ):
                     pipeline.main(
                         specification=specification,
                         inputs=dataset,
-                        config=config_lib.Config(),
+                        config=config_lib.Config(**settings),
                         max_sample_nums=samples,
                         class_config=class_config,
                         log_dir=str(log_dir),
@@ -159,79 +395,465 @@ def build_searcher(
                 return {
                     "status": "endpoint_unavailable",
                     "error": str(exc),
-                    "accounting": _accounting(accounting, started, inexpressible,
-                                  directory / 'llm_calls.jsonl'),
+                    "accounting": spent(),
                 }
+            atomic_json(
+                log_dir / SEARCH_RECORD,
+                {
+                    "target": target,
+                    "llm_requests": accounting.requests,
+                    "llm_samples": accounting.samples,
+                    "transport_failures": accounting.failures,
+                    "transport_failure_reasons": dict(accounting.reasons),
+                    "search_seconds": round(monotonic() - running["started"], 1),
+                    "started_utc": started_utc,
+                    "finished_utc": _utc_now(),
+                    **(
+                        {"single_expression_refusals": dict(refused)}
+                        if single_expression
+                        else {}
+                    ),
+                },
+            )
+            running.update(accounting=ShimAccounting(), started=None)
 
-            best = best_sample(log_dir)
+        if only is not None:
+            return {"status": "searched", "target": only, "accounting": spent()}
+
+        picks: dict[str, dict] = {}
+        for target in targets:
+            best = best_sample(directory / f"llmsr-{target}")
             if best is None:
                 return {
                     "status": "no_candidates",
                     "error": f"no sample scored for target {target}",
-                    "accounting": _accounting(accounting, started, inexpressible,
-                                  directory / 'llm_calls.jsonl'),
+                    "accounting": spent(),
                 }
+            picks[target] = best
+        if program_rollout:
+            return _recover_by_running(
+                picks=picks,
+                channels=channels,
+                targets=targets,
+                description=description,
+                values=values,
+                labels=labels,
+                development=development,
+                context=context,
+                score_rollout=score_rollout,
+                score_programs=score_programs,
+                seconds=seconds_per_rollout,
+                inexpressible=inexpressible,
+                spent=spent,
+            )
+
+        columns = {name: values[:, index] for index, name in enumerate(channels)}
+        for target in targets:
+            best = picks[target]
+            _, mapping = build_specification(description, channels, target)
+            label = labels[:, targets.index(target)].reshape(-1)
             try:
                 body = equation_body(best["function"])
-                symbolic = convert_program(body, mapping)
-                fitted = refit_parameters(
-                    symbolic.expression,
-                    {name: values[:, index] for index, name in enumerate(channels)},
-                    derivatives[:, column].reshape(-1),
-                    symbolic.used_parameters,
-                )
+                # A body with no equation is refused for its own reason, not
+                # for the fit that could not then be made.
+                convert_program(body, mapping, dict.fromkeys(range(MAX_NPARAMS), 1.0))
+                fitted = refit_program(body, mapping, columns, label)
                 if fitted is None:
                     raise InexpressibleProgram("coefficient refit did not converge")
                 equations[target] = convert_program(body, mapping, fitted).expression
-            except InexpressibleProgram as exc:
+                selected[target] = {
+                    "sample_order": best.get("sample_order"),
+                    "llm_sr_score": best["score"],
+                    "refitted_training_mse": training_error(
+                        equations[target], columns, label
+                    ),
+                }
+            except (InexpressibleProgram, RecursionError) as exc:
                 inexpressible.append(f"{target}: {exc}")
 
         if len(equations) != len(targets):
             return {
                 "status": "inexpressible",
                 "error": "; ".join(inexpressible),
-                "accounting": _accounting(accounting, started, inexpressible,
-                                  directory / 'llm_calls.jsonl'),
+                "selected_samples": selected,
+                "accounting": spent(),
             }
-        error = score_rollout(equations, context, *development,
-                              seconds=seconds_per_rollout)
+        try:
+            error, reason = _development_rollout(
+                score_rollout, equations, context, development,
+                seconds=seconds_per_rollout,
+            )
+        except InexpressibleEquation as exc:
+            # What converts can still name something the evaluator's grammar
+            # refuses; record it, do not crash.
+            inexpressible.append(str(exc))
+            return {
+                "status": "inexpressible",
+                "error": "; ".join(inexpressible),
+                "selected_samples": selected,
+                "accounting": spent(),
+            }
         if error is None:
             return {
                 "status": "rollout_failed",
-                "error": "the selected system did not complete a development rollout",
+                "error": reason,
                 "equations": equations,
-                "accounting": _accounting(accounting, started, inexpressible,
-                                  directory / 'llm_calls.jsonl'),
+                "selected_samples": selected,
+                "accounting": spent(),
             }
+        training, failure = _training_rollout(
+            score_rollout, equations, context, development[0],
+            seconds=seconds_per_rollout,
+        )
         return {
             "status": "complete",
             "error": None,
             "equations": equations,
+            "selected_samples": selected,
             "development_rollout_error": error,
-            "training_rollout_error": score_rollout(
-                equations, context, development[0], development[0],
-                seconds=seconds_per_rollout,
-            ),
-            "accounting": _accounting(accounting, started, inexpressible,
-                                  directory / 'llm_calls.jsonl'),
+            "training_rollout_error": training,
+            "training_rollout_failure": failure,
+            "accounting": spent(),
         }
 
     return search
 
 
-def _accounting(
-    accounting: ShimAccounting,
-    started: float,
+#: Why a task has no development rollout error, as every seal so far records it.
+NO_DEVELOPMENT_ROLLOUT = "the selected system did not complete a development rollout"
+
+
+def _development_rollout(
+    score_rollout,
+    equations: dict[str, str],
+    context: ValidationContext,
+    development: tuple[DatasetSplit, DatasetSplit],
+    *,
+    seconds: float,
+) -> tuple[float | None, str | None]:
+    """The system's rollout error on validation, or why it has none.
+
+    Without one the task seals as ``rollout_failed``. A validation trajectory
+    that runs past the time limit has failed too, as a program's does and as a
+    training trajectory does in ``_training_rollout``: the simulator raises
+    then rather than failing, so each validation trajectory is run alone to
+    name it. Any other failure keeps the reason the seals so far recorded.
+    """
+    train, validation = development
+    try:
+        error = score_rollout(equations, context, train, validation, seconds=seconds)
+    except TimeoutError:
+        pass
+    else:
+        return error, (None if error is not None else NO_DEVELOPMENT_ROLLOUT)
+    failed: list[str] = []
+    for trajectory in validation.trajectories:
+        one = replace(validation, trajectories=(trajectory,))
+        try:
+            if score_rollout(equations, context, train, one, seconds=seconds) is None:
+                failed.append(trajectory.trajectory_id)
+        except TimeoutError:
+            failed.append(f"{trajectory.trajectory_id} (over {seconds:g} s)")
+    if not failed:
+        return None, f"{NO_DEVELOPMENT_ROLLOUT} within {seconds:g} s"
+    return None, f"{NO_DEVELOPMENT_ROLLOUT} on {', '.join(failed)}"
+
+
+def _training_rollout(
+    score_rollout,
+    equations: dict[str, str],
+    context: ValidationContext,
+    train: DatasetSplit,
+    *,
+    seconds: float,
+) -> tuple[float | None, str | None]:
+    """The system's rollout error on its training data, or why it has none.
+
+    The training rollout neither selects nor scores LLM-SR's pick, so when it
+    fails the task still seals and the test rollout decides, as for every
+    method (decided by the user on 2026-10-23). The failure names each
+    training trajectory that fails on its own. A trajectory that runs past the
+    time limit has failed too: the simulator raises then rather than failing.
+    """
+    try:
+        error = score_rollout(equations, context, train, train, seconds=seconds)
+    except TimeoutError:
+        error = None
+    if error is not None:
+        return error, None
+    failed: list[str] = []
+    for trajectory in train.trajectories:
+        one = replace(train, trajectories=(trajectory,))
+        try:
+            if score_rollout(equations, context, train, one, seconds=seconds) is None:
+                failed.append(trajectory.trajectory_id)
+        except TimeoutError:
+            failed.append(f"{trajectory.trajectory_id} (over {seconds:g} s)")
+    if not failed:
+        return None, "the training rollout failed"
+    return None, f"the training rollout failed on {', '.join(failed)}"
+
+
+def _as_equation(
+    function: str,
+    mapping: dict[str, str],
+    parameters: tuple[float, ...],
+    columns: dict[str, np.ndarray],
+    outputs: np.ndarray,
+) -> str:
+    """The fitted program as one equation of the current values, if it is one.
+
+    The reader takes the coefficients LLM-SR's own fit found, so a branch on a
+    coefficient goes the way the fitted program goes. The equation is kept
+    only if it reproduces the program's outputs on the training rows.
+    """
+    body = equation_body(function)
+    expression = convert_program(body, mapping, dict(enumerate(parameters))).expression
+    predicted = np.broadcast_to(evaluate_expression(expression, columns), outputs.shape)
+    scale = float(np.max(np.abs(outputs))) if outputs.size else 0.0
+    gap = float(np.max(np.abs(predicted - outputs))) if outputs.size else 0.0
+    if not np.isfinite(gap) or gap > EQUATION_TOLERANCE * scale:
+        raise InexpressibleProgram(
+            "the equation read from the program differs from its outputs",
+            f"by {gap:.3g}",
+        )
+    return expression
+
+
+def _recover_by_running(
+    *,
+    picks: dict[str, dict],
+    channels: tuple[str, ...],
+    targets: tuple[str, ...],
+    description: str,
+    values: np.ndarray,
+    labels: np.ndarray,
+    development: tuple[DatasetSplit, DatasetSplit],
+    context: ValidationContext,
+    score_rollout,
+    score_programs,
+    seconds: float,
     inexpressible: list[str],
-    log_path: Path,
+    spent: Callable[[], dict],
 ) -> dict:
-    """What the run cost, and what our grammar could not read."""
+    """Recover each target's pick by running it, as a plan's program rollout does.
+
+    Each pick is checked against the allowlist and refitted with their
+    evaluator's own call, so its coefficients are LLM-SR's. Its output on the
+    training rows and whether that output depends on later rows are recorded.
+    If every fitted pick is an equation of the current values, the shared
+    evaluator rolls the cell out, as it does PySR's. Otherwise, or if its
+    grammar refuses an equation, every target is run as its program and the
+    cell is rolled out along its grid, on validation and on training data.
+    """
+    train, validation = development
+    rows = [trajectory.number_of_rows for trajectory in train.trajectories]
+    columns = {name: values[:, index] for index, name in enumerate(channels)}
+    programs: dict[str, tuple[CheckedProgram, tuple[float, ...]]] = {}
+    records: dict[str, dict] = {}
+    selected: dict[str, dict] = {}
+    equations: dict[str, str] = {}
+    for target in targets:
+        best = picks[target]
+        _, mapping = build_specification(description, channels, target)
+        label = labels[:, targets.index(target)].reshape(-1)
+        try:
+            program = check_program(best["function"], tuple(mapping))
+            fitted = refit(program, values, label)
+            outputs, error, look_ahead = training_outputs(
+                program, fitted.parameters, values, label, rows
+            )
+        except ProgramRefused as exc:
+            inexpressible.append(f"{target}: {exc}")
+            continue
+        programs[target] = (program, fitted.parameters)
+        selected[target] = {
+            "sample_order": best.get("sample_order"),
+            "llm_sr_score": best["score"],
+            "refit_loss": fitted.loss,
+            "refitted_training_mse": error,
+        }
+        refusal = None
+        try:
+            equations[target] = _as_equation(
+                best["function"], mapping, fitted.parameters, columns, outputs
+            )
+        except (InexpressibleProgram, RecursionError) as exc:
+            refusal = str(exc)
+        records[target] = {
+            "function": program.source,
+            "name": program.name,
+            "variables": list(program.variables),
+            "parameters": list(fitted.parameters),
+            # Why the fitted pick is not an equation of the current values;
+            # None when it is one.
+            "equation_refusal": refusal,
+            "look_ahead": look_ahead,
+        }
+    if inexpressible:
+        return {
+            "status": "inexpressible",
+            "error": "; ".join(inexpressible),
+            "selected_samples": selected,
+            "accounting": spent(),
+        }
+    if len(equations) == len(targets):
+        try:
+            error, reason = _development_rollout(
+                score_rollout, equations, context, development, seconds=seconds
+            )
+        except InexpressibleEquation as exc:
+            # The grammar refuses what the program computes; run the program.
+            for target in targets:
+                records[target]["equation_refusal"] = (
+                    f"the evaluator's grammar refuses the equation: {exc}"
+                )
+        else:
+            if error is None:
+                return {
+                    "status": "rollout_failed",
+                    "error": reason,
+                    "equations": equations,
+                    "selected_samples": selected,
+                    "accounting": spent(),
+                }
+            training, failure = _training_rollout(
+                score_rollout, equations, context, train, seconds=seconds
+            )
+            return {
+                "status": "complete",
+                "error": None,
+                "equations": equations,
+                "selected_samples": selected,
+                "development_rollout_error": error,
+                "training_rollout_error": training,
+                "training_rollout_failure": failure,
+                "accounting": spent(),
+            }
+    step = observation_step(train)
+    errors: dict[str, float | None] = {}
+    failure = None
+    for name, split in (("development", validation), ("training", train)):
+        score = score_programs(
+            programs, channels, context, train, split, step=step, seconds=seconds
+        )
+        if score.error is None and name == "training":
+            # Recorded, not fatal, as in _training_rollout.
+            failure = f"the training rollout failed: {score.failure}"
+        elif score.error is None:
+            return {
+                "status": "rollout_failed",
+                "error": f"the {name} rollout failed: {score.failure}",
+                "programs": records,
+                "grid_step": step,
+                "selected_samples": selected,
+                "accounting": spent(),
+            }
+        errors[name] = score.error
     return {
-        **d3_accounting(log_path),
-        "llm_requests": accounting.requests,
-        "llm_samples": accounting.samples,
-        "transport_failures": accounting.failures,
-        "transport_failure_reasons": accounting.reasons,
-        "search_seconds": round(monotonic() - started, 1),
+        "status": "complete",
+        "error": None,
+        "equations": None,
+        "programs": records,
+        "execution": EXECUTION,
+        "grid_step": step,
+        "selected_samples": selected,
+        "development_rollout_error": errors["development"],
+        "training_rollout_error": errors["training"],
+        "training_rollout_failure": failure,
+        "accounting": spent(),
+    }
+
+
+def _utc_now() -> str:
+    """The wall-clock time a record states, in UTC."""
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def set_aside_unfinished_search(log_dir: Path) -> Path | None:
+    """Move a target search that stopped part-way out of the next one's way.
+
+    It is kept beside the task for its cost and its logs, under a name the
+    task's accounting does not read. Restarting into the same directory would
+    let the new search's model be chosen from samples the stopped one wrote.
+    """
+    if not log_dir.is_dir() or (log_dir / SEARCH_RECORD).exists():
+        return None
+    if not any(log_dir.iterdir()):
+        return None
+    number = 1
+    while (
+        moved := log_dir.with_name(f"{log_dir.name}.interrupted-{number}")
+    ).exists():
+        number += 1
+    log_dir.rename(moved)
+    return moved
+
+
+def _accounting(
+    directory: Path,
+    targets: tuple[str, ...],
+    inexpressible: list[str],
+    running: dict[str, Any],
+) -> dict:
+    """What the searches cost, how many samples scored, what our grammar refused.
+
+    A finished search is counted from its record, so one that another process
+    or an earlier run finished is counted too; a search that stopped in this
+    process is counted from `running`. `search_seconds` adds the searches'
+    durations; `wall_seconds` spans the first start to the last finish, which
+    is shorter when targets were searched at once.
+    """
+    calls = dict.fromkeys(CALL_COUNTS, 0)
+    written = scored = 0
+    refusals: dict[str, int] = {}
+    accounting: ShimAccounting = running["accounting"]
+    requests, samples, failures = (
+        accounting.requests, accounting.samples, accounting.failures
+    )
+    reasons = dict(accounting.reasons)
+    seconds = 0.0 if running["started"] is None else monotonic() - running["started"]
+    starts: list[datetime] = []
+    finishes: list[datetime] = []
+    for target in targets:
+        log_dir = directory / f"llmsr-{target}"
+        for key, value in d3_accounting(log_dir / "llm_calls.jsonl").items():
+            calls[key] += value
+        counts = sample_yield(log_dir)
+        written += counts["model_samples"]
+        scored += counts["model_samples_scored"]
+        path = log_dir / SEARCH_RECORD
+        if not path.is_file():
+            continue
+        record = json.loads(path.read_text(encoding="utf-8"))
+        requests += record["llm_requests"]
+        samples += record["llm_samples"]
+        failures += record["transport_failures"]
+        for reason, count in record["transport_failure_reasons"].items():
+            reasons[reason] = reasons.get(reason, 0) + count
+        for reason, count in record.get("single_expression_refusals", {}).items():
+            refusals[reason] = refusals.get(reason, 0) + count
+        seconds += record["search_seconds"]
+        starts.append(datetime.fromisoformat(record["started_utc"]))
+        finishes.append(datetime.fromisoformat(record["finished_utc"]))
+    value = {
+        **calls,
+        "llm_requests": requests,
+        "llm_samples": samples,
+        # Samples the model wrote that LLM-SR's evaluator could score; one
+        # that is empty or does not parse never scores.
+        "model_samples": written,
+        "model_samples_scored": scored,
+        "transport_failures": failures,
+        "transport_failure_reasons": reasons,
+        "search_seconds": round(seconds, 1),
         "inexpressible_targets": inexpressible,
     }
+    if refusals:
+        # The "w/o Program" form: samples refused before they were evaluated.
+        value["single_expression_refusals"] = refusals
+    if running["started"] is None and len(starts) == len(targets):
+        value["wall_seconds"] = round(
+            (max(finishes) - min(starts)).total_seconds(), 1
+        )
+    return value

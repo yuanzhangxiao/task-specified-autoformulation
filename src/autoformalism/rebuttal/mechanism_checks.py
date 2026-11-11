@@ -12,7 +12,8 @@ import math
 from collections import Counter
 from typing import Literal
 
-from autoformalism.expressions import RestrictedParser, ValidationContext
+from autoformalism.expressions import ValidationContext
+from autoformalism.expressions.parser import grammar_parser
 from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.base import StrictSchema
 from autoformalism.search.requirement_feedback import _ancestors, _simplify
@@ -43,9 +44,16 @@ def counts(rows: list[dict]) -> dict:
 
 
 def effective_trees(
-    candidate: CandidateModel, parameters: dict[str, float] | None = None
+    candidate: CandidateModel,
+    parameters: dict[str, float] | None = None,
+    *,
+    grammar: str = "default",
 ) -> dict[str, ast.AST]:
-    """Substitute fitted scalars before removing obvious inactive syntax."""
+    """Substitute fitted scalars before removing obvious inactive syntax.
+
+    ``grammar`` is the grammar the model was selected under: ours by default,
+    or ``"baseline"`` for an external baseline's model.
+    """
 
     class Substitute(ast.NodeTransformer):
         def visit_Name(self, node):
@@ -65,7 +73,7 @@ def effective_trees(
         **{p.name: p.expression for p in candidate.processes},
         **{f"output:{o.channel}": o.expression for o in candidate.observation_mappings},
     }
-    parser = RestrictedParser()
+    parser = grammar_parser(grammar)
     return {
         name: _simplify(
             Substitute().visit(copy.deepcopy(parser.parse(rhs, location=name).tree))

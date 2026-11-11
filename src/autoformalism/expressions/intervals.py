@@ -73,6 +73,10 @@ def analyze_interval(
             reciprocal = Interval(1.0 / right.upper, 1.0 / right.lower)
             return _multiply(left, reciprocal)
         if isinstance(node.op, ast.Pow):
+            if not _is_integer_literal(node.right):
+                # Only the external-baseline grammar admits a real or computed
+                # exponent. Its domain is enforced when the model is evaluated.
+                return UNKNOWN_INTERVAL
             exponent = int(_signed_literal(node.right))
             if exponent < 0 and left.contains_zero():
                 diagnostics.append(
@@ -169,6 +173,13 @@ def _integer_power(base: Interval, exponent: int) -> Interval:
         lower = 0.0 if base.contains_zero() else min(values)
         return Interval(lower, max(values))
     return Interval(base.lower**exponent, base.upper**exponent)
+
+
+def _is_integer_literal(node: ast.AST) -> bool:
+    try:
+        return float(_signed_literal(node)).is_integer()
+    except AssertionError:
+        return False
 
 
 def _signed_literal(node: ast.AST) -> float:

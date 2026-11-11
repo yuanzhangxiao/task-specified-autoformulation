@@ -24,10 +24,10 @@ from autoformalism.baselines.sindy import fit_sindy
 from autoformalism.data import DatasetSplit, DevelopmentDataset, Trajectory
 from autoformalism.expressions import (
     ModelValidationError,
-    RestrictedParser,
     RuntimeExpressionError,
     ValidationContext,
 )
+from autoformalism.expressions.parser import baseline_parser
 from autoformalism.llm import LLMClient
 
 
@@ -410,7 +410,7 @@ def _propose_features(
     candidate = client.propose(
         system_prompt=prompt, user_prompt="Design features."
     ).parsed
-    parser = RestrictedParser()
+    parser = baseline_parser()
     allowed_set = set(allowed)
     features: dict[str, str] = {}
     seen_expressions: set[str] = set()
@@ -442,7 +442,7 @@ def _feature_functions(expressions, context):
     from autoformalism.baselines.core import _channel_value
     from autoformalism.expressions.compiler import _evaluate
 
-    parser = RestrictedParser()
+    parser = baseline_parser()
     parsed = {name: parser.parse(expr, location=f"feature:{name}")
               for name, expr in expressions.items()}
     def make_function(expression):

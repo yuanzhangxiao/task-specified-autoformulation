@@ -271,6 +271,39 @@ def test_a_vendored_campaign_selection_is_adapted_without_reading_upstream(
     assert "native-selection.json" in subject.source_provenance.auxiliary_sha256
 
 
+def test_an_llm_sr_selection_of_programs_is_not_replayed_as_an_ode(
+    tmp_path: Path,
+) -> None:
+    """A program that reads the history has no candidate; it names its scorer."""
+    run = tmp_path / "llm_sr"
+    run.mkdir()
+    (run / "result.json").write_text(
+        json.dumps({"plan_sha256": "c" * 64}), encoding="utf-8"
+    )
+    selection = _development_result(
+        {
+            "execution": "llm_sr_program_grid_rollout",
+            "programs": {"G": {"function": "def equation(G, params): ..."}},
+            "channels": ["G"],
+            "grid_step": 1.0,
+        }
+    )
+    selection["method"] = "llm_sr"
+    (run / "native-selection.json").write_text(
+        json.dumps({"plan_sha256": "c" * 64, "selection": selection}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match=r"selects programs.*llm_sr_programs"):
+        adapt_source(
+            SourceAdapterRequest(
+                request_id="llm_sr-0",
+                source_kind="llm_sr",
+                source_path=run / "result.json",
+            ),
+            _context(),
+        )
+
+
 def test_a_vendored_selection_from_another_plan_is_refused(tmp_path: Path) -> None:
     run = tmp_path / "llm_sr"
     run.mkdir()

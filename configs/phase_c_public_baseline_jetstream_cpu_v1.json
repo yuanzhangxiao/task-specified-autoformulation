@@ -1,0 +1,70 @@
+{
+  "schema_version": "phase-c-public-baseline-plan-1",
+  "status": "frozen_before_baseline_calls",
+  "purpose": "Run SINDy and PySR on the eight Phase C roster cells with two seeds, development data only, using the Phase B full-matrix settings unchanged, on a Jetstream2 CPU VM instead of Delta",
+  "development_only": true,
+  "release_protocol": "phase-c-development-2",
+  "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
+  "cells": [
+    {"benchmark_id":"phase_c_dalla_man_t1_canonical_named_easy_rates_v1","tier":"easy","public_prompt_sha256":"03367bc88a0cda7478961c0209a2ac354fc9a4bed644c8709dcba7c23dd5574b"},
+    {"benchmark_id":"phase_c_dalla_man_t1_canonical_named_hard_rates_v1","tier":"hard","public_prompt_sha256":"2587c4207eb96349c1e5a35fea88a86728113e13b3b309697b00172233ff856a"},
+    {"benchmark_id":"phase_c_dalla_man_t2_canonical_named_easy_rates_v1","tier":"easy","public_prompt_sha256":"0977074f7c5ce540cc9de8e982e405041027bda17d77978c2b47c3dd0f17d3e9"},
+    {"benchmark_id":"phase_c_dalla_man_t2_canonical_named_hard_rates_v1","tier":"hard","public_prompt_sha256":"ea8b212bdb021267b57c2bc40423a3c24bcd9d45877b7457027d896040eeb383"},
+    {"benchmark_id":"phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1","tier":"easy","public_prompt_sha256":"70fd22109db442ca16eae824b3851ab5c178180eeb935273bb9037dc88a36034"},
+    {"benchmark_id":"phase_c_alien_device_unknown_device_mechanism_canonical_functional_easy_reset_v1","tier":"easy","public_prompt_sha256":"8af1e2e7bd089bbe4786eb5f5d25abb6b87e6c751eb440636713dee5e857f881"},
+    {"benchmark_id":"phase_c_detention_coupled_noise0_v1","tier":"fixed","public_prompt_sha256":"10406a7fcced1a5d92f8c42856c646805d96f15e891234e06e806efe327e38d9"},
+    {"benchmark_id":"phase_c_detention_independent_noise0_v1","tier":"fixed","public_prompt_sha256":"5235aeb88574cd7cc92214bbd2a570d28ddb6206b66a62e10379a2c56a884415"}
+  ],
+  "repetitions": [0, 1],
+  "methods": [
+    {
+      "method": "sindy",
+      "comparison_role": "classical_partial_observability_control",
+      "platform": "jetstream2_cpu",
+      "cpus_per_task": 16,
+      "gpu_type": "none",
+      "gpu_count": 0,
+      "wall_timeout_seconds": 1800,
+      "maximum_llm_calls": 0,
+      "model": null,
+      "reasoning_effort": null,
+      "requires_selected_proposer_operating_point": false,
+      "sindy_thresholds": [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 30.0, 100.0, 300.0, 1000.0, 3000.0, 10000.0],
+      "pysr_iterations": null,
+      "maximum_expression_size": null,
+      "d3_generations": null,
+      "d3_patience": null
+    },
+    {
+      "method": "pysr",
+      "comparison_role": "classical_partial_observability_control",
+      "platform": "jetstream2_cpu",
+      "cpus_per_task": 16,
+      "gpu_type": "none",
+      "gpu_count": 0,
+      "wall_timeout_seconds": 3600,
+      "maximum_llm_calls": 0,
+      "model": null,
+      "reasoning_effort": null,
+      "requires_selected_proposer_operating_point": false,
+      "sindy_thresholds": null,
+      "pysr_iterations": 40,
+      "maximum_expression_size": 30,
+      "d3_generations": null,
+      "d3_patience": null
+    }
+  ],
+  "resource_accounting": {
+    "schema_version": "phase-c-vm-baseline-resource-ledger-1",
+    "process_wall_time_required": true,
+    "machine_flavor_and_cpus_required": true,
+    "cpu_core_hours_required": true,
+    "gpu_hours_required": true,
+    "logical_llm_tokens_required_when_applicable": true,
+    "provider_attempts_required_when_applicable": true,
+    "local_model_monetary_cost_policy": "not_priced_report_hardware_time"
+  },
+  "test_data_opened": false,
+  "private_reference_opened": false,
+  "weighted_overall_score_defined": false
+}
