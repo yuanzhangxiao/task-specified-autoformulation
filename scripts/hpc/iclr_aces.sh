@@ -104,8 +104,10 @@ case "${1:-}" in
             echo "Missing critic authorization for $lane. Complete prepare with the compatible calibration before submitting." >&2
             exit 1
         fi
+        block_limit=()
+        if [[ -n ${4:-} ]]; then block_limit=(--max-blocks "$4"); fi
         credential
-        run iclr_aces_pilot submit --root "$AF_CAMPAIGN/$lane" --wave "$wave" --account "$AF_GPU_ACCOUNT" --concurrency "$limit"
+        run iclr_aces_pilot submit --root "$AF_CAMPAIGN/$lane" --wave "$wave" --account "$AF_GPU_ACCOUNT" --concurrency "$limit" "${block_limit[@]}"
         ;;
     status)
         squeue -u "$USER" -o '%.18i %.18j %.8T %.10M %R'

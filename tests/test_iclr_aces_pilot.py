@@ -300,7 +300,10 @@ def test_fresh_wave_authenticates_before_submit_and_repeat_skips_prompt(
     assert actions == ["prompt", "prompt", "verified", "submit"]
 
 
-def test_submission_resume_and_uncertain_slurm_reply(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("limit", "indices"), [(None, "0,3"), (1, "0"), (5, "0,3")])
+def test_submission_resume_and_uncertain_slurm_reply(
+    tmp_path, monkeypatch, limit, indices
+):
     plan = sealed_write(tmp_path / "plan.json", {"protocol": pilot.study.PROTOCOL})
     sealed_write(
         tmp_path / "critic_authorization.json",
@@ -320,9 +323,11 @@ def test_submission_resume_and_uncertain_slurm_reply(tmp_path, monkeypatch):
         return "1234"
 
     monkeypatch.setattr(pilot, "submit_job", submit_job)
-    assert pilot.submit(tmp_path, "wave1", "12345", 2) == "1234"
-    assert pilot.submit(tmp_path, "wave1", "12345", 2) == "1234"
-    assert len(submitted) == 1 and "--array=0,3%2" in submitted[0]
+    with pytest.raises(ValueError, match="positive integer"):
+        pilot.submit(tmp_path, "wave1", "12345", 2, max_blocks=0)
+    assert pilot.submit(tmp_path, "wave1", "12345", 2, max_blocks=limit) == "1234"
+    assert pilot.submit(tmp_path, "wave1", "12345", 2, max_blocks=limit) == "1234"
+    assert len(submitted) == 1 and f"--array={indices}%2" in submitted[0]
     monkeypatch.setattr(pilot.subprocess, "check_output", lambda *a, **kw: "1234\n")
     with pytest.raises(ValueError, match="active"):
         pilot.submit(tmp_path, "wave2", "12345", 2)

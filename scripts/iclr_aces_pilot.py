@@ -459,10 +459,13 @@ def submit(
     *,
     cached_pilot: bool = False,
     confirm_critic_access: bool = False,
+    max_blocks: int | None = None,
 ) -> str:
-    """Submit unfinished blocks once per wave and prevent overlapping waves."""
+    """Submit the next unfinished blocks in plan order, once per named wave."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", wave) or concurrency not in (1, 2):
         raise ValueError("use a named wave and concurrency one or two")
+    if max_blocks is not None and (type(max_blocks) is not int or max_blocks < 1):
+        raise ValueError("max_blocks must be a positive integer")
     plan = sealed_read(root / "plan.json")
     if plan["protocol"] != study.PROTOCOL:
         raise ValueError("expected a controlled campaign")
@@ -493,7 +496,7 @@ def submit(
             if concurrency != 1:
                 raise ValueError("cached pilot requires concurrency one")
             check_cached_pilot(root)
-        indices = pending_ids(root)
+        indices = pending_ids(root)[:max_blocks]
         if not indices:
             return "no pending blocks"
         supplied = os.environ.get("AF_JETSTREAM_API_KEY")
@@ -556,6 +559,11 @@ def main() -> None:
             sub.add_argument("--wave", required=True)
             sub.add_argument("--account", required=True)
             sub.add_argument("--concurrency", type=int, default=2)
+            sub.add_argument(
+                "--max-blocks",
+                type=int,
+                help="schedule at most this many pending blocks",
+            )
         if cmd == "run-cached":
             sub.add_argument("--seconds", type=int, required=True)
     a = parser.parse_args()
@@ -581,6 +589,7 @@ def main() -> None:
                 a.concurrency,
                 cached_pilot=a.cached_pilot,
                 confirm_critic_access=a.confirm_critic_access,
+                max_blocks=a.max_blocks,
             )
         )
     elif a.stage == "check-cached":

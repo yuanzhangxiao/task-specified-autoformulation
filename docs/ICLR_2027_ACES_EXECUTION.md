@@ -114,6 +114,16 @@ bash scripts/hpc/iclr_aces.sh submit stress wave1
 
 The stress analysis reuses 12 anchor endpoints to report 126 Full/fixed rows. The corrected historical CSTR campaign also needs the original ACES `$AF_GROUP/final-components-v1` plan and public assets. It verifies them before staging a new campaign. The two original prompt variants and two original seeds are preserved.
 
+For a bounded GPU wave, the optional fourth argument to `iclr_aces.sh submit` gives the maximum number of unfinished blocks to submit in sealed roster order. For example, `bash scripts/hpc/iclr_aces.sh submit stress wave1 3` runs the first available three blocks with two GPUs concurrently. Each subsequent wave recomputes which blocks still need work.
+
+In the November deployment, array `2337694` finished all 720 anchor visits and used 23.623 H100-hours. The anchor directory occupied 72,558 entries. The results and pruning directories for an individual Full/fixed pair occupied 1,579–7,913 entries, before the shared critic cache. With roughly 40,000 free group entries after the anchor freeze, the staged command below requests the three paired seeds of the first stress condition. It checks the qualified pilot, prompts for the Jetstream credential in the terminal, and records the Slurm array in the original stress campaign.
+
+~~~bash
+bash /scratch/group/p.nairr260351.000/u.yx126462/iclr-pilot-fit-r1-2334957/launch-stress.sh wave1
+~~~
+
+Use `--check` in place of the wave name to inspect the next proposed blocks without a submission. Check storage with `showquota` between waves. Run the independent anchor assays directly from the frozen model bundle and its plan and freeze receipts when scoring on a local workstation. The paired clamp accepts adjacent float64 representations of the same event knot. An earlier clamp run pins its evaluator hash, so a corrected replay needs a separate output directory with the same frozen models and fidelity trajectories.
+
 One complete first-wave request reserves at most 72 H100-hours for anchors and 684 for stress, from 6 or 57 blocks at 12 hours each. The historical wave's two GPUs each request 6.5 hours. Actual charges follow Slurm accounting. Subsequent waves request additional time only for remaining work. The following computes a provisional proposer-call and token budget from the **actual** pilot. It applies its one independent initial construction and its mean over two revisions to every planned visit. Scientific rejections, different cells, language-model retries and cost from the separately metered critic can materially change the totals. Token estimates with unreported usage are withheld.
 
 ~~~bash
