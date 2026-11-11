@@ -33,6 +33,7 @@ from autoformalism.baselines.core import baseline_validation_context
 from autoformalism.baselines.raw_data_agent import raw_agent_validation_context
 from autoformalism.data import BenchmarkLoader, BenchmarkRegistry, DevelopmentDataset
 from autoformalism.data.models import SplitName
+from autoformalism.rebuttal import phase_c_baselines
 from autoformalism.rebuttal.phase_c_baselines import PhaseCBaselineCell
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 
@@ -41,6 +42,10 @@ REPO = Path(__file__).resolve().parents[3]
 CONFIG = REPO / "configs" / "phase_b_nine_case_inputs_v1.json"
 FILES = ("train.csv", "validation.csv", "proposer_prompt.txt")
 SUBDIRECTORY = "phase_b_v1"
+#: A plan may instead name the Phase C release. It then reads one of the Phase C
+#: baseline cells from that release, as Phase C D3 does, with that cell's
+#: public context.
+PHASE_C = phase_c_baselines.PROTOCOL
 
 
 class StagedCell(BaseModel):
@@ -172,8 +177,7 @@ def verify(root: Path, config: Path | None = None) -> str:
     if (
         receipt["protocol"] != PROTOCOL
         or receipt["test_data_staged"] is not False
-        or receipt["source_campaign_plan_sha256"]
-        != inputs.source_campaign_plan_sha256
+        or receipt["source_campaign_plan_sha256"] != inputs.source_campaign_plan_sha256
     ):
         raise ValueError("not a staged nine-case input tree")
     for name, cell in inputs.cells.items():
@@ -266,3 +270,59 @@ def smoke_problems(summaries: dict[str, dict]) -> list[str]:
                     f"{str(row.get('error', ''))[:300]}"
                 )
     return problems
+
+
+def check_plan_cell(protocol: str, name: str, tier: str, prompt_sha256: str) -> None:
+    """A plan's cell: one of the nine at its tier and prompt, or a Phase C cell.
+
+    A Phase C cell's prompt is checked against the release when it is prepared.
+    """
+    if protocol == PHASE_C:
+        if name not in phase_c_baselines.BASELINE_CELLS:
+            raise ValueError(f"{name} is not a Phase C baseline cell")
+        if tier != phase_c_baselines.tier_of(name):
+            raise ValueError(f"{name} declares the wrong tier")
+        return
+    recorded = load_inputs().cells.get(name)
+    if recorded is None:
+        raise ValueError(f"{name} is not one of the nine cases")
+    if tier != recorded.tier:
+        raise ValueError(f"{name} declares the wrong tier")
+    if prompt_sha256 != recorded.files["proposer_prompt.txt"]:
+        raise ValueError(f"{name} declares another prompt")
+
+
+def verify_inputs(protocol: str, root: Path, names) -> str:
+    """The receipt digest of the inputs a plan reads: staged cases or release."""
+    if protocol == PHASE_C:
+        return phase_c_baselines.verify_release(root, tuple(names))
+    return verify(root)
+
+
+def load_plan_cell(
+    protocol: str,
+    root: Path,
+    name: str,
+    *,
+    context: str = "raw_agent",
+    config: Path | None = None,
+) -> PhaseCBaselineCell:
+    """Load a plan's cell from the staged cases or from the Phase C release."""
+    if protocol == PHASE_C:
+        return phase_c_baselines.load_cell(root, name)
+    return load_cell(root, name, context=context, config=config)
+
+
+def receipt_of(cell: PhaseCBaselineCell) -> str:
+    """The receipt a loaded cell was verified against."""
+    identity = cell.identity
+    if "inputs_receipt_sha256" in identity:
+        return identity["inputs_receipt_sha256"]
+    return identity["release_summary_sha256"]
+
+
+def scope_of(protocol: str) -> str:
+    """How a report names the cells a plan ran on."""
+    if protocol == PHASE_C:
+        return "the Phase C cells its plan names"
+    return "the nine Phase B cases of the main comparison"

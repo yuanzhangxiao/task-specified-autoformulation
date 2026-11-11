@@ -9,7 +9,9 @@
 #   NAME    the run's directory under ~/af/runs
 #   TASKS   how many tasks run at once (default 1)
 #
-# The staged nine-case inputs must be at ~/af/release/phase-b-nine-case-v1.
+# The staged nine-case inputs must be at ~/af/release/phase-b-nine-case-v1; a
+# plan that reads the Phase C release (inputs_protocol phase-c-development-2)
+# reads it at ~/af/release/phase-c-public-v2.
 # Rerunning is safe: a finished task is not repeated and a running one is
 # refused by its lock. A task an outage stopped (exit status 3) resumes where
 # it stopped. When every task has ended, the report is NAME/report.json.
@@ -21,7 +23,6 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly repo
 readonly self="${repo}/scripts/jetstream/run_phase_b_hosted.sh"
 readonly py="${AF_HOME}/venv/bin/python"
-readonly inputs="${AF_HOME}/release/phase-b-nine-case-v1"
 readonly hosted="https://llm.jetstream-cloud.org/gpt-oss-120b"
 
 usage() {
@@ -67,8 +68,15 @@ readonly root="${AF_HOME}/runs/${name}"
   echo "run scripts/jetstream/setup_vm.sh first" >&2
   exit 2
 }
-[[ -f "${inputs}/receipt.json" ]] || {
-  echo "the staged nine-case inputs are not at ${inputs}" >&2
+protocol="$("${py}" -c 'import json, sys
+print(json.load(open(sys.argv[1]))["inputs_protocol"])' "${config}")"
+case "${protocol}" in
+  phase-b-nine-case-inputs-1) inputs="${AF_HOME}/release/phase-b-nine-case-v1" receipt=receipt.json ;;
+  phase-c-development-2) inputs="${AF_HOME}/release/phase-c-public-v2" receipt=summary.json ;;
+  *) echo "${config} reads unknown inputs: ${protocol}" >&2; exit 2 ;;
+esac
+[[ -f "${inputs}/${receipt}" ]] || {
+  echo "the inputs of ${config} are not at ${inputs}" >&2
   exit 2
 }
 git diff --quiet && git diff --cached --quiet || {

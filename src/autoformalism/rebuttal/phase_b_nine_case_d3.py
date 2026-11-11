@@ -126,7 +126,9 @@ class NineCaseD3Plan(BaseModel):
     schema_version: Literal["phase-b-nine-case-d3-plan-1"]
     status: Literal["proposed_pending_review", "frozen_before_calls"]
     development_only: Literal[True]
-    inputs_protocol: Literal["phase-b-nine-case-inputs-1"]
+    inputs_protocol: Literal["phase-b-nine-case-inputs-1", "phase-c-development-2"]
+    #: Required, and only allowed, when the plan reads the Phase C release.
+    release_summary_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     purpose: str = Field(min_length=1)
     method: Method
     endpoint: EndpointKind
@@ -150,19 +152,21 @@ class NineCaseD3Plan(BaseModel):
 
     @model_validator(mode="after")
     def nine_case_cells_and_a_servable_model(self) -> NineCaseD3Plan:
-        """Require the comparison's cells at their tiers, and a servable model."""
-        inputs = nine.load_inputs()
+        """Require the plan's cells at their tiers, and a servable model."""
         names = [cell.benchmark_id for cell in self.cells]
         if len(names) != len(set(names)):
             raise ValueError("campaign cells must be unique")
         for cell in self.cells:
-            recorded = inputs.cells.get(cell.benchmark_id)
-            if recorded is None:
-                raise ValueError(f"{cell.benchmark_id} is not one of the nine cases")
-            if cell.tier != recorded.tier:
-                raise ValueError(f"{cell.benchmark_id} declares the wrong tier")
-            if cell.public_prompt_sha256 != recorded.files["proposer_prompt.txt"]:
-                raise ValueError(f"{cell.benchmark_id} declares another prompt")
+            nine.check_plan_cell(
+                self.inputs_protocol,
+                cell.benchmark_id,
+                cell.tier,
+                cell.public_prompt_sha256,
+            )
+        if (self.inputs_protocol == nine.PHASE_C) != (
+            self.release_summary_sha256 is not None
+        ):
+            raise ValueError("a Phase C plan, and only one, names its release")
         if len(self.repetitions) != len(set(self.repetitions)) or any(
             seed < 0 for seed in self.repetitions
         ):
@@ -213,10 +217,15 @@ def prepare(config_path: Path, inputs_root: Path, root: Path) -> dict:
     """Freeze a campaign against the verified staged inputs, before any call."""
     plan = load_plan(config_path)
     inputs_root = inputs_root.expanduser().resolve()
-    receipt = nine.verify(inputs_root)
+    protocol = plan.inputs_protocol
+    receipt = nine.verify_inputs(
+        protocol, inputs_root, [cell.benchmark_id for cell in plan.cells]
+    )
+    if protocol == nine.PHASE_C and receipt != plan.release_summary_sha256:
+        raise ValueError("the release differs from the plan's")
     rows: list[dict] = []
     for cell in plan.cells:
-        loaded = nine.load_cell(inputs_root, cell.benchmark_id)
+        loaded = nine.load_plan_cell(protocol, inputs_root, cell.benchmark_id)
         if loaded.identity["prompt"] != cell.public_prompt_sha256:
             raise ValueError(f"public prompt differs: {cell.benchmark_id}")
         for repetition in plan.repetitions:
@@ -291,8 +300,10 @@ def run(
     if not 0 <= index < len(sealed["rows"]):
         raise ValueError("task index out of range")
     row = sealed["rows"][index]
-    cell = nine.load_cell(Path(sealed["inputs"]), row["benchmark_id"])
-    if cell.identity["inputs_receipt_sha256"] != sealed["inputs_receipt_sha256"]:
+    cell = nine.load_plan_cell(
+        sealed["plan"]["inputs_protocol"], Path(sealed["inputs"]), row["benchmark_id"]
+    )
+    if nine.receipt_of(cell) != sealed["inputs_receipt_sha256"]:
         raise ValueError("staged inputs differ from the frozen plan")
     if (
         cell.identity != row["public_identity"]
@@ -304,8 +315,7 @@ def run(
     variant, _ = VARIANTS[plan.method]
     directory = root / "results" / str(index)
     searching = not any(
-        (directory / name).exists()
-        for name in ("result.json", "native-selection.json")
+        (directory / name).exists() for name in ("result.json", "native-selection.json")
     )
     if chat is None and searching:
         # Outside the search, so a server without the model is not recorded
@@ -353,8 +363,11 @@ def report(root: Path) -> dict:
     sealed = sealed_read(root / "plan.json")
     if sealed["protocol"] != PROTOCOL:
         raise ValueError(f"{root / 'plan.json'} is not a nine-case D3-family plan")
+    scope = nine.scope_of(sealed["plan"]["inputs_protocol"])
     statements = [
-        LIMITATIONS[sealed["method"]],
+        LIMITATIONS[sealed["method"]].replace(
+            "the nine Phase B cases of the main comparison", scope
+        ),
         ROLLOUT_LIMITATION,
         *sealed["reporting_qualifications"],
     ]

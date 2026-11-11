@@ -1,0 +1,26 @@
+{
+  "schema_version": "phase-b-nine-case-spec-sindy-plan-1",
+  "status": "frozen_before_calls",
+  "purpose": "SINDy with up to eight library features designed by the hosted gpt-oss-120b from the cell's public prompt, on the Phase C CSTR-hard cell with seeds 0, 1 and 2 (one design request each), development data only, for the reactor intervention study, which scores models on this cell; the cell is read from the Phase C release as Phase C D3 reads it. Every other setting is the frozen plan's (phase_b_nine_case_spec_sindy_hosted_120b_v1): the compared SINDy's library, thresholds, validation-rollout selection and 1,800 s limit. 3 requests. The user approved running all nine baselines on this cell with these seeds on 2026-11-11 (HST).",
+  "development_only": true,
+  "inputs_protocol": "phase-c-development-2",
+  "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
+  "endpoint": "jetstream2_hosted",
+  "model": "gpt-oss-120b",
+  "cells": [
+    {
+      "benchmark_id": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1",
+      "tier": "hard",
+      "public_prompt_sha256": "6d951d2a8aae9417852ea87c078ccc6ce9c297baf79e7b6da16a241aaaae15f0"
+    }
+  ],
+  "repetitions": [
+    0,
+    1,
+    2
+  ],
+  "feature_count": 8,
+  "wall_timeout_seconds": 1800.0,
+  "test_data_opened": false,
+  "private_reference_opened": false
+}
