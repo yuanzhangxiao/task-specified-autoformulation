@@ -2,6 +2,7 @@
 
 import hashlib
 import shutil
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -72,6 +73,32 @@ def test_only_the_latent_mediated_path_disappears(solver):
         clamp.simulate_branches(
             model, {}, {}, ctrl, trajectory([0.0] * 4, 1), {}, solver, 10
         )
+
+
+def test_clamp_aligns_adjacent_float_event_knots_and_rejects_shifted_grids():
+    time = np.linspace(0.0, 1.0, 11)
+    model = compile_candidate(
+        candidate(["T"], {"T": "u"}, ["T"]),
+        ValidationContext(targets=["T"], external_inputs=["u"]),
+    )
+    control = Trajectory(
+        "basal", time, {"T": np.zeros(11)}, {}, {"u": np.zeros(11)}, {}, {}
+    )
+    treatment = replace(control, external_inputs={"u": (time >= time[3]).astype(float)})
+
+    def solve(trajectory):
+        return clamp.simulate_branches(
+            model, {}, {}, control, trajectory, {"intact": []}, "Radau", 15
+        )
+
+    rounded = time.copy()
+    rounded[3] = 0.3
+    assert rounded[3] == np.nextafter(time[3], -np.inf)
+    assert solve(replace(treatment, time=rounded)) == solve(treatment)
+    shifted = rounded.copy()
+    shifted[3] = np.nextafter(rounded[3], -np.inf)
+    with pytest.raises(ValueError, match="identical grids"):
+        solve(replace(treatment, time=shifted))
 
 
 def test_numerically_unresolved_channel_preserves_denominator():

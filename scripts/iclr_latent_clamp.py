@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
 from time import monotonic
@@ -36,10 +37,20 @@ REPLAY_TOL = 1e-4
 def simulate_branches(model, pars, initials, control, treated, groups, solver, seconds):
     """Solve the control, intact treatment and clamped treatments simultaneously."""
     t = control.time
-    if not np.array_equal(t, treated.time) or model.validated.context.lagged_targets:
+    # A decimal event knot and the corresponding generated sample can be
+    # adjacent float64 values. Use the control clock for both interpolators.
+    if (
+        model.validated.context.lagged_targets
+        or t.shape != treated.time.shape
+        or not np.all(
+            (np.nextafter(t, -np.inf) <= treated.time)
+            & (treated.time <= np.nextafter(t, np.inf))
+        )
+    ):
         raise ValueError(
             "paired interventions require identical grids and free rollouts"
         )
+    treated = replace(treated, time=t)
     n = len(model.state_names)
     init = trajectory_initial_state(model, control, initials, parameters=pars)
     if not np.array_equal(
