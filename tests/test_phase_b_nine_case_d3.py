@@ -310,3 +310,50 @@ def test_the_committed_plans_keep_upstreams_settings(
     assert plan.reasoning_effort is None
     assert plan.endpoint == "jetstream2_hosted"
     assert plan.model == "gpt-oss-120b"
+
+
+def test_a_smoke_clears_only_when_its_summary_is_complete_without_failures(freeze):
+    root, _ = freeze()
+    summary = campaign.report(root)
+    assert nine.smoke_problems({"d3": summary}) == ["d3: report status pending"]
+    for index in (0, 1):
+        _run(root, index, chat=_Chat([_model(), _model("-k * v01")]))
+    summary = campaign.report(root)
+    assert summary == json.loads((root / "summary.json").read_text())
+    assert summary["status"] == "complete"
+    assert nine.smoke_problems({"d3": summary}) == []
+    # The CLI's report.json leaves the rows out; it cannot clear a smoke.
+    without_rows = {key: value for key, value in summary.items() if key != "rows"}
+    assert nine.smoke_problems({"d3": without_rows}) == [
+        "d3: the report has no task rows"
+    ]
+
+
+def test_the_smoke_check_script_exits_by_the_summaries(freeze, tmp_path):
+    import subprocess
+
+    root, _ = freeze()
+    for index in (0, 1):
+        _run(root, index, chat=_Chat([_model(), _model("-k * v01")]))
+    campaign.report(root)
+    script = Path(__file__).resolve().parents[1] / "scripts" / "check_phase_b_smokes.py"
+    environment = {
+        "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+        "PATH": "/usr/bin:/bin",
+    }
+    passed = subprocess.run(
+        [sys.executable, str(script), str(root / "summary.json")],
+        capture_output=True, text=True, env=environment, check=False,
+    )
+    assert passed.returncode == 0, passed.stderr
+    assert passed.stdout.strip().endswith("every smoke passed")
+    stale = tmp_path / "stale" / "report.json"
+    stale.parent.mkdir()
+    summary = json.loads((root / "summary.json").read_text())
+    stale.write_text(json.dumps({k: v for k, v in summary.items() if k != "rows"}))
+    stopped = subprocess.run(
+        [sys.executable, str(script), str(stale)],
+        capture_output=True, text=True, env=environment, check=False,
+    )
+    assert stopped.returncode == 1
+    assert "no campaign was started" in stopped.stdout

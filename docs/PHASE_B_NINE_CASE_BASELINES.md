@@ -93,7 +93,11 @@ a single channel are not used. SINDy fits its usual library (constant, linear,
 pairwise products and tanh of every channel) plus the features, over the
 compared SINDy's 12 thresholds, and keeps the one with the lowest validation
 rollout NMSE from the shared evaluator. The fit runs in a child process under
-the compared SINDy's 1,800 s limit; a fit past it is `timed_out`. The request
+the compared SINDy's 1,800 s limit; a fit past it is `timed_out`. When no
+threshold's rollout finishes on every training and validation trajectory, the
+compared SINDy's selection has no support and stops; the task then seals as
+`rollout_failed` with that message, the method's outcome, scored as a failure.
+Any other error seals as `failed`. The request
 is made once and its reply kept, so an outage or a rerun does not repeat it.
 A reply outside the format leaves the library without designed features,
 which the result records. Features are algebraic in current values, so this
@@ -109,6 +113,13 @@ bash scripts/jetstream/run_phase_b_hosted.sh d3 configs/phase_b_nine_case_d3_smo
 bash scripts/jetstream/run_phase_b_hosted.sh hdtwingen configs/phase_b_nine_case_hdtwingen_smoke_v1.json phase-b-nine-case-hdtwingen-smoke-v1 1
 bash scripts/jetstream/run_phase_b_hosted.sh spec_sindy configs/phase_b_nine_case_spec_sindy_smoke_v1.json phase-b-nine-case-spec-sindy-smoke-v1 2
 ```
+
+`scripts/jetstream/run_phase_b_nine_case_campaigns.sh` runs the three smokes,
+checks each run's `summary.json` with `scripts/check_phase_b_smokes.py` (complete,
+and no task `discovery_failed`, `native_check_failed` or `failed`), and only
+then starts the three full campaigns, four tasks at a time each. The first
+smokes (v1, at `bba1565`) completed, but the check then read the CLI's
+row-less `report.json` and stopped; the smokes rerun as v2.
 
 The smokes make 3, 5 and 2 requests. The full plans
 (`configs/phase_b_nine_case_*_hosted_120b_v1.json`) run the same way. A task

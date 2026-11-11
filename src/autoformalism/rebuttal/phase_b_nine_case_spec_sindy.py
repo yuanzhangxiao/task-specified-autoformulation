@@ -347,6 +347,13 @@ def design_features(
         }
 
 
+#: The compared SINDy's own outcome when no threshold's rollout finishes on
+#: every training and validation trajectory: the method's failure, scored as
+#: such, not the harness's.
+NO_SUPPORT = "no SINDy support passed safe validation rollout"
+ROLLOUT_FAILURE = "rollout_failure.json"
+
+
 def _fit_worker(root: str, index: int, config: str) -> None:
     """Fit SINDy for one task from its kept design; write development.json.
 
@@ -369,13 +376,19 @@ def _fit_worker(root: str, index: int, config: str) -> None:
     directory = root_path / "results" / str(index)
     design = json.loads((directory / "design.json").read_text(encoding="utf-8"))
     candidate = CandidateModel.model_validate(design["candidate"])
-    result = run_baseline_development(
-        plan.baseline_config(row["repetition"]),
-        cell.dataset,
-        cell.context,
-        llm_client=_KeptFeatures(candidate),
-        proposer_prompt=cell.prompt,
-    )
+    try:
+        result = run_baseline_development(
+            plan.baseline_config(row["repetition"]),
+            cell.dataset,
+            cell.context,
+            llm_client=_KeptFeatures(candidate),
+            proposer_prompt=cell.prompt,
+        )
+    except ValueError as exc:
+        if not str(exc).startswith(NO_SUPPORT):
+            raise
+        atomic_json(directory / ROLLOUT_FAILURE, {"error": str(exc)[:4000]})
+        return
     atomic_json(directory / "development.json", result.model_dump(mode="json"))
 
 
@@ -395,6 +408,10 @@ def _fit_with_limit(root: Path, index: int, seconds: float) -> tuple[str, float,
         return "timed_out", elapsed, "SINDy wall-clock limit reached"
     if process.exitcode != 0:
         return "failed", elapsed, f"the fit exited with status {process.exitcode}"
+    failure = root / "results" / str(index) / ROLLOUT_FAILURE
+    if failure.exists():
+        error = json.loads(failure.read_text(encoding="utf-8"))["error"]
+        return "rollout_failed", elapsed, error
     return "complete", elapsed, ""
 
 
@@ -464,6 +481,7 @@ def run(
             atomic_json(design_path, design)
         design = json.loads(design_path.read_text(encoding="utf-8"))
         (directory / "development.json").unlink(missing_ok=True)
+        (directory / ROLLOUT_FAILURE).unlink(missing_ok=True)
         status, elapsed, error = _fit_with_limit(
             root, index, plan.wall_timeout_seconds
         )

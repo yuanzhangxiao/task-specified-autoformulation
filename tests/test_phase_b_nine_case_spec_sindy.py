@@ -220,3 +220,59 @@ def test_the_committed_plans_keep_the_compared_sindys_settings(
     assert plan.feature_count == 8
     assert plan.endpoint == "jetstream2_hosted"
     assert plan.model == "gpt-oss-120b"
+
+
+class _InlineProcess:
+    """Runs the fit in this process, so a test can stand in for its pieces."""
+
+    def __init__(self, target, args) -> None:
+        self.target, self.args, self.exitcode = target, args, None
+
+    def start(self) -> None:
+        try:
+            self.target(*self.args)
+            self.exitcode = 0
+        except Exception:
+            self.exitcode = 1
+
+    def join(self, timeout=None) -> None:
+        return None
+
+    def is_alive(self) -> bool:
+        return False
+
+
+class _InlineContext:
+    def Process(self, target, args):
+        return _InlineProcess(target, args)
+
+
+@pytest.mark.parametrize(
+    ("message", "status"),
+    [
+        (
+            spec.NO_SUPPORT + ": threshold 0.1: rollout failed for train_000",
+            "rollout_failed",
+        ),
+        ("some other problem", "failed"),
+    ],
+)
+def test_no_threshold_passing_is_the_methods_outcome_not_a_harness_failure(
+    frozen, monkeypatch, message, status
+):
+    def development(*args, **kwargs):
+        raise ValueError(message)
+
+    monkeypatch.setattr(
+        spec.multiprocessing, "get_context", lambda method: _InlineContext()
+    )
+    monkeypatch.setattr(spec, "run_baseline_development", development)
+    result = _run(frozen, Server(json.dumps(GOOD)))
+    assert result["status"] == status
+    problems = nine.smoke_problems({"smoke": spec.report(frozen)})
+    if status == "rollout_failed":
+        assert result["error"].startswith(spec.NO_SUPPORT)
+        assert problems == []
+    else:
+        assert result["error"] == "the fit exited with status 1"
+        assert len(problems) == 1 and "task 0 failed" in problems[0]

@@ -236,3 +236,33 @@ def load_cell(
     return PhaseCBaselineCell(
         dataset, validation_context, prompt_path.read_text(encoding="utf-8"), identity
     )
+
+
+#: Task outcomes that mean the harness, not the method, went wrong. A
+#: rollout that failed, or a fit stopped at its wall-clock limit, is the
+#: method's own outcome and is scored as such.
+HARNESS_FAILURES = frozenset({"discovery_failed", "native_check_failed", "failed"})
+
+
+def smoke_problems(summaries: dict[str, dict]) -> list[str]:
+    """Why a set of smoke summaries does not clear the full campaigns.
+
+    Each summary is a run's ``summary.json``, the campaign report with one row
+    per task. A smoke clears when its report is complete and no task ended in
+    a harness failure.
+    """
+    problems = []
+    for name, summary in summaries.items():
+        if summary.get("status") != "complete":
+            problems.append(f"{name}: report status {summary.get('status')}")
+        rows = summary.get("rows")
+        if not rows:
+            problems.append(f"{name}: the report has no task rows")
+            continue
+        for row in rows:
+            if row["status"] in HARNESS_FAILURES:
+                problems.append(
+                    f"{name}: task {row['index']} {row['status']}: "
+                    f"{str(row.get('error', ''))[:300]}"
+                )
+    return problems
