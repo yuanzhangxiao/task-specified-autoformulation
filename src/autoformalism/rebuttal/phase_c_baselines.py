@@ -35,6 +35,14 @@ from autoformalism.research.phase_c_inputs import ROSTER
 PROTOCOL = "phase-c-development-2"
 RELEASE_CELLS = 28
 PUBLIC_FILES = ("specification.json", "proposer_prompt.txt", "train.json", "val.json")
+#: Cells a baseline may run on beyond the eight-cell roster, each for one
+#: study. CSTR-hard serves the reactor intervention study, which scores models
+#: on that cell; a plan for it keeps every other setting of its frozen source.
+INTERVENTION_CELLS = frozenset(
+    {"phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1"}
+)
+#: Every cell a Phase C baseline plan may name.
+BASELINE_CELLS = frozenset(ROSTER) | INTERVENTION_CELLS
 
 
 @dataclass(frozen=True)
@@ -126,7 +134,7 @@ def tier_of(name: str) -> str:
 
 def load_cell(release: Path, name: str) -> PhaseCBaselineCell:
     """Load one roster cell's train, validation and prompt; never test data."""
-    if name not in ROSTER:
+    if name not in BASELINE_CELLS:
         raise ValueError(f"{name} is outside the Phase C baseline roster")
     receipt = verify_release(release, (name,))
     directory = release / "public" / name

@@ -125,6 +125,13 @@ def test_cell_outside_the_roster_is_refused(tmp_path):
         pcb.load_cell(_release(tmp_path, cell=name), name)
 
 
+def test_the_intervention_cell_loads_beside_the_roster(tmp_path):
+    name = "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1"
+    cell = pcb.load_cell(_release(tmp_path, cell=name), name)
+    assert cell.dataset.tier == "hard"
+    assert cell.identity["benchmark_id"] == name
+
+
 def test_receipt_never_lists_evaluator_files(tmp_path):
     release = _release(tmp_path)
     summary = json.loads((release / "summary.json").read_text())["value"]

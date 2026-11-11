@@ -1,0 +1,32 @@
+{
+  "schema_version": "phase-c-d3-plan-2",
+  "development_only": true,
+  "release_protocol": "phase-c-development-2",
+  "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
+  "status": "frozen_before_calls",
+  "purpose": "D3 as published, in its white-box mode, on the Phase C CSTR-hard cell with seeds 0, 1 and 2, development data only, for the reactor intervention study, which scores models on this cell; every other setting is the frozen plan's (phase_c_d3_hosted_120b_v2). Upstream's loop, prompts and settings: twenty generations, patience twenty, the sixteen best models shown back for reflection, top-p 0.95, and the paper's temperature 0.7; the model with the lowest one-step validation loss is kept, D3's own rule. The model is the hosted gpt-oss-120b, as for the other baselines and our method; it gets no reasoning effort, so the server's default applies, and an 8192-token output limit because its thinking counts against it.",
+  "endpoint": "jetstream2_hosted",
+  "model": "gpt-oss-120b",
+  "cells": [
+    {
+      "benchmark_id": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1",
+      "tier": "hard",
+      "public_prompt_sha256": "6d951d2a8aae9417852ea87c078ccc6ce9c297baf79e7b6da16a241aaaae15f0"
+    }
+  ],
+  "repetitions": [
+    0,
+    1,
+    2
+  ],
+  "generations": 20,
+  "patience": 20,
+  "keep_top_samples": 16,
+  "temperature": 0.7,
+  "top_p": 0.95,
+  "reasoning_effort": null,
+  "max_output_tokens": 8192,
+  "trajectory_seconds": 120,
+  "test_data_opened": false,
+  "private_reference_opened": false
+}

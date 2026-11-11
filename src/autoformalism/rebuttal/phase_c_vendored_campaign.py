@@ -35,7 +35,12 @@ from autoformalism.data.models import DevelopmentDataset
 from autoformalism.expressions import ValidationContext
 from autoformalism.rebuttal.llm_sr_shim import DEFAULT_MAX_TOKENS, http_error_detail
 from autoformalism.rebuttal.phase_c_baseline_plan import PhaseCBaselineCell
-from autoformalism.rebuttal.phase_c_baselines import load_cell, tier_of, verify_release
+from autoformalism.rebuttal.phase_c_baselines import (
+    BASELINE_CELLS,
+    load_cell,
+    tier_of,
+    verify_release,
+)
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.rebuttal.vendored_campaign import (
     DeclaredBudget,
@@ -576,7 +581,7 @@ class PhaseCVendoredCampaignPlan(BaseModel):
         if len(names) != len(set(names)):
             raise ValueError("Phase C campaign cells must be unique")
         for cell in self.cells:
-            if cell.benchmark_id not in ROSTER:
+            if cell.benchmark_id not in BASELINE_CELLS:
                 raise ValueError(f"{cell.benchmark_id} is outside the Phase C roster")
             if cell.tier != tier_of(cell.benchmark_id):
                 raise ValueError(f"{cell.benchmark_id} declares the wrong tier")
