@@ -63,7 +63,11 @@ from autoformalism.rebuttal.llm_sr_shim import (
 )
 from autoformalism.rebuttal.phase_b_d3 import discover_and_seal, summarize
 from autoformalism.rebuttal.phase_c_baseline_plan import PhaseCBaselineCell
-from autoformalism.rebuttal.phase_c_baselines import load_cell, tier_of
+from autoformalism.rebuttal.phase_c_baselines import (
+    BASELINE_CELLS,
+    load_cell,
+    tier_of,
+)
 from autoformalism.rebuttal.phase_c_vendored_campaign import (
     JETSTREAM2_HOSTED_MODEL,
     EndpointKind,
@@ -73,7 +77,6 @@ from autoformalism.rebuttal.phase_c_vendored_campaign import (
     verify_plan_release,
 )
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
-from autoformalism.research.phase_c_inputs import ROSTER
 from autoformalism.schemas import normalize_proposer_candidate_v2_payload
 
 PROTOCOL = "phase-c-d3-upstream-1"
@@ -174,7 +177,7 @@ class PhaseCD3Plan(BaseModel):
         if len(names) != len(set(names)):
             raise ValueError("Phase C campaign cells must be unique")
         for cell in self.cells:
-            if cell.benchmark_id not in ROSTER:
+            if cell.benchmark_id not in BASELINE_CELLS:
                 raise ValueError(f"{cell.benchmark_id} is outside the Phase C roster")
             if cell.tier != tier_of(cell.benchmark_id):
                 raise ValueError(f"{cell.benchmark_id} declares the wrong tier")

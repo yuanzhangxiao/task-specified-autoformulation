@@ -26,8 +26,12 @@ from autoformalism.rebuttal.baseline_pilot import (
     _sha256,
     _write_once,
 )
-from autoformalism.rebuttal.phase_c_baselines import PROTOCOL, tier_of, verify_release
-from autoformalism.research.phase_c_inputs import ROSTER
+from autoformalism.rebuttal.phase_c_baselines import (
+    BASELINE_CELLS,
+    PROTOCOL,
+    tier_of,
+    verify_release,
+)
 
 CLASSICAL_METHODS = frozenset({"persistence", "sindy", "pysr"})
 PLATFORMS = frozenset({"delta_cpu", "jetstream2_cpu"})
@@ -90,7 +94,7 @@ class PhaseCBaselinePlan(BaseModel):
         if len(names) != len(set(names)):
             raise ValueError("Phase C baseline cells must be unique")
         for cell in self.cells:
-            if cell.benchmark_id not in ROSTER:
+            if cell.benchmark_id not in BASELINE_CELLS:
                 raise ValueError(f"{cell.benchmark_id} is outside the Phase C roster")
             if cell.tier != tier_of(cell.benchmark_id):
                 raise ValueError(f"{cell.benchmark_id} declares the wrong tier")
