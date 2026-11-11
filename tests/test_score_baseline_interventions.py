@@ -66,8 +66,10 @@ def _reference(item, time):
     for i in range(len(time) - 1):
         x = temperature[i]
         for _ in range(100):
-            x += (time[i + 1] - time[i]) / 100 * (
-                -0.8 * (x - 350) + 6 * u[i, 2] - 4 * u[i, 0]
+            x += (
+                (time[i + 1] - time[i])
+                / 100
+                * (-0.8 * (x - 350) + 6 * u[i, 2] - 4 * u[i, 0])
             )
         temperature[i + 1] = x
     hidden = np.linspace(0.0, 1.0, len(time))
