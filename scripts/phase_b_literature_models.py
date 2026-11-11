@@ -63,10 +63,11 @@ def main() -> None:
     run.add_argument("--wall-seconds", type=float, default=3 * 3600.0)
     summary = sub.add_parser("report")
     summary.add_argument("--output", type=Path, required=True)
-    corrected = sub.add_parser("phase-c-cstr")
-    corrected.add_argument("--release", type=Path, required=True)
-    corrected.add_argument("--output", type=Path, required=True)
-    corrected.add_argument("--wall-seconds", type=float, default=3 * 3600.0)
+    extra = sub.add_parser("cstr")
+    extra.add_argument("--pair", required=True)
+    extra.add_argument("--source", type=Path, required=True)
+    extra.add_argument("--output", type=Path, required=True)
+    extra.add_argument("--wall-seconds", type=float, default=3 * 3600.0)
     args = parser.parse_args()
     for name in THREADS:
         os.environ[name] = "1"
@@ -79,13 +80,13 @@ def main() -> None:
     commit = _commit()
     if commit.endswith("-dirty"):
         sys.exit("commit or stash tracked changes first; the plan records the commit")
-    if args.command == "phase-c-cstr":
-        from autoformalism.rebuttal import phase_c_literature
+    if args.command == "cstr":
+        from autoformalism.rebuttal import cstr_literature
 
-        prepared, identity = phase_c_literature.prepare(
-            args.release.expanduser().resolve()
+        prepared, identity = cstr_literature.prepare(
+            args.pair, args.source.expanduser().resolve()
         )
-        result = phase_c_literature.run(
+        result = cstr_literature.run(
             prepared,
             identity,
             args.output.expanduser().resolve(),

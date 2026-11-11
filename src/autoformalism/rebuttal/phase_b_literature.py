@@ -18,7 +18,7 @@ import json
 import math
 import time as clock
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import cache
 from itertools import pairwise
 from pathlib import Path
@@ -136,7 +136,18 @@ PAIRS = (
         False,
     ),
 )
-PAIR_BY_KEY = {pair.key: pair for pair in PAIRS}
+#: Agreed on 2026-11-10 after the approved temperature-only fit: the textbook
+#: CSTR with its reactant balance, reported beside the approved row. Not in
+#: PAIRS, whose campaign plan is frozen.
+CSTR_CLOSED = Pair(
+    "cstr_closed_loop",
+    CSTR,
+    "cstr_closed",
+    "textbook CSTR with its reactant balance on the affected historical export;"
+    " not an upper bound there",
+    False,
+)
+PAIR_BY_KEY = {pair.key: pair for pair in (*PAIRS, CSTR_CLOSED)}
 
 
 class SimulationFailed(RuntimeError):
@@ -163,6 +174,9 @@ class Structure:
     starts: Mapping[str, float]
     fractions: frozenset[str]
     needs_dose: bool
+    #: Latent states started from a stated expression instead of the basal
+    #: state and its fitted map.
+    fixed_initials: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def states(self) -> tuple[str, ...]:
@@ -317,6 +331,32 @@ def bergman() -> Structure:
         starts=dict(BERGMAN),
         fractions=frozenset({"f"}),
         needs_dose=False,
+    )
+
+
+def cstr_closed(r_ref: float, beta: float) -> Structure:
+    """The textbook CSTR: reactant and temperature balances, Tj supplied.
+
+    The reactant concentration is a model state, ``Cr``, started at the
+    supplied C's first reading and never reset to it; the reaction rate is
+    ``r_ref / beta * exp(-ER * (1/T - 1/350))`` and its heat ``beta`` times
+    that. Consuming reactant slows the heating, which the temperature balance
+    with C read from data cannot do.
+    """
+    rate = "r_ref / beta * exp(-ER * (1 / T - 1 / 350))"
+    return Structure(
+        observed={"T": "T"},
+        latent=("Cr",),
+        processes=(("rate", rate),),
+        equations={
+            "T": "q * (Tf - T) + beta * rate * Cr - h * (T - Tj)",
+            "Cr": "q * (Cf - Cr) - rate * Cr",
+        },
+        observations={"T": "T"},
+        starts={**CSTR_STARTS, "r_ref": r_ref, "beta": beta},
+        fractions=frozenset(),
+        needs_dose=False,
+        fixed_initials={"Cr": "C"},
     )
 
 
@@ -989,6 +1029,34 @@ def cstr_reference_rate(train: DatasetSplit) -> float:
     return rate
 
 
+def cstr_heat_factor(train: DatasetSplit) -> float:
+    """beta's start: heat per unit of reactant consumed, at the generic starts.
+
+    The least-squares ratio of the temperature balance's unexplained heat to
+    the reactant consumed, both from finite-difference slopes of the training
+    data with q and h at their generic starts.
+    """
+    numerator = denominator = 0.0
+    for trajectory in train.trajectories:
+        temperature = trajectory.targets["T"]
+        concentration = trajectory.auxiliaries["C"]
+        inputs = trajectory.external_inputs
+        consumed = CSTR_STARTS["q"] * (inputs["Cf"] - concentration) - np.gradient(
+            concentration, trajectory.time
+        )
+        heat = (
+            np.gradient(temperature, trajectory.time)
+            - CSTR_STARTS["q"] * (inputs["Tf"] - temperature)
+            + CSTR_STARTS["h"] * (temperature - trajectory.auxiliaries["Tj"])
+        )
+        numerator += float(np.sum(heat * consumed))
+        denominator += float(np.sum(consumed * consumed))
+    factor = numerator / denominator if denominator > 0 else 0.0
+    if factor <= 0.0:
+        raise ValueError("no positive heat-of-reaction scale in the training data")
+    return factor
+
+
 def prepare(inputs: Path, key: str) -> Prepared:
     """Load a pair's public cell and build its compiled candidate."""
     pair = PAIR_BY_KEY[key]
@@ -1009,19 +1077,29 @@ def assemble(
         structure = dm07(pair.model)
     elif pair.model == "bergman":
         structure = bergman()
+    elif pair.model == "cstr_closed":
+        structure = cstr_closed(cstr_reference_rate(train), cstr_heat_factor(train))
     else:
         structure = cstr(cstr_reference_rate(train))
     if structure.needs_dose:
         train, validation = with_dose(train), with_dose(validation)
     context = model_context(context, (train, validation), structure.needs_dose)
-    basal = latent_basal(pair, structure)
-    if not structure.latent:
-        readings = {}
-    reading_basals = {channel: reading_basal(pair, channel) for channel in readings}
-    scales_of_latent = reference_scales(pair, structure, basal)
-    initials, weights = initial_expressions(
-        structure, basal, scales_of_latent, readings, reading_basals
-    )
+    initials: dict[str, str]
+    weights: tuple[str, ...]
+    if structure.fixed_initials:
+        basal, readings, reading_basals, scales_of_latent = {}, {}, {}, {}
+        initials, weights = dict(structure.fixed_initials), ()
+    else:
+        basal = latent_basal(pair, structure)
+        if not structure.latent:
+            readings = {}
+        reading_basals = {
+            channel: reading_basal(pair, channel) for channel in readings
+        }
+        scales_of_latent = reference_scales(pair, structure, basal)
+        initials, weights = initial_expressions(
+            structure, basal, scales_of_latent, readings, reading_basals
+        )
     compiled = _compile(
         structure, context, initials=initials, weights=weights, identifier=key
     )

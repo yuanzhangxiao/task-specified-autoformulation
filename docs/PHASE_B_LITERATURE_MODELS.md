@@ -142,28 +142,46 @@ minutes.
   finite-difference step 1e-3 (well above the solver tolerance 1e-7),
   ftol and xtol 1e-6, at most 200 evaluations and three hours per start; at
   the time limit the best point seen is kept.
-- **The CSTR row.** The historical CSTR export carries known generation
-  defects (`docs/PHASE_C_FITTING_STATIONARY.md`, later corrected by segmented
-  integration). At the generator's documented parameters (q 1, h 2.5,
-  ER 8750, r_ref about 80) the textbook balance reproduces 7 of the 16
-  training trajectories exactly and runs away on 5, so on this export it is
-  not the generating structure and its fit is not an upper bound. The fit
-  still starts from the generic values above.
-
-- **The corrected Phase C cell.** Agreed on 2026-11-10: after the Phase B
-  fits, the same balance is fitted by the same protocol to
-  `phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1`,
-  the corrected Phase C counterpart with the same roles (target T; C and Tj
-  supplied; Cf, Tf and Tjf as inputs; 16 training and 4 validation
-  trajectories), reading only its public training and validation tables
-  (`src/autoformalism/rebuttal/phase_c_literature.py`). It is reported beside
-  the Phase B table, not in it. The balance is also scored at the documented
-  parameters, as a diagnostic of the data, never as a start.
+- **The CSTR row.** With C read from data, the temperature balance is
+  open-loop unstable at these operating points: its local growth rate,
+  -q - h + r_ref exp(-ER(1/T - 1/350)) C ER/T^2, is positive along nearly every
+  trajectory (about 0.4 per time unit at the base point, up to 2), so a
+  30-unit free rollout amplifies small errors, such as the linear
+  interpolation of C between samples, by e^10 or more. At the generator's
+  documented parameters (q 1, h 2.5, ER 8750, r_ref about 80, beta 80) the
+  balance reproduces 7 of the 16 historical training trajectories and runs
+  away on 5; five of the historical trajectories also miss the balance by 4
+  to 8 K per time unit, the export's known generation defects
+  (`docs/PHASE_C_FITTING_STATIONARY.md`). On the corrected Phase C cell the
+  data follow the balance closely, yet it still runs away on 6 of 16. So
+  the temperature balance alone is not an upper bound on either cell.
+- **CSTR rows beside the table.** Agreed on 2026-11-10: report both the
+  approved temperature balance and the textbook CSTR with its reactant
+  balance, `dCr/dt = q (Cf - Cr) - k(T) Cr` and
+  `dT/dt = q (Tf - T) + beta k(T) Cr - h (T - Tj)` with
+  `k(T) = r_ref/beta exp(-ER (1/T - 1/350))`, Tj supplied, Cr started at C's
+  first reading and never reset to it. beta starts at the least-squares heat
+  per unit of reactant consumed, from finite-difference slopes of the
+  training data at the generic q and h; the other starts are as above. At
+  the documented parameters this closed loop reproduces the corrected Phase C
+  trajectories to NMSE about 1e-7 (training) and 2e-8 (validation), and the
+  historical ones to 0.87 and 0.54. Three pairs run beside the approved
+  campaign (`src/autoformalism/rebuttal/cstr_literature.py`), by the same
+  protocol and each also scored at the documented parameters as a diagnostic:
+  the closed loop on the Phase B cell (`cstr_closed_loop`), and both models
+  on the corrected Phase C counterpart,
+  `phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1`
+  (`cstr_balance_phase_c`, `cstr_closed_loop_phase_c`), which has the same
+  roles and 16 training and 4 validation trajectories; only its public
+  training and validation tables are read. Phase C rows are reported beside
+  the Phase B table, not in it.
 
 ```bash
 python scripts/phase_b_literature_models.py run \
   --inputs /path/to/phase-b-nine-case-v1 --output /path/to/output --workers 8
 python scripts/phase_b_literature_models.py report --output /path/to/output
-python scripts/phase_b_literature_models.py phase-c-cstr \
-  --release /path/to/phase-c-public-v2 --output /path/to/phase-c-output
+python scripts/phase_b_literature_models.py cstr --pair cstr_closed_loop \
+  --source /path/to/phase-b-nine-case-v1 --output /path/to/cstr_closed_loop
+python scripts/phase_b_literature_models.py cstr --pair cstr_closed_loop_phase_c \
+  --source /path/to/phase-c-public-v2 --output /path/to/cstr_closed_loop_phase_c
 ```
