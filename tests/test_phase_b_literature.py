@@ -360,3 +360,30 @@ def test_an_infinite_score_is_kept_when_no_rollout_finishes():
     runaway = {"q": 0.1, "h": 0.1, "ER": 1e5, "r_ref": 50.0}
     scored = lit.score(prepared, prepared.validation, runaway)
     assert math.isinf(scored["normalized_mse"]) or scored["normalized_mse"] > 1e6
+
+
+def test_the_phase_c_run_fits_every_start_once_and_selects_on_validation(tmp_path):
+    from autoformalism.rebuttal import phase_c_literature
+
+    truth = {"q": 1.3, "h": 0.8, "ER": 9000.0, "r_ref": 8.0}
+    train, validation, context = _cstr_cell(truth)
+    prepared = lit.assemble(phase_c_literature.PAIR, train, validation, context)
+    identity = {"benchmark_id": phase_c_literature.CELL}
+    summary = phase_c_literature.run(
+        prepared, identity, tmp_path, source_commit="abc", wall_seconds=120
+    )
+    assert summary["selected_start"] in lit.STARTS
+    assert summary["validation_nmse"] < 1e-5
+    assert set(summary["starts"]) == set(lit.STARTS)
+    diagnostic = summary["documented_parameters_diagnostic"]
+    assert diagnostic["parameters"]["r_ref"] == pytest.approx(80.0, rel=1e-3)
+    sealed = (tmp_path / "results" / "start_0.json").read_text()
+    again = phase_c_literature.run(
+        prepared, identity, tmp_path, source_commit="abc", wall_seconds=120
+    )
+    assert again["starts"] == summary["starts"]
+    assert (tmp_path / "results" / "start_0.json").read_text() == sealed
+    with pytest.raises(ValueError, match="differs from this run's plan"):
+        phase_c_literature.run(
+            prepared, identity, tmp_path, source_commit="other", wall_seconds=120
+        )

@@ -150,8 +150,20 @@ minutes.
   not the generating structure and its fit is not an upper bound. The fit
   still starts from the generic values above.
 
+- **The corrected Phase C cell.** Agreed on 2026-11-10: after the Phase B
+  fits, the same balance is fitted by the same protocol to
+  `phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1`,
+  the corrected Phase C counterpart with the same roles (target T; C and Tj
+  supplied; Cf, Tf and Tjf as inputs; 16 training and 4 validation
+  trajectories), reading only its public training and validation tables
+  (`src/autoformalism/rebuttal/phase_c_literature.py`). It is reported beside
+  the Phase B table, not in it. The balance is also scored at the documented
+  parameters, as a diagnostic of the data, never as a start.
+
 ```bash
 python scripts/phase_b_literature_models.py run \
   --inputs /path/to/phase-b-nine-case-v1 --output /path/to/output --workers 8
 python scripts/phase_b_literature_models.py report --output /path/to/output
+python scripts/phase_b_literature_models.py phase-c-cstr \
+  --release /path/to/phase-c-public-v2 --output /path/to/phase-c-output
 ```
