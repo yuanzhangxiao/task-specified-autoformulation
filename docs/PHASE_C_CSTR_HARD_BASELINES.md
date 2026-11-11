@@ -47,11 +47,12 @@ lists them, so the loader verifies them as it verifies every other cell.
 4. The held D3 and LLM-ODE seeds 2 to 4 ([PHASE_C_SEEDS_2_4.md](PHASE_C_SEEDS_2_4.md)),
    from the commit that froze them.
 
-From a clean checkout of this branch on js2:
+`scripts/jetstream/run_phase_c_cstr_hard.sh` runs items 1 and 2: SINDy and
+PySR, then D3, each alone, then LLM-SR and LLM-ODE side by side, each step once
+the previous one has ended. From a clean checkout of this branch on js2:
 
 ```bash
-bash scripts/jetstream/run_phase_c_classical.sh configs/phase_c_cstr_hard_public_baseline_jetstream_cpu_v1.json phase-c-cstr-hard-classical-v1
-bash scripts/jetstream/run_phase_c_hosted.sh d3 configs/phase_c_cstr_hard_d3_hosted_120b_v2.json phase-c-cstr-hard-d3-hosted-120b-v2 4
+nohup bash scripts/jetstream/run_phase_c_cstr_hard.sh > ~/af/runs/cstr-hard-chain.log 2>&1 < /dev/null &
 ```
 
 Scoring is a separate step: every pick is frozen first, failures included, and
