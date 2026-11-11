@@ -105,8 +105,8 @@ data's scale), not the generator's values.
 ## Cost
 
 CPU only: seven model/case pairs, three starts each, plus five unfitted
-evaluations. On an eight-worker laptop a start took 2 minutes to 2.3 hours in
-the first run.
+evaluations. On an eight-worker laptop a start took 1 minute to the full three
+hours, and the whole second run about 3.5 hours.
 
 ## Implementation
 
@@ -122,8 +122,10 @@ the first run.
   error can be up to the square root of their number times that. The fit's
   rollout therefore divides the shared evaluator's tolerances (relative 1e-7,
   absolute 1e-9) by that square root, so every accepted step meets them on
-  each trajectory alone, and a trajectory the shared evaluator cannot
-  integrate fails in the fit too. Radau's Jacobian is block diagonal, as the
+  each trajectory alone. The steps still differ: the stack shares one step
+  size and restarts at every trajectory's forcing changes, so it can pass a
+  narrow region that one trajectory alone cannot, and only the replay check
+  catches that. Radau's Jacobian is block diagonal, as the
   trajectories are independent. The wall-clock limit is checked at every
   right-hand-side evaluation, as the shared evaluator checks its own.
 - **The meal dose D.** `meal_dose_mg`, the last meal's amount in mg, is
@@ -166,6 +168,17 @@ the first run.
   reruns every job. At all 20 points the first run fitted and sealed, the
   corrected rollout agrees with the shared evaluator, the two T2-easy points
   failing in both and the others within relative 1e-5.
+- **The second run.** Protocol `phase-b-literature-models-2` (commit 4015330)
+  sealed all 26 jobs on 2026-11-11, and every pair has a replay-matched
+  start. The replay check excluded three starts. At two DM07 T2-hard points,
+  one training trajectory stops the shared evaluator, and the fast rollout
+  run on that trajectory alone, while the stack passed. One DM07 T1-hard start
+  missed the relative 1e-4 by 8%. One T2-easy start reached its three hours;
+  its best point was kept and was not selected. The fits depend on the
+  optimizer's path. On the perturbed T1-easy case, the first run's start 1
+  reached a training NMSE of 0.091, while the second run's three starts, from
+  the same starting values, stopped at 0.140 to 0.151. That point passes the
+  corrected replay check.
 - **The CSTR row.** With C read from data, the temperature balance is
   open-loop unstable at these operating points: its local growth rate,
   -q - h + r_ref exp(-ER(1/T - 1/350)) C ER/T^2, is positive along nearly every
