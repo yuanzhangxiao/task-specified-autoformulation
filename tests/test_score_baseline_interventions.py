@@ -200,3 +200,70 @@ def test_the_study_probes_a_latent_ode_like_its_own_models(tmp_path):
     assert {r["status"] for r in targets} <= {"complete", "negligible_reference_effect"}
     probes = {r["status"] for r in result["scores"] if r["readout"] == "oracle_affine"}
     assert "calibration_unavailable" not in probes
+
+
+def _suite():
+    import json
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "configs"
+        / "cstr_mechanism_probes_v1.json"
+    )
+    return json.loads(path.read_text())
+
+
+def test_the_probe_suite_copies_the_study_base_and_calibration():
+    suite = _suite()
+    table = scoring.suite_schedules(CSTR, suite)
+    study = anchor.cases(CSTR, "confirmation")
+    for name in suite["calibration"]:
+        assert table[name] == study[name]
+    base = study["train_zero"]["protocol"]
+    probes = [k for k, v in table.items() if v["role"] == "contrast"]
+    assert len(probes) == len(suite["probes"]) == 12
+    for item in table.values():
+        if item["role"] == "train_calibration":
+            continue
+        changed = {k for k in base if item["protocol"][k] != base[k]}
+        assert changed <= {"protocol_id", "split", "specification"}
+        if item["role"] == "contrast":
+            assert item["control"] == "basal"
+            low, high = item["window"]
+            assert 0.0 <= low < high <= base["duration"]
+
+
+def test_a_probe_never_shifts_a_hidden_initial_value():
+    for probe_case in _suite()["probes"]:
+        shift = probe_case["specification"].get("initial_shift", [0.0, 0.0, 0.0])
+        assert shift[0] == shift[2] == 0.0
+
+
+def test_an_unfrozen_suite_or_another_cell_is_refused():
+    suite = _suite()
+    with pytest.raises(ValueError, match="not frozen"):
+        scoring.suite_schedules(CSTR, {**suite, "status": "draft"})
+    with pytest.raises(ValueError, match="not frozen"):
+        scoring.suite_schedules(anchor.fits.T2, suite)
+
+
+def test_the_study_models_join_on_their_canonical_cell(tmp_path):
+    from autoformalism.rebuttal.prefit_replay import sealed_write
+
+    path = tmp_path / "frozen_models.json"
+    sealed_write(
+        path,
+        {
+            "protocol": "iclr-controlled-search-models-1",
+            "rows": [
+                {"benchmark_id": "sensor_00", "method": "full", "repetition": 0},
+                {"benchmark_id": "acquisition_00", "method": "full", "repetition": 0},
+            ],
+        },
+    )
+    rows = scoring.study_rows(path, CSTR)
+    assert [(r["benchmark_id"], r["source_benchmark_id"]) for r in rows] == [
+        (CSTR, "sensor_00")
+    ]
+    assert rows[0]["source_protocol"] == "iclr-controlled-search-models-1"

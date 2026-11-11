@@ -16,7 +16,9 @@ its hidden-process rows are recorded unavailable, as for any such model.
 Stages, in order:
 
 * ``freeze``: every pick of the named sealed runs, failures included, with the
-  schedules and training scales. Opens public data only.
+  schedules and training scales. Opens public data only. A frozen suite
+  (``configs/*_probes_*.json``) may replace the study's schedules, and the
+  study's own frozen models may join the scored subjects.
 * ``rehearse``: the same predictor on the public validation trajectories, beside
   each run's recorded validation error.
 * ``score``: reference responses and paired metrics. Optionally rescores named
@@ -39,6 +41,7 @@ import numpy as np
 
 from autoformalism.baselines import latent_ode
 from autoformalism.baselines.d3_rollout import predict as native_rollout
+from autoformalism.benchmarks.phase_c_protocols import phase_c_protocols
 from autoformalism.benchmarks.phase_c_release import SPEC_PATHS, load_public_cell
 from autoformalism.expressions import (
     ValidationContext,
@@ -100,6 +103,77 @@ def public_cells(release: Path, names) -> dict:
             "training": train.model_dump(mode="json"),
         }
     return cells
+
+
+def suite_schedules(cell: str, suite: dict) -> dict:
+    """A frozen suite's schedules, built as the study builds its own.
+
+    Calibration schedules are the named training protocols; the control and
+    every probe copy the base training protocol with only their input
+    specification changed, as ``anchor.cases`` does.
+    """
+    if suite.get("status") != "frozen_before_references" or suite["cell"] != cell:
+        raise ValueError("the suite is not frozen for this cell")
+    if cell != anchor.fits.CSTR:
+        raise ValueError("only the reactor has a probe suite")
+    by_id = {r.protocol_id: r for r in phase_c_protocols("cstr") if r.split == "train"}
+    table = {
+        name: {
+            "protocol": by_id[name].model_dump(mode="json"),
+            "role": "train_calibration",
+        }
+        for name in suite["calibration"]
+    }
+    base = by_id[suite["base_protocol"]].model_dump(mode="json")
+
+    def protocol(name, specification):
+        return base | {
+            "protocol_id": "probe_" + name,
+            "split": "test",
+            "specification": specification,
+        }
+
+    control = suite["control"]
+    table[control["name"]] = {
+        "protocol": protocol(control["name"], control["specification"]),
+        "role": "control",
+        "control": None,
+        "window": None,
+    }
+    for probe_case in suite["probes"]:
+        name = probe_case["name"]
+        if name in table:
+            raise ValueError(f"probe {name} repeats a schedule name")
+        table[name] = {
+            "protocol": protocol(name, probe_case["specification"]),
+            "role": "contrast",
+            "control": control["name"],
+            "window": list(probe_case["window"]),
+            "group": probe_case["group"],
+        }
+    return table
+
+
+def study_rows(path: Path, cell: str) -> list[dict]:
+    """Every frozen model of the study on a cell, as its evaluator reads them."""
+    bundle = sealed_read(path)
+    rows = []
+    for r in bundle["rows"]:
+        if ALIASES.get(r["benchmark_id"], r["benchmark_id"]) != cell:
+            continue
+        rows.append(
+            {
+                **r,
+                "benchmark_id": cell,
+                "source_benchmark_id": r["benchmark_id"],
+                "source_bundle_sha256": bundle["artifact_sha256"],
+                "source_protocol": bundle["protocol"],
+                "direct_readouts": {},
+            }
+        )
+    if not rows:
+        raise ValueError("the study bundle has no model on this cell")
+    return rows
 
 
 def subject(row: dict, bundle: str) -> dict:
@@ -239,6 +313,8 @@ def freeze(
     sources: dict[str, Path],
     cells: list[str],
     llm_sr_transcriptions: Path | None = None,
+    suite: Path | None = None,
+    study_models: Path | None = None,
 ) -> dict:
     """Seal every pick of the named runs on the named cells, failures included."""
     if (root / "plan.json").exists():
@@ -246,6 +322,9 @@ def freeze(
     unknown = set(sources) - set(METHODS)
     if unknown or not sources or not set(cells) <= set(anchor.fits.CELLS):
         raise ValueError("unknown methods or cells outside the study")
+    frozen_suite = json.loads(suite.read_text()) if suite else None
+    if frozen_suite and len(cells) != 1:
+        raise ValueError("a probe suite is frozen for one cell")
     names = set().union(*(_run_cells(m, p) for m, p in sources.items()))
     receipt = verify_release(release, sorted(names))
     public_by_name = public_cells(release, names)
@@ -296,7 +375,31 @@ def freeze(
                 else None
             ),
             "cells": sorted(cells),
-            "schedules": {c: anchor.cases(c, MODE) for c in sorted(cells)},
+            "suite": (
+                {
+                    "path": str(suite.resolve()),
+                    "sha256": _digest(suite),
+                    "name": frozen_suite["suite"],
+                }
+                if frozen_suite
+                else None
+            ),
+            "schedules": {
+                c: suite_schedules(c, frozen_suite)
+                if frozen_suite
+                else anchor.cases(c, MODE)
+                for c in sorted(cells)
+            },
+            "study_rows": (
+                [r for c in sorted(cells) for r in study_rows(study_models, c)]
+                if study_models
+                else []
+            ),
+            "study_models": (
+                {"path": str(study_models.resolve()), "sha256": _digest(study_models)}
+                if study_models
+                else None
+            ),
             "training_sd": {
                 c: anchor.training_sd(c, release / "public", Path(".")) for c in cells
             },
@@ -441,6 +544,8 @@ def score(
     # The study's own models are scored under a root of their own, so a subject
     # index always names the same model as its checkpoints.
     groups = [(root, plan["rows"], False)]
+    if plan.get("study_rows"):
+        groups.append((root / "study", plan["study_rows"], False))
     if parity_models:
         ids = sorted(parity_ids or ())
         folder = root / "parity" / public.content_sha256(ids)[:16]
@@ -488,7 +593,11 @@ def score(
 
 def report(root: Path) -> dict:
     """Target rows per seed, and per method, cell and case over seeds."""
-    files = [root / "scores.json", *sorted((root / "parity").glob("*/scores.json"))]
+    files = [
+        root / "scores.json",
+        root / "study" / "scores.json",
+        *sorted((root / "parity").glob("*/scores.json")),
+    ]
     rows = [
         r
         for path in files
@@ -572,13 +681,21 @@ if __name__ == "__main__":
     parser.add_argument("--source", action="append", default=[])
     parser.add_argument("--cell", action="append", default=[])
     parser.add_argument("--llm-sr-transcriptions", type=Path)
+    parser.add_argument("--suite", type=Path)
+    parser.add_argument("--study-models", type=Path)
     parser.add_argument("--data-root", type=Path, default=Path("data_raw"))
     parser.add_argument("--parity-models", type=Path, action="append")
     parser.add_argument("--parity-id", action="append", default=[])
     a = parser.parse_args()
     if a.stage == "freeze":
         out = freeze(
-            a.root, a.release, _sources(a.source), a.cell, a.llm_sr_transcriptions
+            a.root,
+            a.release,
+            _sources(a.source),
+            a.cell,
+            a.llm_sr_transcriptions,
+            a.suite,
+            a.study_models,
         )
         print(out["artifact_sha256"], len(out["rows"]), "subjects")
     elif a.stage == "rehearse":
