@@ -3,9 +3,11 @@
 docs/PHASE_B_LITERATURE_MODELS.md states the models and the protocol. Each
 model is written once, as a candidate in the restricted grammar, and compiled
 by the shared validator. The fit evaluates the validated expressions over all
-of a split's trajectories at once; the shared simulator then scores the fitted
-candidate one trajectory at a time, as it scores the compared methods, with a
-Radau retry. A start counts only if the two give the same training NMSE.
+of a split's trajectories at once, with tolerances tightened so that every
+accepted step also meets the shared evaluator's tolerances on each trajectory
+alone; the shared simulator then scores the fitted candidate one trajectory at
+a time, as it scores the compared methods, with a Radau retry. A start counts
+only if the two give the same training NMSE.
 
 Only the nine cells' public training and validation tables are read. Nothing
 here opens test data, a private reference, or a generator's code.
@@ -26,6 +28,7 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy import sparse
 from scipy.integrate import solve_ivp
 from scipy.optimize import least_squares, root
 
@@ -38,7 +41,7 @@ from autoformalism.fitting.simulation import simulate_trajectory
 from autoformalism.rebuttal import phase_b_nine_case as nine
 from autoformalism.schemas import CandidateModel
 
-PROTOCOL = "phase-b-literature-models-1"
+PROTOCOL = "phase-b-literature-models-2"
 MEAL = "meal_event_g"
 INSULIN = "insulin_pmol_per_kg_min"
 #: The last meal's amount in mg, a causal transform of the public meal channel.
@@ -57,6 +60,16 @@ FAILURE_RESIDUAL = 1e3
 #: to the absolute floor where both sit at the solvers' round-off.
 REPLAY_TOLERANCE = 1e-4
 REPLAY_FLOOR = 1e-9
+#: The shared evaluator's solver tolerances (FitConfig's defaults).
+RTOL, ATOL = 1e-7, 1e-9
+#: How the fit's stacked rollout meets them; frozen into every plan.
+FAST_ROLLOUT = {
+    "rtol": RTOL,
+    "atol": ATOL,
+    "tolerances_divided_by": "the square root of the number of trajectories",
+    "radau_jacobian": "block diagonal by trajectory",
+    "wall_clock_limit": "checked at every right-hand-side evaluation",
+}
 #: The reference meal of the published model (BioModels BIOMD0000000379).
 REFERENCE_DOSE_MG = 78000.0
 
@@ -657,10 +670,28 @@ class FastModel:
         max_step: float,
         method: str = "RK45",
         initial: NDArray[np.float64] | None = None,
+        deadline: float | None = None,
     ) -> dict[str, NDArray[np.float64]]:
-        """Free rollout of every trajectory, restarting at slope changes."""
+        """Free rollout of every trajectory, restarting at slope changes.
+
+        The solver bounds one root-mean-square error over all trajectories. A
+        trajectory's own error is at most the square root of their number times
+        that, so both tolerances are divided by it: every accepted step meets
+        the shared evaluator's tolerances on each trajectory alone, and a
+        trajectory the shared evaluator cannot integrate is not stepped over.
+        Radau's Jacobian is block diagonal, as trajectories are independent.
+        Past the deadline, the next right-hand-side evaluation stops the fit.
+        """
         count = len(stack.trajectory_ids)
         shape = (len(self.states), count)
+        tighten = math.sqrt(count)
+        options: dict[str, Any] = {}
+        if method == "Radau":
+            options["jac_sparsity"] = sparse.kron(
+                np.ones((len(self.states), len(self.states))),
+                sparse.identity(count),
+                format="csc",
+            )
         start_state = (
             self.initial_state(stack, parameters) if initial is None else initial
         )
@@ -668,6 +699,8 @@ class FastModel:
         states[:, :, 0] = start_state
 
         def rhs(time: float, flat: NDArray[np.float64]) -> NDArray[np.float64]:
+            if deadline is not None and clock.monotonic() >= deadline:
+                raise OutOfTime
             derivative = self.derivatives(
                 time,
                 dict(zip(self.states, flat.reshape(shape), strict=True)),
@@ -687,9 +720,10 @@ class FastModel:
                     states[:, :, start].ravel(),
                     t_eval=stack.time[start : end + 1],
                     method=method,
-                    rtol=1e-7,
-                    atol=1e-9,
+                    rtol=RTOL / tighten,
+                    atol=ATOL / tighten,
                     max_step=max_step,
+                    **options,
                 )
                 if not solution.success:
                     raise SimulationFailed(f"integration failed: {solution.message}")
@@ -713,13 +747,22 @@ class FastModel:
         return {"states": states, **predictions}
 
     def simulate(
-        self, stack: Stack, parameters: Mapping[str, float], *, max_step: float
+        self,
+        stack: Stack,
+        parameters: Mapping[str, float],
+        *,
+        max_step: float,
+        deadline: float | None = None,
     ) -> dict[str, NDArray[np.float64]]:
         """RK45, then Radau if RK45 fails."""
         try:
-            return self.rollout(stack, parameters, max_step=max_step)
+            return self.rollout(
+                stack, parameters, max_step=max_step, deadline=deadline
+            )
         except SimulationFailed:
-            return self.rollout(stack, parameters, max_step=max_step, method="Radau")
+            return self.rollout(
+                stack, parameters, max_step=max_step, method="Radau", deadline=deadline
+            )
 
 
 # --------------------------------------------------------------------------
@@ -1298,7 +1341,10 @@ def fit(prepared: Prepared, start: int, *, wall_seconds: float) -> dict[str, Any
         evaluations["count"] += 1
         try:
             predictions = prepared.fast.simulate(
-                stack, vectorizer.values(x), max_step=prepared.max_step
+                stack,
+                vectorizer.values(x),
+                max_step=prepared.max_step,
+                deadline=deadline,
             )
         except SimulationFailed:
             evaluations["failed"] += 1
@@ -1411,6 +1457,7 @@ def plan(inputs: Path, *, source_commit: str, wall_seconds: float) -> dict[str, 
             "max_nfev": MAX_NFEV,
         },
         "wall_seconds_per_start": wall_seconds,
+        "fast_rollout": FAST_ROLLOUT,
         "replay_tolerance": {"relative": REPLAY_TOLERANCE, "floor": REPLAY_FLOOR},
         "pairs": [prepare(inputs, pair.key).description for pair in PAIRS],
         "not_applicable": NOT_APPLICABLE,

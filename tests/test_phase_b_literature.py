@@ -226,6 +226,65 @@ def test_the_fast_rollout_scores_as_the_shared_evaluator_does():
         assert fast == pytest.approx(shared["normalized_mse"], rel=1e-6)
 
 
+def test_the_stacked_rollout_meets_the_shared_tolerances_on_each_trajectory(
+    monkeypatch,
+):
+    """The solver's error norm is a root mean square over every trajectory; a
+    trajectory's own norm is at most the square root of their number times it,
+    so the tolerances are divided by that. Radau's Jacobian is block diagonal."""
+    train, validation, context = _t1_easy_cell()
+    prepared = lit.assemble(
+        lit.PAIR_BY_KEY["dm07_t1_easy_canonical"], train, validation, context
+    )
+    calls = []
+    solve = lit.solve_ivp
+
+    def recording(*args, **kwargs):
+        calls.append(kwargs)
+        return solve(*args, **kwargs)
+
+    monkeypatch.setattr(lit, "solve_ivp", recording)
+    stack = prepared.train_stack
+    count = len(stack.trajectory_ids)
+    states = len(prepared.fast.states)
+    starts = {**prepared.structure.starts, **dict.fromkeys(prepared.weights, 0.0)}
+    for method in ("RK45", "Radau"):
+        calls.clear()
+        prepared.fast.rollout(stack, starts, max_step=1.0, method=method)
+        assert calls
+        for kwargs in calls:
+            assert kwargs["rtol"] == pytest.approx(lit.RTOL / math.sqrt(count))
+            assert kwargs["atol"] == pytest.approx(lit.ATOL / math.sqrt(count))
+            assert ("jac_sparsity" in kwargs) == (method == "Radau")
+    pattern = calls[0]["jac_sparsity"].toarray().astype(bool)
+    rows, columns = np.indices(pattern.shape)
+    # Flat index: state * count + trajectory.
+    assert pattern.shape == (states * count, states * count)
+    assert np.array_equal(pattern, rows % count == columns % count)
+
+
+def test_the_wall_clock_limit_stops_a_rollout_in_progress(monkeypatch):
+    """Past the deadline, the next right-hand-side evaluation ends the fit, so
+    one slow rollout cannot carry a start beyond its limit."""
+    train, validation, context = _t1_easy_cell()
+    prepared = lit.assemble(
+        lit.PAIR_BY_KEY["dm07_t1_easy_canonical"], train, validation, context
+    )
+    with pytest.raises(lit.OutOfTime):
+        prepared.fast.rollout(
+            prepared.train_stack,
+            {**prepared.structure.starts, **dict.fromkeys(prepared.weights, 0.0)},
+            max_step=1.0,
+            deadline=lit.clock.monotonic() - 1.0,
+        )
+    ticks = iter(range(1, 1_000_000))
+    monkeypatch.setattr(lit.clock, "monotonic", lambda: float(next(ticks)))
+    result = lit.fit(prepared, 0, wall_seconds=10.0)
+    assert result["least_squares"]["status"] == "wall_clock_limit"
+    assert result["residual_evaluations"]["count"] == 1
+    assert result["parameters"] == result["starting_values"]
+
+
 def test_the_meal_at_the_first_sample_enters_the_initial_map():
     train, validation, context = _t1_easy_cell()
     prepared = lit.assemble(

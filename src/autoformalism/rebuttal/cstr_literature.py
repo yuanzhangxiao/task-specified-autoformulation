@@ -34,7 +34,7 @@ from autoformalism.rebuttal import phase_b_literature as lit
 from autoformalism.rebuttal import phase_b_nine_case as nine
 from autoformalism.rebuttal import phase_c_baselines
 
-PROTOCOL = "cstr-literature-1"
+PROTOCOL = "cstr-literature-2"
 PHASE_C_CELL = "phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1"
 PAIRS = (
     lit.CSTR_CLOSED,
@@ -109,6 +109,7 @@ def run(
         "pair": prepared.description,
         "starts": list(lit.STARTS),
         "wall_seconds_per_start": wall_seconds,
+        "fast_rollout": lit.FAST_ROLLOUT,
         "test_data_opened": False,
         "private_reference_opened": False,
     }

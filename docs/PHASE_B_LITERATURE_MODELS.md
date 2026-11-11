@@ -105,8 +105,8 @@ data's scale), not the generator's values.
 ## Cost
 
 CPU only: seven model/case pairs, three starts each, plus five unfitted
-evaluations. On an eight-worker laptop a DM07 start takes about 4 to 15
-minutes.
+evaluations. On an eight-worker laptop a start took 2 minutes to 2.3 hours in
+the first run.
 
 ## Implementation
 
@@ -117,6 +117,15 @@ minutes.
   with a Radau retry and steps of at most one sample, exactly as it scores the
   compared methods. A start counts only if the two training NMSEs agree
   (relative 1e-4, or 1e-9 absolute where both are at round-off).
+- **The stacked rollout's tolerances.** The solver bounds one
+  root-mean-square error over all stacked trajectories, and a trajectory's own
+  error can be up to the square root of their number times that. The fit's
+  rollout therefore divides the shared evaluator's tolerances (relative 1e-7,
+  absolute 1e-9) by that square root, so every accepted step meets them on
+  each trajectory alone, and a trajectory the shared evaluator cannot
+  integrate fails in the fit too. Radau's Jacobian is block diagonal, as the
+  trajectories are independent. The wall-clock limit is checked at every
+  right-hand-side evaluation, as the shared evaluator checks its own.
 - **The meal dose D.** `meal_dose_mg`, the last meal's amount in mg, is
   derived causally from the public meal channel and read as an input. Before
   the first meal D is 1 mg: the stomach is empty and k_empt is k_max.
@@ -142,6 +151,21 @@ minutes.
   finite-difference step 1e-3 (well above the solver tolerance 1e-7),
   ftol and xtol 1e-6, at most 200 evaluations and three hours per start; at
   the time limit the best point seen is kept.
+- **The first run, replaced.** The first run (protocol
+  `phase-b-literature-models-1`, commit 1b1cadd) was stopped on 2026-11-10
+  with 25 of 26 jobs sealed. Its stacked rollout used the shared tolerances
+  unchanged, so a step could pass on the average while one trajectory's own
+  error was several times too large. Two DM07 T2-easy starts fitted a region
+  where two training trajectories cannot be integrated: their mapped portal
+  insulin starts negative, hepatic extraction reaches 1, and
+  m3 = HE m1/(1 - HE) has a pole. The stacked fit stepped over it; the shared
+  evaluator, RK45 and Radau alike, stopped there, and the replay check
+  excluded both starts. The third T2-easy start ran past its three hours in a
+  Radau retry with a dense Jacobian, because the limit was checked only
+  between rollouts. Protocol `phase-b-literature-models-2` fixes both and
+  reruns every job. At all 20 points the first run fitted and sealed, the
+  corrected rollout agrees with the shared evaluator, the two T2-easy points
+  failing in both and the others within relative 1e-5.
 - **The CSTR row.** With C read from data, the temperature balance is
   open-loop unstable at these operating points: its local growth rate,
   -q - h + r_ref exp(-ER(1/T - 1/350)) C ER/T^2, is positive along nearly every
