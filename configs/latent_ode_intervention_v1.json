@@ -1,0 +1,38 @@
+{
+  "schema": "latent-ode-frozen-plan-1",
+  "status": "frozen_before_training",
+  "purpose": "A conventional latent-state model with no task specification, for the intervention study's decomposition of latent states and specification: a latent neural ODE driven by the measured inputs (augmented neural ODE with an encoder of the initial readings), on the two cells the study scores, Phase C CSTR-hard and T2-hard, with seeds 0, 1 and 2. Public training trajectories fit it; public validation trajectories stop training early and choose the latent dimension. Settings are common neural ODE defaults, fixed before any model was trained and before any intervention score was seen; frozen on 2026-11-11 on the user's sign-off.",
+  "release_protocol": "phase-c-development-2",
+  "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
+  "cells": [
+    "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1",
+    "phase_c_dalla_man_t2_canonical_named_hard_rates_v1"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "settings": {
+    "latent_dimensions": [
+      2,
+      4,
+      8
+    ],
+    "width": 64,
+    "depth": 2,
+    "encoder_width": 32,
+    "final_layer_scale": 0.1,
+    "learning_rate": 0.001,
+    "iterations": 2000,
+    "evaluate_every": 25,
+    "gradient_clip": 1.0,
+    "rk4_substeps": 2,
+    "horizon_fraction_for_tau": 0.1,
+    "replay_rtol": 1e-08,
+    "replay_atol": 1e-10,
+    "replay_seconds": 45.0
+  },
+  "test_data_opened": false,
+  "private_reference_opened": false
+}
