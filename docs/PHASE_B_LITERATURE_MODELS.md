@@ -1,7 +1,9 @@
-# Literature models on the nine-case Phase B comparison (proposed)
+# Literature models on the nine-case Phase B comparison
 
-**Status: proposed, awaiting approval. Nothing here has been implemented or
-run.**
+**Status: approved on 2026-11-10 and implemented in
+`src/autoformalism/rebuttal/phase_b_literature.py`, run by
+`scripts/phase_b_literature_models.py`. The implementation section at the end
+records the choices this sheet left open.**
 
 A literature model is a model an expert would write from the published
 literature for a case, using only that case's public channels, fitted to its
@@ -26,7 +28,7 @@ a privileged upper bound, not an independent expert result.
 | T2-easy canonical, named | DM07 plasma balance, gut, insulin, secretion, remote action, U | generator's published structure (upper bound) |
 | T2-hard canonical, named | full DM07 (Uii supplied) | generator's published structure (upper bound) |
 | T2-hard canonical, named | extended Bergman minimal model + two-compartment gut | classic expert model |
-| CSTR easy, named | textbook reactor-temperature balance (C, Tj supplied) | generator's structure (upper bound) on the affected historical export |
+| CSTR easy, named | textbook reactor-temperature balance (C, Tj supplied) | textbook structure on the affected historical export; not an upper bound there (see below) |
 | T1-easy canonical and perturbed, obfuscated | none | not applicable: no names, so no literature can be chosen |
 | Alien device easy | none | not applicable: no literature exists |
 
@@ -102,5 +104,54 @@ data's scale), not the generator's values.
 
 ## Cost
 
-CPU only: six model/case pairs, three starts each, plus six unfitted
-evaluations. Estimated one to three hours on Jetstream2.
+CPU only: seven model/case pairs, three starts each, plus five unfitted
+evaluations. On an eight-worker laptop a DM07 start takes about 4 to 15
+minutes.
+
+## Implementation
+
+- **One encoding, two evaluators.** Each model is written once in the
+  restricted grammar and compiled by the shared validator. The fit evaluates
+  the validated expressions over all of a split's trajectories at once; the
+  shared simulator scores the fitted candidate one trajectory at a time, RK45
+  with a Radau retry and steps of at most one sample, exactly as it scores the
+  compared methods. A start counts only if the two training NMSEs agree
+  (relative 1e-4, or 1e-9 absolute where both are at round-off).
+- **The meal dose D.** `meal_dose_mg`, the last meal's amount in mg, is
+  derived causally from the public meal channel and read as an input. Before
+  the first meal D is 1 mg: the stomach is empty and k_empt is k_max.
+- **Held constants.** VG 1.88, VI 0.05 and BW 78 stay at the published
+  values, as in the Bergman row: they only rescale other parameters. Insulin
+  is written as plasma concentration, I = Ip/VI, the same model in other units.
+- **Latent starting values.** The basal state is the published model's
+  fasting steady state, solved numerically (Gp 173.85 mg/kg, I 25.06 pmol/L,
+  Gt 131.38 mg/kg, EGP 1.92 mg/kg/min). The map reads every public target,
+  auxiliary or input channel whose first value varies over the training
+  trajectories, the meal channel included, each divided by its spread over
+  those first values; each latent state's shift is scaled by the largest value
+  it reaches under the published model's reference meal (78 g). Because the
+  meal channel is interpolated linearly, a meal on the first minute delivers
+  half its grams through the inflow term; the map's meal weight can put the
+  rest in the stomach. The unfitted rows have no map.
+- **Starts that are not published.** Extended minimal model: SG 0.025,
+  Gpb 178.6, p2 0.025, p3 2e-6, Ib 25, n 0.14, γB 0.5, h 95, tmax 40 and
+  f 0.9, typical normal-subject magnitudes, not fitted to these data. CSTR:
+  r_ref starts at the least-squares rate given the other generic starts and
+  finite-difference slopes of the training temperatures.
+- **Least squares.** Trust-region reflective, Jacobian scaling, relative
+  finite-difference step 1e-3 (well above the solver tolerance 1e-7),
+  ftol and xtol 1e-6, at most 200 evaluations and three hours per start; at
+  the time limit the best point seen is kept.
+- **The CSTR row.** The historical CSTR export carries known generation
+  defects (`docs/PHASE_C_FITTING_STATIONARY.md`, later corrected by segmented
+  integration). At the generator's documented parameters (q 1, h 2.5,
+  ER 8750, r_ref about 80) the textbook balance reproduces 7 of the 16
+  training trajectories exactly and runs away on 5, so on this export it is
+  not the generating structure and its fit is not an upper bound. The fit
+  still starts from the generic values above.
+
+```bash
+python scripts/phase_b_literature_models.py run \
+  --inputs /path/to/phase-b-nine-case-v1 --output /path/to/output --workers 8
+python scripts/phase_b_literature_models.py report --output /path/to/output
+```
