@@ -37,6 +37,7 @@ from time import monotonic
 
 import numpy as np
 
+from autoformalism.baselines import latent_ode
 from autoformalism.baselines.d3_rollout import predict as native_rollout
 from autoformalism.benchmarks.phase_c_release import SPEC_PATHS, load_public_cell
 from autoformalism.expressions import (
@@ -49,7 +50,7 @@ from autoformalism.fitting import public_fitting as public
 from autoformalism.rebuttal import llm_sr_transcriptions as transcriptions
 from autoformalism.rebuttal import phase_c_baseline_mechanisms as mechanisms
 from autoformalism.rebuttal.mechanism_probes import _native
-from autoformalism.rebuttal.phase_c_baselines import verify_release
+from autoformalism.rebuttal.phase_c_baselines import tier_of, verify_release
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.schemas import CandidateModel
 from scripts import evaluate_t2_latent_dynamics as probe
@@ -61,6 +62,10 @@ MODE = "confirmation"
 RTOL, ATOL, SECONDS = 1e-8, 1e-10, 45.0
 #: The public fields that define a cell's context, as the adapters read them.
 CONTEXT_FIELDS = ("targets", "auxiliaries", "external_inputs", "fixed_covariates")
+#: The latent neural ODE (``baselines.latent_ode``), which runs outside the
+#: vendored campaigns and is sealed by ``scripts/run_latent_ode_baseline.py``.
+LATENT_ODE = "latent_ode"
+METHODS = (*mechanisms.METHODS, LATENT_ODE)
 #: The study's stress aliases, for rescoring its own models.
 ALIASES = anchor.ALIASES
 
@@ -76,6 +81,8 @@ def evaluator_identity() -> dict:
 
 
 def _run_cells(method: str, root: Path) -> set[str]:
+    if method == LATENT_ODE:
+        return {r["benchmark_id"] for r in sealed_read(root / "selection.json")["rows"]}
     if method in ("sindy", "pysr"):
         lines = (root / "frozen" / "task_plan.jsonl").read_text().splitlines()
         return {json.loads(line)["benchmark_id"] for line in lines if line.strip()}
@@ -108,8 +115,39 @@ def subject(row: dict, bundle: str) -> dict:
         "failure": row.get("failure"),
         "model": row.get("model"),
         "sources": row["sources"],
+        "recorded": row.get("recorded"),
         "direct_readouts": {},
     }
+
+
+def latent_ode_rows(root: Path) -> list[dict]:
+    """The latent ODE's selected model per cell and seed, failures included."""
+    plan = sealed_read(root / "plan.json")
+    selection = sealed_read(root / "selection.json")
+    if (
+        plan["protocol"] != latent_ode.PROTOCOL
+        or selection["plan_sha256"] != plan["artifact_sha256"]
+        or selection.get("test_data_opened") is not False
+    ):
+        raise ValueError("the latent ODE selection belongs to another plan")
+    sources = [
+        mechanisms._file(root / "plan.json"),
+        mechanisms._file(root / "selection.json"),
+    ]
+    rows = []
+    for r in selection["rows"]:
+        name = r["benchmark_id"]
+        row = mechanisms._row(LATENT_ODE, name, tier_of(name), int(r["repetition"]))
+        if r["status"] != "complete":
+            rows.append(mechanisms._failure(row, sources, r["status"]))
+            continue
+        rows.append(
+            {
+                **mechanisms._ready(row, sources, r["model"]),
+                "recorded": ["selection.validation_nmse", r["validation_nmse"]],
+            }
+        )
+    return rows
 
 
 def predict(row: dict, tr, solver: str) -> dict:
@@ -124,6 +162,25 @@ def predict(row: dict, tr, solver: str) -> dict:
         or context.fixed_covariates
     ):
         raise ValueError("model violates public input or initialization contract")
+    if model["semantics"] == "latent_neural_ode":
+        ode = latent_ode.LatentODE(model)
+        supplied = {**tr.external_inputs, **tr.auxiliaries}
+        inputs = np.stack(
+            [np.asarray(supplied[n], dtype=float) for n in ode.inputs], -1
+        )
+        y, h = ode.simulate(
+            np.asarray(tr.time, dtype=float),
+            np.array([tr.targets[t][0] for t in ode.targets], dtype=float),
+            inputs,
+            method=solver,
+            rtol=RTOL,
+            atol=ATOL,
+            seconds=SECONDS,
+        )
+        # Latent coordinates go to the study's train-calibrated probe, as ours do.
+        return {t: y[:, i].tolist() for i, t in enumerate(ode.targets)} | {
+            f"latent.h{j}": h[:, j].tolist() for j in range(h.shape[1])
+        }
     if model["semantics"] == "native_increment":
         step = np.diff(np.asarray(tr.time, dtype=float))
         if np.max(np.abs(step - model["increment_step"])) > 1e-9 * max(
@@ -186,7 +243,7 @@ def freeze(
     """Seal every pick of the named runs on the named cells, failures included."""
     if (root / "plan.json").exists():
         raise ValueError("this root is already frozen")
-    unknown = set(sources) - set(mechanisms.METHODS)
+    unknown = set(sources) - set(METHODS)
     if unknown or not sources or not set(cells) <= set(anchor.fits.CELLS):
         raise ValueError("unknown methods or cells outside the study")
     names = set().union(*(_run_cells(m, p) for m, p in sources.items()))
@@ -197,7 +254,9 @@ def freeze(
     )
     rows = []
     for method, path in sorted(sources.items()):
-        if method in ("sindy", "pysr"):
+        if method == LATENT_ODE:
+            rows += latent_ode_rows(path)
+        elif method in ("sindy", "pysr"):
             found = mechanisms.classical_rows(path, public_by_name)
             rows += [r for r in found if r["method"] == method]
         else:
@@ -206,7 +265,9 @@ def freeze(
     bundle = public.content_sha256(rows)
     subjects = [subject(r, bundle) for r in rows]
     for s in subjects:
-        if s["status"] == "ready" and s["model"]["semantics"] == "native_increment":
+        if s["status"] == "ready" and s["model"]["semantics"] == "latent_neural_ode":
+            latent_ode.LatentODE(s["model"])
+        elif s["status"] == "ready" and s["model"]["semantics"] == "native_increment":
             _native(s["model"])
         elif s["status"] == "ready":
             compile_candidate(
@@ -251,8 +312,11 @@ def _recorded_validation(row: dict):
 
     SINDy and PySR record ``validation_normalized_mse``; LLM-ODE and LLM-SR
     ``development_rollout_error``; D3 its recursive ``phase_b_rollout`` beside
-    the one-step loss it selects on.
+    the one-step loss it selects on; the latent ODE the error it was selected on.
     """
+    if row.get("recorded"):
+        key, value = row["recorded"]
+        return key, float(value)
     for source in row["sources"]:
         path = Path(source["path"])
         if path.name != "result.json":

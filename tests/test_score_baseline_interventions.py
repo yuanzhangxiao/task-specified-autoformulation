@@ -146,3 +146,57 @@ def test_freeze_refuses_unknown_methods_and_cells(tmp_path):
         scoring.freeze(tmp_path, tmp_path, {"oracle": tmp_path}, [CSTR])
     with pytest.raises(ValueError, match="unknown methods"):
         scoring.freeze(tmp_path, tmp_path, {"d3": tmp_path}, ["phase_c_other"])
+
+
+def _latent_row(rng):
+    """A small random latent ODE for the reactor cell: T plus two latents."""
+
+    def layer(rows, cols):
+        return {
+            "weight": (0.1 * rng.standard_normal((rows, cols))).tolist(),
+            "bias": (0.1 * rng.standard_normal(rows)).tolist(),
+        }
+
+    model = {
+        "semantics": "latent_neural_ode",
+        "context": CONTEXT.model_dump(mode="json"),
+        "targets": ["T"],
+        "inputs": ["Cf", "Tf", "Tjf"],
+        "tau": 3.0,
+        "standardization": {
+            "target_mean": [350.0],
+            "target_sd": [5.0],
+            "input_mean": [0.0, 0.0, 0.0],
+            "input_sd": [1.0, 1.0, 1.0],
+        },
+        "network": {
+            "dynamics": [layer(8, 6), layer(8, 8), layer(3, 8)],
+            "encoder": [layer(4, 4), layer(2, 4)],
+        },
+    }
+    return {**_row(), "method": "latent_ode", "model": model}
+
+
+def test_a_latent_ode_gives_its_targets_and_latent_coordinates():
+    row = _latent_row(np.random.default_rng(0))
+    time = np.linspace(0.0, 2.0, 21)
+    radau = scoring.predict(row, _trajectory(time), "Radau")
+    bdf = scoring.predict(row, _trajectory(time), "BDF")
+    assert set(radau) == {"T", "latent.h0", "latent.h1"}
+    assert radau["T"][0] == pytest.approx(350.0)
+    assert np.max(np.abs(np.subtract(radau["T"], bdf["T"]))) < 1e-5
+
+
+def test_the_study_probes_a_latent_ode_like_its_own_models(tmp_path):
+    schedules = anchor.cases(CSTR, "confirmation")
+    time = np.round(np.arange(0.0, 30.05, 0.1), 10)
+    refs = {k: _reference(item, time) for k, item in schedules.items()}
+    row = _latent_row(np.random.default_rng(1))
+    with scoring.baseline_predictions():
+        result = anchor.evaluate_one(
+            (tmp_path, 0, row, schedules, refs, "plan", {"T": 1.0})
+        )
+    targets = [r for r in result["scores"] if r["readout"] == "target"]
+    assert {r["status"] for r in targets} <= {"complete", "negligible_reference_effect"}
+    probes = {r["status"] for r in result["scores"] if r["readout"] == "oracle_affine"}
+    assert "calibration_unavailable" not in probes
