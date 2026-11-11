@@ -128,7 +128,7 @@ def suite_schedules(cell: str, suite: dict) -> dict:
 
     def protocol(name, specification):
         return base | {
-            "protocol_id": "probe_" + name,
+            "protocol_id": "test_probe_" + name,
             "split": "test",
             "specification": specification,
         }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from autoformalism.benchmarks.phase_b_generation import PhaseBProtocol
 from autoformalism.data import Trajectory
 from autoformalism.expressions import ValidationContext, compile_candidate
 from autoformalism.expressions.diagnostics import ModelValidationError
@@ -226,6 +227,7 @@ def test_the_probe_suite_copies_the_study_base_and_calibration():
     for item in table.values():
         if item["role"] == "train_calibration":
             continue
+        PhaseBProtocol.model_validate(item["protocol"])
         changed = {k for k in base if item["protocol"][k] != base[k]}
         assert changed <= {"protocol_id", "split", "specification"}
         if item["role"] == "contrast":
