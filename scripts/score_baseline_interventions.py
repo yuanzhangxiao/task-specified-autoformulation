@@ -247,16 +247,25 @@ def freeze(
 
 
 def _recorded_validation(row: dict):
-    """The validation error a run sealed for its pick, where it recorded one."""
+    """The free-rollout validation error a run sealed for its pick.
+
+    SINDy and PySR record ``validation_normalized_mse``; LLM-ODE and LLM-SR
+    ``development_rollout_error``; D3 its recursive ``phase_b_rollout`` beside
+    the one-step loss it selects on.
+    """
     for source in row["sources"]:
         path = Path(source["path"])
         if path.name != "result.json":
             continue
-        record = json.loads(path.read_text())
-        value = record.get("value", record)
-        for key in ("validation_normalized_mse", "validation_nmse"):
-            if isinstance(value.get(key), int | float):
-                return key, float(value[key])
+        value = json.loads(path.read_text())
+        rollout = value.get("evaluation", {}).get("phase_b_rollout", {})
+        for key, found in (
+            ("validation_normalized_mse", value.get("validation_normalized_mse")),
+            ("development_rollout_error", value.get("development_rollout_error")),
+            ("evaluation.phase_b_rollout", rollout.get("normalized_mse")),
+        ):
+            if isinstance(found, int | float):
+                return key, float(found)
     return None, None
 
 
@@ -297,6 +306,9 @@ def rehearse(root: Path, release: Path) -> dict:
                 "validation_nmse_training_variance": nmse,
                 "recorded_key": key,
                 "recorded": recorded,
+                "relative_difference": abs(nmse - recorded) / abs(recorded)
+                if recorded and np.isfinite(nmse)
+                else None,
             }
         )
     return sealed_write(
