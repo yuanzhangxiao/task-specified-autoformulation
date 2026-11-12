@@ -39,6 +39,10 @@ from autoformalism.expressions import (
     baseline_validator,
     compile_candidate,
 )
+from autoformalism.expressions.diagnostics import (
+    ModelValidationError,
+    RuntimeExpressionError,
+)
 from autoformalism.expressions.parser import grammar_parser
 from autoformalism.fitting import FitConfig, simulate_trajectory
 from autoformalism.fitting.simulation import trajectory_forcing
@@ -239,7 +243,17 @@ def view_of(row: dict) -> dict | None:
 
 def curves(view: dict, assignment: dict, tr) -> dict:
     """The model's temperature, terms and declared states along one trajectory."""
-    candidate = CandidateModel.model_validate(view["candidate"])
+    payload = view["candidate"]
+    if view["semantics"] == "native_increment":
+        # D3's one-step map uses its fitted values as they are: declared
+        # parameter ranges are audited, never imposed, so its terms are too.
+        payload = {
+            **payload,
+            "parameters": [
+                {**p, "domain": "real", "bounds": None} for p in payload["parameters"]
+            ],
+        }
+    candidate = CandidateModel.model_validate(payload)
     context = ValidationContext.model_validate(view["context"])
     baseline = view["grammar"] == "baseline"
     compiled = compile_candidate(
@@ -397,7 +411,13 @@ def score_stage(root: Path, out: Path) -> dict:
         for case, record in refs.items():
             try:
                 model[case] = curves(view, entry, anchor.trajectory(cell, record))
-            except (ValueError, ArithmeticError, TimeoutError) as exc:
+            except (
+                ValueError,
+                ArithmeticError,
+                TimeoutError,
+                RuntimeExpressionError,
+                ModelValidationError,
+            ) as exc:
                 failed = failed or {}
                 failed[case] = str(exc)[:300]
         for quantity in (*MECHANISMS, *STATES):
