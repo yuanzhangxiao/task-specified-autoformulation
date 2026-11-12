@@ -1,0 +1,28 @@
+{
+  "schema": "declared-mechanism-readout-1",
+  "status": "frozen_before_scoring",
+  "cell": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1",
+  "purpose": "Score the mechanisms each frozen model discovered, not only its temperature: the two unobserved states (reactant concentration C and jacket temperature Tj) and the three terms of the temperature balance the task specification requires (feed transport, reaction heat, jacket heat exchange), under the interventions that require extrapolation (cstr-extrapolation-1). Each model's own equation decides which of its quantities is which mechanism, by the fixed rule below, applied mechanically to every model with an explicit temperature equation. Agreed with the user on 2026-11-11 and frozen before any mechanism score was computed; every model was frozen beforehand.",
+  "truth": {
+    "C": "the simulator's reactant concentration state",
+    "Tj": "the simulator's jacket temperature state",
+    "feed_transport": "Tf - T, the feed-transport term of the simulator's temperature balance (stated by the user, 2026-11-11)",
+    "reaction_heat": "the simulator's reaction-heat term, as the study's reference function computes it",
+    "jacket_heat": "the simulator's jacket-exchange term, as the study's reference function computes it"
+  },
+  "term_rule": [
+    "Split the model's temperature right-hand side into additive terms: sums and differences are split; a factor or divisor common to a sum (for example a heat capacity) is distributed over the sum's terms when those terms belong to different mechanisms, so a difference such as (Tf - T) inside a term stays whole; named processes are kept as written.",
+    "Classify a latent state by the inputs in its own equation: Tjf makes it jacket-like, otherwise Tf feed-temperature-like, otherwise Cf concentration-like; a latent state whose equation has none of these is unclassified.",
+    "Assign each term, after inlining its processes, by precedence: it contains Tjf or a jacket-like state -> jacket heat; otherwise Tf or a feed-temperature-like state -> feed transport; otherwise Cf, a concentration-like state, or a process whose name contains 'react' or 'rxn' -> reaction heat; otherwise unattributed (for example ambient losses and constant offsets).",
+    "A mechanism's model value is the sum of its terms: the model's contribution to dT/dt in K per time unit, the same units as the simulator's term. A one-step map's increment is divided by its sample interval. Terms plus the unattributed remainder must equal the model's full right-hand side at every point."
+  ],
+  "state_rule": "The model's concentration-like latent state stands for C and its jacket-like latent state for Tj; if a model has several of one kind, the first declared is used. A model without such a state does not represent that quantity.",
+  "readouts": {
+    "terms": "compared directly with the simulator's term, without any transformation (primary); an affine map with a nonnegative scale fitted on the study's four training calibration runs is reported as a sensitivity",
+    "states": "an affine map with a nonnegative scale fitted on the study's four training calibration runs (a model's own units differ from the simulator's), then applied unchanged to the interventions"
+  },
+  "calibration": ["train_zero", "train_cf_plus_step", "train_tjf_pulse", "train_tf_minus_step"],
+  "metrics": "The study's own response metrics (scripts/iclr_anchor_fidelity.py scores): response RSE and direction of each quantity's response to each intervention against its matched basal control, on the windows of cstr-extrapolation-1.",
+  "not_represented": "A model with no term for a mechanism, or no state for C or Tj, is reported as not representing it; a model without an explicit equation (the latent neural ODE) has no declared terms.",
+  "test_data_opened": false
+}
