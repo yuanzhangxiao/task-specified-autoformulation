@@ -8,7 +8,9 @@ its confirmation schedules, its reference responses (DOP853, checked against
 Radau), its public input trajectories, its per-subject checkpoints and its
 metrics (``evaluate_one``). Only the prediction differs: a baseline's model is
 read with the external-baseline grammar it was selected under, and D3's model
-is its native one-step map on the sample grid.
+is its native one-step map on the sample grid. HDTwinGen's is the same kind of
+map with the networks it trained, and specification-informed SINDy's its
+equations with its designed features written inline.
 
 A baseline has no latent coordinate, so only its target rows can be complete;
 its hidden-process rows are recorded unavailable, as for any such model.
@@ -40,7 +42,10 @@ from time import monotonic
 import numpy as np
 
 from autoformalism.baselines import latent_ode
+from autoformalism.baselines.d3_rollout import NativeMap
 from autoformalism.baselines.d3_rollout import predict as native_rollout
+from autoformalism.baselines.hybrid_networks import NetworkSpec
+from autoformalism.baselines.models import BaselineDevelopmentResult
 from autoformalism.benchmarks.phase_c_protocols import phase_c_protocols
 from autoformalism.benchmarks.phase_c_release import SPEC_PATHS, load_public_cell
 from autoformalism.expressions import (
@@ -52,10 +57,13 @@ from autoformalism.fitting import FitConfig, simulate_trajectory
 from autoformalism.fitting import public_fitting as public
 from autoformalism.rebuttal import llm_sr_transcriptions as transcriptions
 from autoformalism.rebuttal import phase_c_baseline_mechanisms as mechanisms
+from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
+from autoformalism.rebuttal.llm_sr_programs import observation_step
 from autoformalism.rebuttal.mechanism_probes import _native
-from autoformalism.rebuttal.phase_c_baselines import tier_of, verify_release
+from autoformalism.rebuttal.phase_c_baselines import load_cell, tier_of, verify_release
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.schemas import CandidateModel
+from autoformalism.schemas.public_fitting import PublicSplit
 from scripts import evaluate_t2_latent_dynamics as probe
 from scripts import iclr_anchor_fidelity as anchor
 
@@ -68,7 +76,16 @@ CONTEXT_FIELDS = ("targets", "auxiliaries", "external_inputs", "fixed_covariates
 #: The latent neural ODE (``baselines.latent_ode``), which runs outside the
 #: vendored campaigns and is sealed by ``scripts/run_latent_ode_baseline.py``.
 LATENT_ODE = "latent_ode"
-METHODS = (*mechanisms.METHODS, LATENT_ODE)
+#: Runs of the nine-case runners on a Phase C cell, by their plan's protocol:
+#: HDTwinGen's hybrid one-step map (``scripts/phase_b_nine_case_d3.py``) and
+#: specification-informed SINDy (``scripts/phase_b_nine_case_spec_sindy.py``).
+NINE_CASE = {
+    "hdtwingen": "phase-b-nine-case-d3-family-1",
+    "spec_sindy": "phase-b-nine-case-spec-sindy-1",
+}
+#: Outcomes of the service, not the method: such a task is rerun, not assessed.
+SERVICE_STATUSES = frozenset({"endpoint_unavailable", "infrastructure_failure"})
+METHODS = (*mechanisms.METHODS, LATENT_ODE, *NINE_CASE)
 #: The study's stress aliases, for rescoring its own models.
 ALIASES = anchor.ALIASES
 
@@ -224,6 +241,97 @@ def latent_ode_rows(root: Path) -> list[dict]:
     return rows
 
 
+def nine_case_rows(method: str, root: Path, release: Path, cells: dict) -> list[dict]:
+    """A nine-case run's pick per Phase C cell and seed, failures included.
+
+    The run must have read exactly the release's public files of each cell.
+    """
+    plan = sealed_read(root / "plan.json")
+    if (
+        plan["protocol"] != NINE_CASE[method]
+        or plan.get("method", "spec_sindy") != method
+        or plan.get("test_data_opened") is not False
+    ):
+        raise ValueError(f"{root} is not a sealed {method} run")
+    rows = []
+    for source in plan["rows"]:
+        index, name = int(source["index"]), source["benchmark_id"]
+        if name not in cells:
+            raise ValueError(f"{method} task {index} is off the roster")
+        if source["public_identity"] != load_cell(release, name).identity:
+            raise ValueError(f"{method} task {index} read other public files")
+        row = {
+            **mechanisms._row(method, name, source["tier"], int(source["repetition"])),
+            "task": index,
+        }
+        path = root / "results" / str(index) / "result.json"
+        if not path.is_file():
+            raise ValueError(f"{row['row_id']} has no outcome; finish it first")
+        result = sealed_read(path)
+        if (result["plan_sha256"], int(result["index"])) != (
+            plan["artifact_sha256"],
+            index,
+        ):
+            raise ValueError(f"{path} belongs to another plan or task")
+        if result.get("test_data_opened") is not False:
+            raise ValueError(f"{path} records opened test data")
+        sources = [mechanisms._file(root / "plan.json"), mechanisms._file(path)]
+        if result["status"] in SERVICE_STATUSES:
+            raise ValueError(
+                f"{row['row_id']} ended {result['status']}: an infrastructure "
+                "failure is rerun, not assessed"
+            )
+        if result["status"] != "complete":
+            rows.append(
+                mechanisms._failure(row, sources, result["status"], result.get("error"))
+            )
+            continue
+        context = mechanisms._context(cells[name])
+        if method == "spec_sindy":
+            candidate = equation_candidate(
+                "llm_feature_sindy", result["equations"], context
+            )
+            model = mechanisms._model(candidate, {}, context, "continuous_time")
+        else:
+            selection_path = path.with_name("native-selection.json")
+            sealed = sealed_read(selection_path)
+            if sealed["plan_sha256"] != plan["artifact_sha256"]:
+                raise ValueError(f"{selection_path} names another plan")
+            sources.append(mechanisms._file(selection_path))
+            payload = BaselineDevelopmentResult.model_validate(
+                sealed["selection"]
+            ).selection_payload
+            training = public.unpack_split(
+                PublicSplit.model_validate(cells[name]["training"])
+            )
+            model = mechanisms._model(
+                CandidateModel.model_validate(payload["candidate"]),
+                payload["parameters"],
+                context,
+                "native_increment",
+                increment_step=observation_step(training),
+                networks=list(payload.get("networks") or ()),
+                network_weights=payload.get("network_weights"),
+            )
+        rows.append(mechanisms._ready(row, sources, model))
+    return rows
+
+
+def _map(model: dict) -> NativeMap:
+    """D3's map as the probes restore it; HDTwinGen's with its trained networks."""
+    if not model.get("networks"):
+        return _native(model)
+    context = ValidationContext.model_validate(model["context"])
+    return NativeMap.build(
+        CandidateModel.model_validate(model["candidate"]),
+        model["parameters"],
+        (*context.targets, *context.auxiliaries),
+        (*context.external_inputs, *context.fixed_covariates),
+        networks=tuple(NetworkSpec.model_validate(n) for n in model["networks"]),
+        network_weights=model["network_weights"],
+    )
+
+
 def predict(row: dict, tr, solver: str) -> dict:
     """A baseline's free rollout of the study's public input trajectory."""
     model = row["model"]
@@ -261,7 +369,7 @@ def predict(row: dict, tr, solver: str) -> dict:
             1.0, model["increment_step"]
         ):
             raise ValueError("the schedule's grid is not the map's sample interval")
-        native = _native(model)
+        native = _map(model)
         states = native_rollout(native, tr, teacher_forced=False, seconds=SECONDS)
         return {t: states[:, native.states.index(t)].tolist() for t in context.targets}
     if model["semantics"] != "continuous_time" or model.get("grammar") != "baseline":
@@ -338,6 +446,8 @@ def freeze(
         elif method in ("sindy", "pysr"):
             found = mechanisms.classical_rows(path, public_by_name)
             rows += [r for r in found if r["method"] == method]
+        elif method in NINE_CASE:
+            rows += nine_case_rows(method, path, release, public_by_name)
         else:
             rows += mechanisms.campaign_rows(method, path, public_by_name, reviewed)
     rows = [r for r in rows if r["benchmark_id"] in cells]
@@ -347,7 +457,7 @@ def freeze(
         if s["status"] == "ready" and s["model"]["semantics"] == "latent_neural_ode":
             latent_ode.LatentODE(s["model"])
         elif s["status"] == "ready" and s["model"]["semantics"] == "native_increment":
-            _native(s["model"])
+            _map(s["model"])
         elif s["status"] == "ready":
             compile_candidate(
                 CandidateModel.model_validate(s["model"]["candidate"]),
@@ -414,8 +524,10 @@ def _recorded_validation(row: dict):
     """The free-rollout validation error a run sealed for its pick.
 
     SINDy and PySR record ``validation_normalized_mse``; LLM-ODE and LLM-SR
-    ``development_rollout_error``; D3 its recursive ``phase_b_rollout`` beside
-    the one-step loss it selects on; the latent ODE the error it was selected on.
+    ``development_rollout_error``; D3 and HDTwinGen their recursive
+    ``phase_b_rollout`` beside the one-step loss they select on; specification-
+    informed SINDy ``validation_normalized_mse``; the latent ODE the error it was
+    selected on.
     """
     if row.get("recorded"):
         key, value = row["recorded"]

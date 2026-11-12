@@ -149,6 +149,139 @@ def test_freeze_refuses_unknown_methods_and_cells(tmp_path):
         scoring.freeze(tmp_path, tmp_path, {"d3": tmp_path}, ["phase_c_other"])
 
 
+#: A trained network that HDTwinGen's map reads as ``r``.
+NETWORK = {
+    "name": "r",
+    "inputs": ["T", "Cf"],
+    "hidden_layers": 1,
+    "hidden_width": 4,
+    "activation": "tanh",
+}
+
+
+def _hybrid(bias):
+    """HDTwinGen's map with zero weights, so ``r`` is its last bias everywhere."""
+    weights = [
+        {"weight": np.zeros(shape).tolist(), "bias": np.zeros(shape[0]).tolist()}
+        for shape in ((4, 2), (1, 4))
+    ]
+    weights[-1]["bias"] = [bias]
+    row = _row(
+        "native_increment",
+        increment_step=0.1,
+        networks=[NETWORK],
+        network_weights={"r": weights},
+    )
+    candidate = equation_candidate(
+        "hdtwingen", {"T": "-0.8*(T - 350) + 6*Tjf + r"}, CONTEXT
+    )
+    row["model"]["candidate"] = candidate.model_dump(mode="json")
+    return row
+
+
+def test_a_hybrid_map_evaluates_its_trained_networks():
+    time = np.linspace(0.0, 2.0, 21)
+    hybrid = scoring.predict(_hybrid(2.0), _trajectory(time), "Radau")
+    plain = _row("native_increment", increment_step=0.1)
+    plain["model"]["candidate"] = equation_candidate(
+        "d3", {"T": "-0.8*(T - 350) + 6*Tjf + 2.0"}, CONTEXT
+    ).model_dump(mode="json")
+    expected = scoring.predict(plain, _trajectory(time), "Radau")
+    assert np.allclose(hybrid["T"], expected["T"], rtol=0.0, atol=1e-12)
+    assert hybrid["T"][-1] > 350.0
+    broken = _hybrid(2.0)
+    broken["model"]["network_weights"] = {}
+    with pytest.raises(ValueError, match="exactly the declared"):
+        scoring.predict(broken, _trajectory(time), "Radau")
+
+
+def _nine_case_run(root, results, method="spec_sindy"):
+    """A sealed nine-case run on the reactor cell, one task per result."""
+    from autoformalism.rebuttal.prefit_replay import sealed_write
+
+    identity = {"benchmark_id": CSTR, "train": "public"}
+    plan = sealed_write(
+        root / "plan.json",
+        {
+            "protocol": scoring.NINE_CASE[method],
+            **({} if method == "spec_sindy" else {"method": method}),
+            "rows": [
+                {
+                    "index": index,
+                    "benchmark_id": CSTR,
+                    "repetition": index,
+                    "tier": "hard",
+                    "public_identity": identity,
+                }
+                for index in range(len(results))
+            ],
+            "test_data_opened": False,
+        },
+    )
+    for index, result in enumerate(results):
+        folder = root / "results" / str(index)
+        folder.mkdir(parents=True)
+        sealed_write(
+            folder / "result.json",
+            {
+                "plan_sha256": plan["artifact_sha256"],
+                "index": index,
+                "test_data_opened": False,
+                **result,
+            },
+        )
+    return identity
+
+
+def _public(monkeypatch, identity):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        scoring, "load_cell", lambda release, name: SimpleNamespace(identity=identity)
+    )
+    return {CSTR: {"context": CONTEXT.model_dump(mode="json")}}
+
+
+def test_a_nine_case_run_is_read_with_its_failures(tmp_path, monkeypatch):
+    identity = _nine_case_run(
+        tmp_path,
+        [
+            {"status": "complete", "equations": {"T": "-0.8*(T - 350) + tanh(Cf)"}},
+            {"status": "rollout_failed", "error": "diverged"},
+        ],
+    )
+    cells = _public(monkeypatch, identity)
+    ready, failed = scoring.nine_case_rows("spec_sindy", tmp_path, tmp_path, cells)
+    assert (ready["status"], ready["model"]["semantics"]) == (
+        "ready",
+        "continuous_time",
+    )
+    time = np.linspace(0.0, 1.0, 11)
+    curves = scoring.predict(
+        {**_row(), "model": ready["model"]}, _trajectory(time), "Radau"
+    )
+    assert np.allclose(curves["T"], 350.0)
+    assert (failed["status"], failed["failure"]) == ("method_failure", "rollout_failed")
+
+
+def test_a_nine_case_pick_must_come_from_the_public_files(tmp_path, monkeypatch):
+    _nine_case_run(tmp_path, [{"status": "complete", "equations": {"T": "-T"}}])
+    cells = _public(monkeypatch, {"benchmark_id": CSTR, "train": "other"})
+    with pytest.raises(ValueError, match="other public files"):
+        scoring.nine_case_rows("spec_sindy", tmp_path, tmp_path, cells)
+
+
+def test_an_outage_is_rerun_and_another_method_refused(tmp_path, monkeypatch):
+    identity = _nine_case_run(
+        tmp_path, [{"status": "endpoint_unavailable"}], method="hdtwingen"
+    )
+    cells = _public(monkeypatch, identity)
+    with pytest.raises(ValueError, match="rerun"):
+        scoring.nine_case_rows("hdtwingen", tmp_path, tmp_path, cells)
+    with pytest.raises(ValueError, match="not a sealed spec_sindy run"):
+        scoring.nine_case_rows("spec_sindy", tmp_path, tmp_path, cells)
+
+
 def _latent_row(rng):
     """A small random latent ODE for the reactor cell: T plus two latents."""
 
