@@ -62,20 +62,21 @@ unset AF_JETSTREAM_API_KEY
 cd "$root"
 shopt -s nullglob
 ids=(submissions/*/array.id)
-cost=()
+files=(plan.json spec_variants.json ablation_switch_manifest.json critic_authorization.json
+    frozen_models.json evaluation_freeze.json paired_ablation_results.csv paired_proposer_validation.csv
+    search_visits.csv endpoint-audit runtime/service-*.json)
 if (( ${#ids[@]} )); then
+    files+=("${ids[@]}")
     job_ids=$(cat "${ids[@]}" | sort -u | paste -sd, -)
     if sacct --array -j "$job_ids" -P --format=JobID%45,ElapsedRaw,TotalCPU,AllocCPUS,AllocTRES%120,State >sacct.psv &&
         "$AF_PYTHON" -m scripts.iclr_stress_resources --plan plan.json --sacct sacct.psv --output scheduler-cost.csv; then
-        cost=(scheduler-cost.csv sacct.psv)
+        files+=(scheduler-cost.csv sacct.psv)
     else
         echo "Slurm accounting unavailable; run finish again to include GPU costs." >&2
     fi
 fi
 archive=$(mktemp "$root/.inspection.XXXXXXXX")
 trap 'rm -f -- "$archive"' EXIT
-tar -czf "$archive" plan.json spec_variants.json ablation_switch_manifest.json critic_authorization.json \
-    frozen_models.json evaluation_freeze.json paired_ablation_results.csv paired_proposer_validation.csv \
-    search_visits.csv endpoint-audit runtime/service-*.json "${ids[@]}" "${cost[@]}" -C "$full_code" SOURCE_COMMIT
+tar -czf "$archive" "${files[@]}" -C "$full_code" SOURCE_COMMIT
 mv "$archive" "$root/inspection.tar.gz"
 printf 'Inspection package: %s/inspection.tar.gz\n' "$root"

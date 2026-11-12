@@ -19,6 +19,56 @@ def copy_launcher(tmp_path: Path, name: str) -> Path:
     return path
 
 
+@pytest.mark.parametrize("confirmed_job", [False, True])
+def test_full_120b_finish_packages_results_without_accounting(tmp_path, confirmed_job):
+    """Scheduler accounting may lag or a submitted wave may lack its ID file."""
+    code = tmp_path / "code"
+    launch = copy_launcher(code, "iclr_full_120b_aces.sh")
+    (code / "SOURCE_COMMIT").write_text("fixture")
+    group = tmp_path / "group"
+    root = group / "iclr-anchors-full-120b-v1"
+    (root / "endpoint-audit").mkdir(parents=True)
+    for name in (
+        "plan.json",
+        "spec_variants.json",
+        "ablation_switch_manifest.json",
+        "critic_authorization.json",
+        "frozen_models.json",
+        "evaluation_freeze.json",
+        "paired_ablation_results.csv",
+        "paired_proposer_validation.csv",
+        "search_visits.csv",
+    ):
+        (root / name).write_text("fixture")
+    if confirmed_job:
+        directory = root / "submissions/wave1"
+        directory.mkdir(parents=True)
+        (directory / "array.id").write_text("12345\n")
+    for cmd, status in (("module", 0), ("fixture-python", 0), ("sacct", 1)):
+        script = tmp_path / cmd
+        script.write_text(f"#!/bin/sh\nexit {status}\n")
+        script.chmod(0o755)
+    subprocess.run(
+        ["bash", str(launch), "finish"],
+        env={
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "AF_GROUP": str(group),
+            "AF_PYTHON": str(tmp_path / "fixture-python"),
+        },
+        check=True,
+        capture_output=True,
+    )
+    with tarfile.open(root / "inspection.tar.gz") as archive:
+        paths = set(archive.getnames())
+    assert {
+        "SOURCE_COMMIT",
+        "paired_proposer_validation.csv",
+        "endpoint-audit",
+    } <= paths
+    assert ("submissions/wave1/array.id" in paths) == confirmed_job
+    assert "scheduler-cost.csv" not in paths
+
+
 @pytest.mark.parametrize("override", [None, "custom-gate"])
 def test_gate_defaults_to_known_cases_and_preserves_overrides(tmp_path, override):
     launcher = copy_launcher(tmp_path, "iclr_aces.sh")
