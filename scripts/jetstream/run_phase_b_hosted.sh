@@ -11,7 +11,8 @@
 #
 # The staged nine-case inputs must be at ~/af/release/phase-b-nine-case-v1; a
 # plan that reads the Phase C release (inputs_protocol phase-c-development-2)
-# reads it at ~/af/release/phase-c-public-v2.
+# reads it at ~/af/release/phase-c-public-v2, and one that reads the T2 noise
+# release (t2-noise-public-1) at ~/af/release/t2-noise-fit.
 # Rerunning is safe: a finished task is not repeated and a running one is
 # refused by its lock. A task an outage stopped (exit status 3) resumes where
 # it stopped. When every task has ended, the report is NAME/report.json.
@@ -73,6 +74,7 @@ print(json.load(open(sys.argv[1]))["inputs_protocol"])' "${config}")"
 case "${protocol}" in
   phase-b-nine-case-inputs-1) inputs="${AF_HOME}/release/phase-b-nine-case-v1" receipt=receipt.json ;;
   phase-c-development-2) inputs="${AF_HOME}/release/phase-c-public-v2" receipt=summary.json ;;
+  t2-noise-public-1) inputs="${AF_HOME}/release/t2-noise-fit" receipt=release.json ;;
   *) echo "${config} reads unknown inputs: ${protocol}" >&2; exit 2 ;;
 esac
 [[ -f "${inputs}/${receipt}" ]] || {

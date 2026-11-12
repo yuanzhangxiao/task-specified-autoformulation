@@ -29,6 +29,7 @@ from autoformalism.rebuttal.phase_c_baseline_plan import (
     freeze_phase_c_baseline_plan,
     load_phase_c_baseline_plan,
 )
+from autoformalism.rebuttal.phase_c_baselines import release_receipt
 
 PLATFORM = "jetstream2_cpu"
 OUTCOMES = frozenset({"complete", "failed", "timed_out"})
@@ -161,7 +162,7 @@ def run(
     root, release = root.resolve(), release.resolve()
     task = load_task(root, index)
     plan = load_phase_c_baseline_plan(_verified(root / "frozen" / "plan.json"))
-    if _sha256(release / "summary.json") != plan.release_summary_sha256:
+    if release_receipt(release, plan.release_protocol) != plan.release_summary_sha256:
         raise ValueError("the release receipt differs from the frozen plan")
     ended = outcome(run_directory(root, task))
     if ended is not None:

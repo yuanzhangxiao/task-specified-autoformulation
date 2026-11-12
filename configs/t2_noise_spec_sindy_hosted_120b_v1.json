@@ -1,0 +1,41 @@
+{
+  "schema_version": "phase-b-nine-case-spec-sindy-plan-1",
+  "status": "frozen_before_calls",
+  "purpose": "SINDy with up to eight library features designed by the hosted gpt-oss-120b from the cell's public prompt, on the four acquisitions of the T2-hard measurement-noise study with seeds 0, 1 and 2 (one design request each), development data only, each acquisition read from the noise study's release as Phase C D3 reads a cell. Every other setting is the frozen plan's (phase_b_nine_case_spec_sindy_hosted_120b_v1): the compared SINDy's library, thresholds, validation-rollout selection and 1,800 s limit. 12 requests. The user approved running the external baselines on these acquisitions with these seeds on 2026-11-12 (HST). The four acquisitions are the T2-hard cell's sixteen training and four validation trajectories with measurement noise of 0, 1, 5 and 10% of each target's clean training SD; each is fitted only from its own public files, every setting is the same at every noise level, and the noisy observations are used as delivered, with the frozen plan's derivative rule and no smoothing (decided with the user on 2026-11-12 (HST)).",
+  "development_only": true,
+  "inputs_protocol": "t2-noise-public-1",
+  "release_summary_sha256": "30c50333df09ad24e0454086a96d821e7375d48564e8c1f2325086509b61ee29",
+  "endpoint": "jetstream2_hosted",
+  "model": "gpt-oss-120b",
+  "cells": [
+    {
+      "benchmark_id": "acquisition_00",
+      "tier": "hard",
+      "public_prompt_sha256": "c77385e3a04b7a3d86c2bde92eee93f057aaf28f3b7ff4b02f73c378993aea3b"
+    },
+    {
+      "benchmark_id": "acquisition_01",
+      "tier": "hard",
+      "public_prompt_sha256": "c77385e3a04b7a3d86c2bde92eee93f057aaf28f3b7ff4b02f73c378993aea3b"
+    },
+    {
+      "benchmark_id": "acquisition_02",
+      "tier": "hard",
+      "public_prompt_sha256": "c77385e3a04b7a3d86c2bde92eee93f057aaf28f3b7ff4b02f73c378993aea3b"
+    },
+    {
+      "benchmark_id": "acquisition_03",
+      "tier": "hard",
+      "public_prompt_sha256": "c77385e3a04b7a3d86c2bde92eee93f057aaf28f3b7ff4b02f73c378993aea3b"
+    }
+  ],
+  "repetitions": [
+    0,
+    1,
+    2
+  ],
+  "feature_count": 8,
+  "wall_timeout_seconds": 1800.0,
+  "test_data_opened": false,
+  "private_reference_opened": false
+}

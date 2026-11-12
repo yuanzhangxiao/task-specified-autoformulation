@@ -1,0 +1,40 @@
+{
+  "schema": "latent-ode-frozen-plan-1",
+  "status": "frozen_before_training",
+  "purpose": "A conventional latent-state model with no task specification, as in the intervention study's frozen plan (latent_ode_intervention_v1), with its settings unchanged, on the four acquisitions of the T2-hard measurement-noise study with seeds 0, 1 and 2. Public training trajectories fit it; public validation trajectories stop training early and choose the latent dimension. The four acquisitions are the T2-hard cell's sixteen training and four validation trajectories with measurement noise of 0, 1, 5 and 10% of each target's clean training SD; each is fitted only from its own public files, every setting is the same at every noise level, and the noisy observations are used as delivered, with the frozen plan's derivative rule and no smoothing (decided with the user on 2026-11-12 (HST)).",
+  "release_protocol": "t2-noise-public-1",
+  "release_summary_sha256": "30c50333df09ad24e0454086a96d821e7375d48564e8c1f2325086509b61ee29",
+  "cells": [
+    "acquisition_00",
+    "acquisition_01",
+    "acquisition_02",
+    "acquisition_03"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "settings": {
+    "latent_dimensions": [
+      2,
+      4,
+      8
+    ],
+    "width": 64,
+    "depth": 2,
+    "encoder_width": 32,
+    "final_layer_scale": 0.1,
+    "learning_rate": 0.001,
+    "iterations": 2000,
+    "evaluate_every": 25,
+    "gradient_clip": 1.0,
+    "rk4_substeps": 2,
+    "horizon_fraction_for_tau": 0.1,
+    "replay_rtol": 1e-08,
+    "replay_atol": 1e-10,
+    "replay_seconds": 45.0
+  },
+  "test_data_opened": false,
+  "private_reference_opened": false
+}

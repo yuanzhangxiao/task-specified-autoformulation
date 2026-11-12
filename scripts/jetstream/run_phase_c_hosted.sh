@@ -26,8 +26,18 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly repo
 readonly self="${repo}/scripts/jetstream/run_phase_c_hosted.sh"
 readonly py="${AF_HOME}/venv/bin/python"
-readonly release="${AF_HOME}/release/phase-c-public-v2"
 readonly hosted="https://llm.jetstream-cloud.org/gpt-oss-120b"
+
+release_of() {  # plan: the published release it reads
+  local protocol
+  protocol="$("${py}" -c 'import json, sys
+print(json.load(open(sys.argv[1]))["release_protocol"])' "$1")"
+  case "${protocol}" in
+    phase-c-development-2) echo "${AF_HOME}/release/phase-c-public-v2" ;;
+    t2-noise-public-1) echo "${AF_HOME}/release/t2-noise-fit" ;;
+    *) echo "$1 reads an unknown release: ${protocol}" >&2; return 2 ;;
+  esac
+}
 
 usage() {
   sed -n '2,10p' "${self}" >&2
@@ -99,6 +109,7 @@ curl -sf --max-time 30 -o /dev/null "${hosted}/v1/models" || {
   exit 2
 }
 
+release="$(release_of "${config}")"
 mkdir -p "${root}/logs"
 "${py}" "scripts/phase_c_${method}.py" prepare \
   --config "${config}" --release "${release}" --root "${root}" >"${root}/prepare.json"

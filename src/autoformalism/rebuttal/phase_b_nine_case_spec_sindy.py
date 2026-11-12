@@ -104,7 +104,9 @@ class SpecSindyPlan(BaseModel):
     schema_version: Literal["phase-b-nine-case-spec-sindy-plan-1"]
     status: Literal["proposed_pending_review", "frozen_before_calls"]
     development_only: Literal[True]
-    inputs_protocol: Literal["phase-b-nine-case-inputs-1", "phase-c-development-2"]
+    inputs_protocol: Literal[
+        "phase-b-nine-case-inputs-1", "phase-c-development-2", "t2-noise-public-1"
+    ]
     #: Required, and only allowed, when the plan reads the Phase C release.
     release_summary_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     purpose: str = Field(min_length=1)
@@ -136,7 +138,7 @@ class SpecSindyPlan(BaseModel):
                 cell.tier,
                 cell.public_prompt_sha256,
             )
-        if (self.inputs_protocol == nine.PHASE_C) != (
+        if (self.inputs_protocol in nine.RELEASES) != (
             self.release_summary_sha256 is not None
         ):
             raise ValueError("a Phase C plan, and only one, names its release")
@@ -189,7 +191,7 @@ def prepare(config_path: Path, inputs_root: Path, root: Path) -> dict:
     receipt = nine.verify_inputs(
         protocol, inputs_root, [cell.benchmark_id for cell in plan.cells]
     )
-    if protocol == nine.PHASE_C and receipt != plan.release_summary_sha256:
+    if protocol in nine.RELEASES and receipt != plan.release_summary_sha256:
         raise ValueError("the release differs from the plan's")
     rows: list[dict] = []
     for cell in plan.cells:

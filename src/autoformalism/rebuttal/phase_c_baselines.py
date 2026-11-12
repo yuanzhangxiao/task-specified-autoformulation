@@ -8,11 +8,16 @@ that the registry path produces, so every baseline method runs unchanged.
 Only files listed in the release receipt under ``public/<cell>`` are opened;
 evaluator diagnostics are never traversed. The roster is the one the Phase C
 construction baseline uses, so baselines and construction see the same cells.
+
+The T2-hard measurement-noise study publishes its four acquisitions in a
+release of their own, identified by ``release.json``; such a cell is read with
+the same rules, from that release only.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -41,8 +46,15 @@ PUBLIC_FILES = ("specification.json", "proposer_prompt.txt", "train.json", "val.
 INTERVENTION_CELLS = frozenset(
     {"phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1"}
 )
+#: The release of the T2-hard measurement-noise study.
+NOISE_PROTOCOL = "t2-noise-public-1"
+#: Its four acquisitions: the T2-hard cell's sixteen training and four
+#: validation trajectories with 0, 1, 5 and 10% measurement noise.
+NOISE_CELLS = frozenset(f"acquisition_{index:02d}" for index in range(4))
 #: Every cell a Phase C baseline plan may name.
-BASELINE_CELLS = frozenset(ROSTER) | INTERVENTION_CELLS
+BASELINE_CELLS = frozenset(ROSTER) | INTERVENTION_CELLS | NOISE_CELLS
+#: The releases a plan may read.
+RELEASE_PROTOCOLS = frozenset({PROTOCOL, NOISE_PROTOCOL})
 
 
 @dataclass(frozen=True)
@@ -72,12 +84,65 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def release_protocol(cells: Iterable[str]) -> str:
+    """The release a set of cells is read from; one plan never mixes two."""
+    names = set(cells)
+    noisy = names & NOISE_CELLS
+    if noisy and noisy != names:
+        raise ValueError(
+            "noise acquisitions and Phase C cells are in different releases"
+        )
+    return NOISE_PROTOCOL if noisy else PROTOCOL
+
+
+def release_receipt(release: Path, protocol: str) -> str:
+    """The digest of the receipt file that identifies a release."""
+    if protocol not in RELEASE_PROTOCOLS:
+        raise ValueError(f"unknown release protocol {protocol!r}")
+    name = "release.json" if protocol == NOISE_PROTOCOL else "summary.json"
+    return _sha256(release / name)
+
+
+def _canonical(value: object) -> bytes:
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode()
+
+
+def _verify_noise_release(release: Path, cells: tuple[str, ...]) -> str:
+    """Check the noise study's content-addressed record and each listed file."""
+    record = json.loads((release / "release.json").read_bytes())
+    if (
+        set(record) != {"sha256", "value"}
+        or hashlib.sha256(_canonical(record["value"])).hexdigest() != record["sha256"]
+    ):
+        raise ValueError("the noise release record differs from its digest")
+    value = record["value"]
+    if (
+        value.get("format") != NOISE_PROTOCOL
+        or set(value.get("cells", {})) != NOISE_CELLS
+    ):
+        raise ValueError("requires the four-acquisition T2 noise release")
+    for name in cells:
+        listed = value["cells"][name]["public_files"]
+        if set(listed) != set(PUBLIC_FILES):
+            raise ValueError(f"unexpected public files listed for {name}")
+        for filename in PUBLIC_FILES:
+            key = f"public/{name}/{filename}"
+            if _sha256(release / key) != listed[filename]:
+                raise ValueError(f"published public file changed or unlisted: {key}")
+    return release_receipt(release, NOISE_PROTOCOL)
+
+
 def verify_release(release: Path, cells: Iterable[str]) -> str:
     """Check the publication receipt and each public file a baseline will read.
 
     Returns the receipt's digest, which identifies the release a model was
     developed on. A changed, missing or unlisted file is refused.
     """
+    cells = tuple(cells)
+    if release_protocol(cells) == NOISE_PROTOCOL:
+        return _verify_noise_release(release, cells)
     summary = read_seal(release / "summary.json")
     if (
         summary["protocol"] != PROTOCOL
@@ -124,8 +189,11 @@ def with_estimated_derivatives(split: DatasetSplit) -> DatasetSplit:
 def tier_of(name: str) -> str:
     """Return the observability tier in a cell name.
 
-    Basin cells have one fixed observation design, so they carry no tier.
+    Basin cells have one fixed observation design, so they carry no tier. The
+    noise acquisitions are the T2-hard cell's trajectories, so they are hard.
     """
+    if name in NOISE_CELLS:
+        return "hard"
     for tier in ("easy", "hard"):
         if f"_{tier}_" in f"{name}_":
             return tier
@@ -143,7 +211,10 @@ def load_cell(release: Path, name: str) -> PhaseCBaselineCell:
     prompt = prompt_path.read_text(encoding="utf-8")
     if spec["protocol"] != PROTOCOL or spec["test_released"]:
         raise ValueError("cell is not a development-only Phase C cell")
-    if prompt != spec["public_prompt"] + "\n":
+    noisy = name in NOISE_CELLS
+    # The noise release writes the sealed prompt with exactly one final newline.
+    sealed = spec["public_prompt"].rstrip("\n") if noisy else spec["public_prompt"]
+    if prompt != sealed + "\n":
         raise ValueError("proposer prompt differs from the sealed public prompt")
     dataset = DevelopmentDataset(
         benchmark_id=name,
@@ -162,7 +233,7 @@ def load_cell(release: Path, name: str) -> PhaseCBaselineCell:
         ),
     )
     identity = {
-        "protocol": PROTOCOL,
+        "protocol": NOISE_PROTOCOL if noisy else PROTOCOL,
         "release_summary_sha256": receipt,
         "benchmark_id": name,
         "train": dataset.train.fingerprint,

@@ -74,7 +74,8 @@ def test_a_cstr_hard_plan_changes_only_the_cell_the_seeds_and_their_description(
 def test_cstr_hard_joins_the_cells_a_baseline_may_run_on_but_not_the_roster():
     assert HARD not in ROSTER
     assert len(ROSTER) == 8
-    assert set(pcb.BASELINE_CELLS) == {*ROSTER, HARD}
+    # The noise study's acquisitions are the only other cells a plan may name.
+    assert set(pcb.BASELINE_CELLS) == {*ROSTER, HARD, *pcb.NOISE_CELLS}
     assert pcb.tier_of(HARD) == "hard"
 
 

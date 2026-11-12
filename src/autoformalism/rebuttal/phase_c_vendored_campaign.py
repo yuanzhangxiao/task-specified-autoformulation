@@ -41,6 +41,9 @@ from autoformalism.rebuttal.phase_c_baselines import (
     tier_of,
     verify_release,
 )
+from autoformalism.rebuttal.phase_c_baselines import (
+    release_protocol as release_protocol_of,
+)
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.rebuttal.vendored_campaign import (
     DeclaredBudget,
@@ -535,7 +538,7 @@ class PhaseCVendoredCampaignPlan(BaseModel):
     schema_version: Literal["phase-c-vendored-campaign-plan-1"]
     status: Literal["proposed_pending_review", "frozen_before_calls"]
     development_only: Literal[True]
-    release_protocol: Literal["phase-c-development-2"]
+    release_protocol: Literal["phase-c-development-2", "t2-noise-public-1"]
     release_summary_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     method: VendoredMethod
     upstream: UpstreamRevision
@@ -585,6 +588,10 @@ class PhaseCVendoredCampaignPlan(BaseModel):
                 raise ValueError(f"{cell.benchmark_id} is outside the Phase C roster")
             if cell.tier != tier_of(cell.benchmark_id):
                 raise ValueError(f"{cell.benchmark_id} declares the wrong tier")
+        if self.release_protocol != release_protocol_of(names):
+            raise ValueError(
+                f"these cells are read from the {release_protocol_of(names)} release"
+            )
         if len(self.repetitions) != len(set(self.repetitions)) or any(
             seed < 0 for seed in self.repetitions
         ):

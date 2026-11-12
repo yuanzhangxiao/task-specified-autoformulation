@@ -1,0 +1,47 @@
+{
+  "schema_version": "phase-c-d3-plan-2",
+  "development_only": true,
+  "release_protocol": "t2-noise-public-1",
+  "release_summary_sha256": "30c50333df09ad24e0454086a96d821e7375d48564e8c1f2325086509b61ee29",
+  "status": "frozen_before_calls",
+  "purpose": "D3 as published, in its white-box mode, on the four acquisitions of the T2-hard measurement-noise study with seeds 0, 1 and 2, development data only; every other setting is the frozen plan's (phase_c_d3_hosted_120b_v2). Upstream's loop, prompts and settings: twenty generations, patience twenty, the sixteen best models shown back for reflection, top-p 0.95, and the paper's temperature 0.7; the model with the lowest one-step validation loss is kept, D3's own rule. The model is the hosted gpt-oss-120b, as for the other baselines and our method; it gets no reasoning effort, so the server's default applies, and an 8192-token output limit because its thinking counts against it. The four acquisitions are the T2-hard cell's sixteen training and four validation trajectories with measurement noise of 0, 1, 5 and 10% of each target's clean training SD; each is fitted only from its own public files, every setting is the same at every noise level, and the noisy observations are used as delivered, with the frozen plan's derivative rule and no smoothing (decided with the user on 2026-11-12 (HST)).",
+  "endpoint": "jetstream2_hosted",
+  "model": "gpt-oss-120b",
+  "cells": [
+    {
+      "benchmark_id": "acquisition_00",
+      "tier": "hard",
+      "public_prompt_sha256": "c77385e3a04b7a3d86c2bde92eee93f057aaf28f3b7ff4b02f73c378993aea3b"
+    },
+    {
+      "benchmark_id": "acquisition_01",
+      "tier": "hard",
+      "public_prompt_sha256": "c77385e3a04b7a3d86c2bde92eee93f057aaf28f3b7ff4b02f73c378993aea3b"
+    },
+    {
+      "benchmark_id": "acquisition_02",
+      "tier": "hard",
+      "public_prompt_sha256": "c77385e3a04b7a3d86c2bde92eee93f057aaf28f3b7ff4b02f73c378993aea3b"
+    },
+    {
+      "benchmark_id": "acquisition_03",
+      "tier": "hard",
+      "public_prompt_sha256": "c77385e3a04b7a3d86c2bde92eee93f057aaf28f3b7ff4b02f73c378993aea3b"
+    }
+  ],
+  "repetitions": [
+    0,
+    1,
+    2
+  ],
+  "generations": 20,
+  "patience": 20,
+  "keep_top_samples": 16,
+  "temperature": 0.7,
+  "top_p": 0.95,
+  "reasoning_effort": null,
+  "max_output_tokens": 8192,
+  "trajectory_seconds": 120,
+  "test_data_opened": false,
+  "private_reference_opened": false
+}

@@ -28,9 +28,11 @@ from autoformalism.rebuttal.baseline_pilot import (
 )
 from autoformalism.rebuttal.phase_c_baselines import (
     BASELINE_CELLS,
-    PROTOCOL,
     tier_of,
     verify_release,
+)
+from autoformalism.rebuttal.phase_c_baselines import (
+    release_protocol as release_protocol_of,
 )
 
 CLASSICAL_METHODS = frozenset({"persistence", "sindy", "pysr"})
@@ -72,7 +74,7 @@ class PhaseCBaselinePlan(BaseModel):
     status: Literal["proposed_pending_review", "frozen_before_baseline_calls"]
     purpose: str = Field(min_length=1)
     development_only: Literal[True]
-    release_protocol: Literal["phase-c-development-2"]
+    release_protocol: Literal["phase-c-development-2", "t2-noise-public-1"]
     release_summary_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     cells: tuple[PhaseCBaselineCell, ...] = Field(min_length=1)
     repetitions: tuple[int, ...] = Field(min_length=1)
@@ -98,6 +100,10 @@ class PhaseCBaselinePlan(BaseModel):
                 raise ValueError(f"{cell.benchmark_id} is outside the Phase C roster")
             if cell.tier != tier_of(cell.benchmark_id):
                 raise ValueError(f"{cell.benchmark_id} declares the wrong tier")
+        if self.release_protocol != release_protocol_of(names):
+            raise ValueError(
+                f"these cells are read from the {release_protocol_of(names)} release"
+            )
         methods = [method.method for method in self.methods]
         if len(methods) != len(set(methods)):
             raise ValueError("Phase C baseline methods must be unique")
@@ -191,7 +197,7 @@ def freeze_phase_c_baseline_plan(
     manifest = {
         "schema_version": "phase-c-public-baseline-freeze-1",
         "status": "frozen_before_baseline_calls",
-        "release_protocol": PROTOCOL,
+        "release_protocol": plan.release_protocol,
         "release_summary_sha256": receipt,
         "plan_sha256": _sha256(plan_path),
         "task_plan_sha256": _sha256(task_path),

@@ -46,6 +46,10 @@ SUBDIRECTORY = "phase_b_v1"
 #: baseline cells from that release, as Phase C D3 does, with that cell's
 #: public context.
 PHASE_C = phase_c_baselines.PROTOCOL
+#: Or the T2-hard noise study's release, read by the same rules.
+NOISE = phase_c_baselines.NOISE_PROTOCOL
+#: The protocols whose cells come from a published release.
+RELEASES = frozenset({PHASE_C, NOISE})
 
 
 class StagedCell(BaseModel):
@@ -277,11 +281,13 @@ def check_plan_cell(protocol: str, name: str, tier: str, prompt_sha256: str) -> 
 
     A Phase C cell's prompt is checked against the release when it is prepared.
     """
-    if protocol == PHASE_C:
+    if protocol in RELEASES:
         if name not in phase_c_baselines.BASELINE_CELLS:
             raise ValueError(f"{name} is not a Phase C baseline cell")
         if tier != phase_c_baselines.tier_of(name):
             raise ValueError(f"{name} declares the wrong tier")
+        if phase_c_baselines.release_protocol((name,)) != protocol:
+            raise ValueError(f"{name} is not read from the {protocol} release")
         return
     recorded = load_inputs().cells.get(name)
     if recorded is None:
@@ -294,7 +300,7 @@ def check_plan_cell(protocol: str, name: str, tier: str, prompt_sha256: str) -> 
 
 def verify_inputs(protocol: str, root: Path, names) -> str:
     """The receipt digest of the inputs a plan reads: staged cases or release."""
-    if protocol == PHASE_C:
+    if protocol in RELEASES:
         return phase_c_baselines.verify_release(root, tuple(names))
     return verify(root)
 
@@ -308,7 +314,7 @@ def load_plan_cell(
     config: Path | None = None,
 ) -> PhaseCBaselineCell:
     """Load a plan's cell from the staged cases or from the Phase C release."""
-    if protocol == PHASE_C:
+    if protocol in RELEASES:
         return phase_c_baselines.load_cell(root, name)
     return load_cell(root, name, context=context, config=config)
 
@@ -325,4 +331,6 @@ def scope_of(protocol: str) -> str:
     """How a report names the cells a plan ran on."""
     if protocol == PHASE_C:
         return "the Phase C cells its plan names"
+    if protocol == NOISE:
+        return "the T2-hard measurement-noise acquisitions its plan names"
     return "the nine Phase B cases of the main comparison"

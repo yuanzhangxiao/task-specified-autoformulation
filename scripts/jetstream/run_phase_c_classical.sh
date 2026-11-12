@@ -22,8 +22,18 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly repo
 readonly self="${repo}/scripts/jetstream/run_phase_c_classical.sh"
 readonly py="${AF_HOME}/venv-classical/bin/python"
-readonly release="${AF_HOME}/release/phase-c-public-v2"
 readonly depot="${AF_HOME}/julia-depot-pysr-1.5.9"
+
+release_of() {  # plan: the published release it reads
+  local protocol
+  protocol="$("${py}" -c 'import json, sys
+print(json.load(open(sys.argv[1]))["release_protocol"])' "$1")"
+  case "${protocol}" in
+    phase-c-development-2) echo "${AF_HOME}/release/phase-c-public-v2" ;;
+    t2-noise-public-1) echo "${AF_HOME}/release/t2-noise-fit" ;;
+    *) echo "$1 reads an unknown release: ${protocol}" >&2; return 2 ;;
+  esac
+}
 
 usage() {
   sed -n '2,9p' "${self}" >&2
@@ -47,6 +57,7 @@ lane() {  # root, first task, stride, task count, CPU list: runs in the foregrou
 
 worker() {  # root, task count, lanes, CPUs per task: runs in the foreground
   local root="$1" count="$2" lanes="$3" width="$4" slot
+  release="$(release_of "${root}/frozen/plan.json")"
   echo "started $(date -u +%FT%TZ): ${count} tasks, ${lanes} at a time, ${width} CPUs each"
   for ((slot = 0; slot < lanes; slot++)); do
     lane "${root}" "${slot}" "${lanes}" "${count}" \
@@ -94,6 +105,7 @@ for other in "${AF_HOME}"/runs/*/pid; do
   fi
 done
 
+release="$(release_of "${config}")"
 mkdir -p "${root}/logs"
 "${py}" scripts/phase_c_classical.py prepare \
   --config "${config}" --release "${release}" --root "${root}" >"${root}/prepare.json"
