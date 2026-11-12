@@ -250,7 +250,9 @@ def curves(view: dict, assignment: dict, tr) -> dict:
         payload = {
             **payload,
             "parameters": [
-                {**p, "domain": "real", "bounds": None} for p in payload["parameters"]
+                # The role only implies a domain; "coefficient" implies none.
+                {**p, "role": "coefficient", "domain": "real", "bounds": None}
+                for p in payload["parameters"]
             ],
         }
     candidate = CandidateModel.model_validate(payload)
