@@ -269,3 +269,27 @@ def test_the_study_models_join_on_their_canonical_cell(tmp_path):
         (CSTR, "sensor_00")
     ]
     assert rows[0]["source_protocol"] == "iclr-controlled-search-models-1"
+
+
+def test_the_extrapolation_suite_leaves_the_training_range_in_four_directions():
+    import json
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1] / "configs" / "cstr_extrapolation_v1.json"
+    )
+    suite = json.loads(path.read_text())
+    table = scoring.suite_schedules(CSTR, suite)
+    assert table["train_zero"] == anchor.cases(CSTR, "confirmation")["train_zero"]
+    signs = set()
+    for probe_case in suite["probes"]:
+        spec = probe_case["specification"]
+        PhaseBProtocol.model_validate(table[probe_case["name"]]["protocol"])
+        assert spec["kind"] == "step" and "initial_shift" not in spec
+        cf, tf, tjf = spec["value"]
+        # Training's largest step is one unit in each direction.
+        assert (
+            tf == 0.0 and min(abs(cf), abs(tjf)) == 0.0 and max(abs(cf), abs(tjf)) >= 2
+        )
+        signs.add((cf > 0, cf < 0, tjf > 0, tjf < 0))
+    assert len(signs) == 4
