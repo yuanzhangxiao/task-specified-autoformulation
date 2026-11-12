@@ -1,0 +1,43 @@
+{
+  "schema": "latent-sindy-frozen-plan-1",
+  "status": "frozen_before_training",
+  "purpose": "Latent-state SINDy for the T2-hard measurement-noise study, on its four acquisitions with seeds 0, 1 and 2: the targets are augmented with k latent coordinates (k = 1, 2 or 3), every state's derivative is a sparse combination of a degree-2 polynomial library of the scaled state and supplied channels divided by a fixed tenth of the training horizon, and the latent part of the initial state is a linear function of the first readings and inputs, fitted on training trajectories only. Coefficients are fitted by matching RK4 rollouts of the training trajectories, first with an L1 penalty, then, for each threshold, with the coefficients below it fixed at zero (sequential thresholding). Validation free-rollout error stops each phase early and chooses the latent dimension and threshold per seed. The formulation was approved by the user on 2026-11-12 (HST); these settings are common defaults, fixed before any full fit, after a 20-iteration feasibility check that changed only the input scaling (each input divided by its largest training deviation) and the recovery from a diverged step. The four acquisitions are the T2-hard cell's sixteen training and four validation trajectories with measurement noise of 0, 1, 5 and 10% of each target's clean training SD; each is fitted only from its own public files, with the same settings at every level and the noisy observations as delivered.",
+  "release_protocol": "t2-noise-public-1",
+  "release_summary_sha256": "30c50333df09ad24e0454086a96d821e7375d48564e8c1f2325086509b61ee29",
+  "cells": [
+    "acquisition_00",
+    "acquisition_01",
+    "acquisition_02",
+    "acquisition_03"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "settings": {
+    "latent_dimensions": [
+      1,
+      2,
+      3
+    ],
+    "thresholds": [
+      0.01,
+      0.03,
+      0.1
+    ],
+    "l1": 0.001,
+    "learning_rate": 0.01,
+    "iterations": 2000,
+    "refit_iterations": 500,
+    "evaluate_every": 25,
+    "gradient_clip": 1.0,
+    "initial_scale": 0.01,
+    "restarts_after_divergence": 3,
+    "rk4_substeps": 2,
+    "horizon_fraction_for_tau": 0.1,
+    "replay_rtol": 1e-08,
+    "replay_atol": 1e-10,
+    "replay_seconds": 45.0
+  }
+}

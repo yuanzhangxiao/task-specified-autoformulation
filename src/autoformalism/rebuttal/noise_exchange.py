@@ -16,7 +16,8 @@ initial readings, the auxiliary's path and the measured inputs.
   expression form, LLM-ODE): Full's backend with the external-baseline grammar,
   Radau or BDF at rtol 1e-8 and atol 1e-10, piecewise-linear forcing restarted
   at each knot, the state carried across, 120 s a trajectory.
-* The latent neural ODE: its own replay with the same solvers and limits.
+* The latent neural ODE and latent-state SINDy: their own replays with the
+  same solvers and limits.
 * D3 and HDTwinGen: their native one-step maps, x[k+1] = x[k] + f, on the
   one-minute grid, hybrid networks included; the supplied auxiliary is read as
   measured, as in their own recursive rollout. An increment is never scaled by
@@ -40,7 +41,7 @@ from time import monotonic
 
 import numpy as np
 
-from autoformalism.baselines import latent_ode
+from autoformalism.baselines import latent_ode, latent_sindy
 from autoformalism.baselines.d3_rollout import NativeMap
 from autoformalism.baselines.d3_rollout import predict as native_rollout
 from autoformalism.baselines.hybrid_networks import NetworkSpec
@@ -166,8 +167,11 @@ def forecast(
         return {t: states[:, native.states.index(t)] for t in context.targets}
     if solver not in ("Radau", "BDF"):
         raise ValueError("a continuous model is integrated by Radau or BDF")
-    if kind == "latent_ode":
-        ode = latent_ode.LatentODE(model)
+    if kind in ("latent_ode", "latent_sindy"):
+        replay = (
+            latent_ode.LatentODE if kind == "latent_ode" else latent_sindy.LatentSINDy
+        )
+        ode = replay(model)
         supplied = {**trajectory.external_inputs, **trajectory.auxiliaries}
         inputs = np.stack(
             [np.asarray(supplied[n], dtype=float) for n in ode.inputs], -1
@@ -448,16 +452,16 @@ def read_spec_sindy(native: Mapping, cell: PhaseCBaselineCell, seed: int):
     }
 
 
-def read_latent_ode(native: Mapping, cell: PhaseCBaselineCell, seed: int):
-    """The latent neural ODE: the latent dimension its validation replay chose."""
+def _read_latent(native: Mapping, cell: PhaseCBaselineCell, seed: int, kind: str):
+    """A latent-state model the plan's validation replay chose for this seed."""
     root = Path(native["root"])
     plan = sealed_read(root / "plan.json")
     name = cell.dataset.benchmark_id
     if plan["cells"][name]["identity"] != cell.identity:
-        raise ValueError(f"the latent ODE plan at {root} read other public files")
+        raise ValueError(f"the {kind} plan at {root} read other public files")
     selection = sealed_read(root / "selection.json")
     if selection["plan_sha256"] != plan["artifact_sha256"]:
-        raise ValueError("the latent ODE selection belongs to another plan")
+        raise ValueError(f"the {kind} selection belongs to another plan")
     rows = [
         r
         for r in selection["rows"]
@@ -465,19 +469,33 @@ def read_latent_ode(native: Mapping, cell: PhaseCBaselineCell, seed: int):
     ]
     if len(rows) != 1:
         raise ValueError(
-            f"the latent ODE selection has no single row for {name} seed {seed}"
+            f"the {kind} selection has no single row for {name} seed {seed}"
         )
     row = rows[0]
     sources = [_source(root / "plan.json"), _source(root / "selection.json")]
     if row["status"] != "complete":
-        return _failure(f"latent ODE ended {row['status']}", sources)
-    model = {**row["model"], "kind": "latent_ode"}
-    return model, {
+        return _failure(f"{kind} ended {row['status']}", sources)
+    model = {**row["model"], "kind": kind}
+    record = {
         "status": "complete",
         "sources": sources,
         "recorded_validation": ["selection.validation_nmse", row["validation_nmse"]],
         "selected_latent_dimension": row["selected_latent_dimension"],
     }
+    for key in ("selected_threshold", "kept_terms", "equations"):
+        if key in row:
+            record[key] = row[key]
+    return model, record
+
+
+def read_latent_ode(native: Mapping, cell: PhaseCBaselineCell, seed: int):
+    """The latent neural ODE: the latent dimension its validation replay chose."""
+    return _read_latent(native, cell, seed, "latent_ode")
+
+
+def read_latent_sindy(native: Mapping, cell: PhaseCBaselineCell, seed: int):
+    """Latent-state SINDy: the latent dimension and threshold validation chose."""
+    return _read_latent(native, cell, seed, "latent_sindy")
 
 
 READERS: dict[str, Callable] = {
@@ -486,6 +504,7 @@ READERS: dict[str, Callable] = {
     "d3_family": read_d3_family,
     "spec_sindy": read_spec_sindy,
     "latent_ode": read_latent_ode,
+    "latent_sindy": read_latent_sindy,
 }
 
 
