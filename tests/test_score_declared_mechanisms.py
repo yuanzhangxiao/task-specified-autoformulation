@@ -238,3 +238,23 @@ def test_the_rule_is_frozen_for_the_reactor():
         "train_tjf_pulse",
         "train_tf_minus_step",
     ]
+
+
+def test_only_the_trajectories_a_validity_rule_kept_are_scored(tmp_path):
+    from autoformalism.rebuttal.prefit_replay import sealed_write
+
+    cell = "reactor"
+    schedules = {cell: {"kept": {"role": "contrast"}, "dropped": {"role": "contrast"}}}
+    open_plan = sealed_write(tmp_path / "open" / "plan.json", {"schedules": schedules})
+    assert declared.kept_schedule(tmp_path / "open", open_plan, cell) == schedules[cell]
+    plan = sealed_write(
+        tmp_path / "plan.json", {"schedules": schedules, "validity_rule": {"x": 1}}
+    )
+    sealed_write(
+        tmp_path / "validity.json",
+        {"plan": plan["artifact_sha256"], "dropped": ["dropped"]},
+    )
+    assert list(declared.kept_schedule(tmp_path, plan, cell)) == ["kept"]
+    other = {**plan, "artifact_sha256": "0" * 64}
+    with pytest.raises(ValueError, match="another plan"):
+        declared.kept_schedule(tmp_path, other, cell)

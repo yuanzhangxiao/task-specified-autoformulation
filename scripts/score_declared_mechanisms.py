@@ -439,6 +439,17 @@ def _truth(record: dict) -> dict:
     }
 
 
+def kept_schedule(root: Path, plan: dict, cell: str) -> dict:
+    """The root's schedule for a cell, less what its suite's validity rule dropped."""
+    schedule = plan["schedules"][cell]
+    if not plan.get("validity_rule"):
+        return schedule
+    verdict = sealed_read(root / "validity.json")
+    if verdict["plan"] != plan["artifact_sha256"]:
+        raise ValueError("the validity record belongs to another plan")
+    return {k: v for k, v in schedule.items() if k not in verdict["dropped"]}
+
+
 def score_stage(root: Path, out: Path) -> dict:
     """Simulate every declared model and score each mechanism's responses."""
     plan = sealed_read(root / "plan.json")
@@ -448,7 +459,7 @@ def score_stage(root: Path, out: Path) -> dict:
     ] != _digest(RULE):
         raise ValueError("the assignment belongs to another root or rule")
     cell = plan["cells"][0]
-    schedule = plan["schedules"][cell]
+    schedule = kept_schedule(root, plan, cell)
     refs = {
         case: sealed_read(root / "references" / cell / f"{case}.json")["reference"]
         for case in schedule
