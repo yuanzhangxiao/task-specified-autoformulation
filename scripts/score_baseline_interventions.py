@@ -332,8 +332,12 @@ def _map(model: dict) -> NativeMap:
     )
 
 
-def predict(row: dict, tr, solver: str) -> dict:
-    """A baseline's free rollout of the study's public input trajectory."""
+def predict(row: dict, tr, solver: str, seconds: float | None = None) -> dict:
+    """A baseline's free rollout of the study's public input trajectory.
+
+    ``seconds`` bounds the rollout; by default the study's intervention budget.
+    """
+    limit = SECONDS if seconds is None else seconds
     model = row["model"]
     context = ValidationContext.model_validate(model["context"])
     if (
@@ -357,7 +361,7 @@ def predict(row: dict, tr, solver: str) -> dict:
             method=solver,
             rtol=RTOL,
             atol=ATOL,
-            seconds=SECONDS,
+            seconds=limit,
         )
         # Latent coordinates go to the study's train-calibrated probe, as ours do.
         return {t: y[:, i].tolist() for i, t in enumerate(ode.targets)} | {
@@ -370,7 +374,7 @@ def predict(row: dict, tr, solver: str) -> dict:
         ):
             raise ValueError("the schedule's grid is not the map's sample interval")
         native = _map(model)
-        states = native_rollout(native, tr, teacher_forced=False, seconds=SECONDS)
+        states = native_rollout(native, tr, teacher_forced=False, seconds=limit)
         return {t: states[:, native.states.index(t)].tolist() for t in context.targets}
     if model["semantics"] != "continuous_time" or model.get("grammar") != "baseline":
         raise ValueError("unsupported baseline semantics or grammar")
@@ -391,7 +395,7 @@ def predict(row: dict, tr, solver: str) -> dict:
             allow_derivative_regression=False,
         ),
         reset_observed_states=False,
-        deadline=monotonic() + SECONDS,
+        deadline=monotonic() + limit,
     )
     if not sim.success:
         raise ValueError(sim.message)
