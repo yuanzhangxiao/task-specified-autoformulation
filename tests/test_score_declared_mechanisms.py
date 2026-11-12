@@ -169,6 +169,65 @@ def test_terms_add_up_to_the_right_hand_side_along_a_rollout():
     np.testing.assert_allclose(out["unattributed"], -0.01)
 
 
+def test_a_hybrid_maps_terms_follow_its_own_increment():
+    """HDTwinGen's network output is an unattributed term of its increment."""
+    network = {
+        "name": "r",
+        "inputs": ["T", "Cf"],
+        "hidden_layers": 1,
+        "hidden_width": 4,
+        "activation": "tanh",
+    }
+    weights = {
+        "r": [
+            {"weight": np.zeros((4, 2)).tolist(), "bias": np.zeros(4).tolist()},
+            {"weight": np.zeros((1, 4)).tolist(), "bias": [0.02]},
+        ]
+    }
+    law = "0.05*(Tf - T) - 0.03*(T - Tjf) + r"
+    model = {
+        "candidate": equation_candidate("hdtwingen", {"T": law}, CONTEXT).model_dump(
+            mode="json"
+        ),
+        "context": CONTEXT.model_dump(mode="json"),
+        "parameters": {},
+        "initials": {},
+        "semantics": "native_increment",
+        "grammar": "baseline",
+        "increment_step": 0.1,
+        "networks": [network],
+        "network_weights": weights,
+    }
+    view = declared.view_of({"status": "ready", "model": model})
+    assignment = declared.attribute(view)
+    assert [t["mechanism"] for t in assignment["terms"]] == [
+        "feed_transport",
+        "jacket_heat",
+        "unattributed",
+    ]
+    time = np.round(np.arange(0.0, 3.0001, 0.1), 10)
+    tr = Trajectory(
+        trajectory_id="toy",
+        time=time,
+        targets={"T": np.full(len(time), 360.0)},
+        external_inputs={
+            "Cf": np.ones(len(time)),
+            "Tf": np.full(len(time), 350.0),
+            "Tjf": np.where(time > 1.0, 340.0, 330.0),
+        },
+        auxiliaries={},
+        fixed_covariates={},
+        derivatives={},
+    )
+    out = declared.curves(view, assignment, tr)
+    temperature = np.asarray(out["T"])
+    tjf = tr.external_inputs["Tjf"]
+    np.testing.assert_allclose(out["feed_transport"], 0.5 * (350.0 - temperature))
+    np.testing.assert_allclose(out["jacket_heat"], -0.3 * (temperature - tjf))
+    np.testing.assert_allclose(out["unattributed"], 0.2)
+    assert temperature[1] == pytest.approx(360.0 + 0.05 * -10 - 0.03 * 30 + 0.02)
+
+
 def test_the_rule_is_frozen_for_the_reactor():
     rule = json.loads(Path(declared.RULE).read_text())
     assert rule["status"] == "frozen_before_scoring"

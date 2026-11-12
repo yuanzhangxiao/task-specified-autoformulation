@@ -33,7 +33,10 @@ from time import monotonic
 import numpy as np
 from scipy.optimize import lsq_linear
 
+from autoformalism.baselines.d3_native import _evaluate
+from autoformalism.baselines.d3_rollout import _NUMPY
 from autoformalism.baselines.d3_rollout import predict as native_rollout
+from autoformalism.baselines.hybrid_networks import numpy_outputs
 from autoformalism.expressions import (
     ValidationContext,
     baseline_validator,
@@ -51,6 +54,7 @@ from autoformalism.rebuttal.mechanism_probes import _native
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.schemas import CandidateModel
 from scripts import iclr_anchor_fidelity as anchor
+from scripts import score_baseline_interventions as scoring
 
 PROTOCOL = "declared-mechanism-scores-1"
 RULE = (
@@ -241,8 +245,61 @@ def view_of(row: dict) -> dict | None:
     }
 
 
+def _hybrid_curves(view: dict, assignment: dict, tr) -> dict:
+    """A hybrid map's terms along its own rollout, read as its increment reads them.
+
+    Its networks and named quantities are evaluated exactly as the map evaluates
+    them before each increment, so a network's output is one more term; the rule
+    leaves a term without the inputs of a mechanism unattributed.
+    """
+    native = scoring._map(view["native"])
+    values = native_rollout(native, tr, teacher_forced=False, seconds=SECONDS)
+    parser = grammar_parser("baseline")
+    rhs = native.equations[native.states.index(TARGET)]
+    parsed = [
+        parser.parse(t["expression"], location="term").tree.body
+        for t in assignment["terms"]
+    ]
+    time = np.asarray(tr.time, dtype=float)
+    out = {m: np.zeros(len(time)) for m in (*MECHANISMS, "unattributed")}
+    total = np.zeros(len(time))
+    for k in range(len(time)):
+        environment = dict(zip(native.states, values[k], strict=True))
+        environment["t"] = float(time[k])
+        environment.update(tr.fixed_covariates)
+        environment.update({n: v[k] for n, v in tr.external_inputs.items()})
+        environment.update(native.parameters)
+        with np.errstate(over="raise", divide="raise", invalid="raise"):
+            environment.update(
+                numpy_outputs(
+                    native.networks,
+                    native.network_inputs,
+                    native.network_weights,
+                    environment,
+                    _evaluate,
+                    _NUMPY,
+                )
+            )
+            for name, node in native.processes:
+                environment[name] = _evaluate(node, environment, _NUMPY)
+            total[k] = _evaluate(rhs, environment, _NUMPY)
+            for term, node in zip(assignment["terms"], parsed, strict=True):
+                value = term["sign"] * _evaluate(node, environment, _NUMPY)
+                out[term["mechanism"]][k] += value
+    summed = sum(out.values())
+    if np.max(np.abs(summed - total)) > 1e-7 * max(1.0, float(np.max(np.abs(total)))):
+        raise ValueError("the assigned terms do not add up to the right-hand side")
+    per_time = 1.0 / float(view["increment_step"])
+    return {
+        TARGET: values[:, native.states.index(TARGET)].tolist(),
+        **{m: (out[m] * per_time).tolist() for m in (*MECHANISMS, "unattributed")},
+    }
+
+
 def curves(view: dict, assignment: dict, tr) -> dict:
     """The model's temperature, terms and declared states along one trajectory."""
+    if view["semantics"] == "native_increment" and view["native"].get("networks"):
+        return _hybrid_curves(view, assignment, tr)
     payload = view["candidate"]
     if view["semantics"] == "native_increment":
         # D3's one-step map uses its fitted values as they are: declared
