@@ -512,6 +512,9 @@ def submit(
         os.environ["AF_SEARCH_ROOT"] = str(root.resolve())
         worker = io.REPO / "scripts/hpc/run_iclr_controlled_search_aces.sh"
         partition = "gpu"
+        resources = []
+        if plan.get("proposer_tensor_parallel_size", 1) == 2:
+            resources = ["--gres=gpu:h100:2", "--mem=128G", "--job-name=iclr-full-120b"]
         if cached_pilot:
             helper = Path(__file__).resolve()
             os.environ["AF_PILOT_RESUME_CLI"] = str(helper)
@@ -524,6 +527,7 @@ def submit(
                 f"--account={account}",
                 f"--partition={partition}",
                 f"--array={array}",
+                *resources,
                 "--export=ALL",
                 f"--output={root}/logs/{wave}-%A_%a.out",
                 f"--error={root}/logs/{wave}-%A_%a.err",

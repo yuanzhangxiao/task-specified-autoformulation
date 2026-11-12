@@ -212,6 +212,47 @@ bash scripts/hpc/iclr_aces.sh combine
 
 Repeat the same scoring command on the same paths after a time limit. The evaluators preserve recorded outcomes and explicit interrupted or unavailable statuses. The result directories are under `$AF_CAMPAIGN/confirmation`, including `fidelity`, `anchor-comparison`, `anchor-clamps`, `specification`, `corrected-cstr-test`, `corrected-cstr-compliance`, `acquisition-anchors`, `acquisition-stress` and `stress-report`. The anchor clamp analysis measures the influence of the selected models' joint hidden coordinates under two interventions per hard cell.
 
+## Full with a 120B proposer on the two hard anchors
+
+The comparator is the Full arm of completed ACES array `2337694`. Both runs use T2-hard (`acquisition_00`) and corrected temperature-only CSTR-hard (`sensor_00`), seeds 0, 1 and 2, and 15 visits per lineage. Visit zero constructs a fresh model. A lineage with no fitted start records the remaining visits as unavailable, as it did in the original anchor. The 120B search inherits the public input snapshots, Full prompts, proposal and repair budgets, calibrated Jetstream critic, collocation fitter, validation selection and endpoint pruning. Each running block uses two H100s on one node for tensor-parallel serving, with eight CPUs, single-threaded numerical libraries and the original 12-hour allocation. One block runs at a time.
+
+On the Mac, build the source archive from the comparison commit or use the archive supplied with it. This delivery includes code and the offline Harmony vocabulary. The launcher reads the original public plan and cells on ACES.
+
+~~~bash
+bash scripts/hpc/package_iclr_aces.sh full-120b
+bundle="iclr-anchors-full-120b-$(git rev-parse --short=7 HEAD)"
+scp "output/$bundle.tar.gz" aces:/scratch/group/p.nairr260351.000/u.yx126462/
+~~~
+
+On ACES, set `bundle` to the same printed name without `.tar.gz` and run the following. The new results go to `$AF_GROUP/iclr-anchors-full-120b-v1`. The launcher normally sources the original deployment's `activate.sh` for the fitting environment.
+
+~~~bash
+export AF_GROUP=/scratch/group/p.nairr260351.000/u.yx126462
+cd "$AF_GROUP"
+tar -xzf "$bundle.tar.gz" && cd "$bundle/code"
+bash scripts/hpc/iclr_full_120b_aces.sh run wave1
+~~~
+
+Enter the launch command on its own line so the terminal can read the critic credential if needed. `prepare` performs the same input and runtime checks without submitting. Repeating `run wave1` returns a recorded job ID. If Slurm times out before returning an ID, inspect `submissions/wave1/array.reply.json`, `squeue -u "$USER" -n iclr-full-120b`, and `sacct` before attempting another submission. The launcher retains the intent to prevent a duplicate array.
+
+~~~bash
+bash scripts/hpc/iclr_full_120b_aces.sh status
+~~~
+
+After the array exits, use `run wave2` on the same root if visits or pruning dispositions are missing. It schedules only unfinished blocks and reuses their checkpoints. Once all 90 visit records and six dispositions exist, freeze and download the public results.
+
+~~~bash
+bash scripts/hpc/iclr_full_120b_aces.sh finish
+~~~
+
+Download the inspection package on the Mac.
+
+~~~bash
+scp aces:/scratch/group/p.nairr260351.000/u.yx126462/iclr-anchors-full-120b-v1/inspection.tar.gz ~/Downloads/iclr-full-120b-inspection.tar.gz
+~~~
+
+`paired_proposer_validation.csv` contains one row per case and seed, with both endpoint statuses, validation NMSE and the 120B-minus-20B difference where both fits exist. Per-visit feedback, fitted endpoints, public graph checks and available Slurm accounting are in the same inspection archive. This launch ends at the validation comparison.
+
 ## Historical archive recovery
 
 To check whether the original ACES campaign already has final files, run this in the ACES login shell. A nonempty evaluation file can still have missing subjects. Inspect its status counts before using any score. The newer freeze and six-visit submission snapshot are distinct cohorts.

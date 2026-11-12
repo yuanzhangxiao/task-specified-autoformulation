@@ -42,6 +42,7 @@ image_digest="$(sha256sum "$AF_VLLM_IMAGE")"
 test "${image_digest%% *}" = "$(jq -r .serving_image_sha256 "$plan")"
 model="$(jq -r .model_settings.model "$plan")"
 revision="$(jq -r .model_settings.model_revision "$plan")"
+parallel="$(jq -r '.proposer_tensor_parallel_size // 1' "$plan")"
 port="$("$AF_PYTHON" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
 endpoint="http://127.0.0.1:$port"
 export NO_PROXY="127.0.0.1,localhost,${NO_PROXY:-}" no_proxy="127.0.0.1,localhost,${no_proxy:-}"
@@ -79,7 +80,7 @@ env -u AF_JETSTREAM_API_KEY "$runtime" exec --nv \
     --env "XDG_CACHE_HOME=$cache/xdg" --env "CUDA_CACHE_PATH=$cache/cuda" \
     "$AF_VLLM_IMAGE" vllm serve "$model" --revision "$revision" \
     --host 127.0.0.1 --port "$port" --max-model-len 32768 --max-num-seqs 1 \
-    --gpu-memory-utilization 0.90 --tensor-parallel-size 1 >"$server_log" 2>&1 &
+    --gpu-memory-utilization 0.90 --tensor-parallel-size "$parallel" >"$server_log" 2>&1 &
 pid=$!
 for _ in $(seq 1 300); do
     kill -0 "$pid" || { echo "vLLM exited; inspect $server_log" >&2; exit 1; }
@@ -91,9 +92,9 @@ curl --noproxy '*' --silent --fail "$endpoint/v1/models" |
 runtime_receipt="$AF_SEARCH_ROOT/runtime/service-${SLURM_JOB_ID}.json"
 jq -n --arg job "$SLURM_JOB_ID" --arg host "$(hostname)" --arg endpoint "$endpoint" \
     --arg model "$model" --arg revision "$revision" --arg image "${image_digest%% *}" \
-    --arg plan "$(jq -r .artifact_sha256 "$plan")" --arg cache "$cache" --argjson block "$SLURM_ARRAY_TASK_ID" \
+    --arg plan "$(jq -r .artifact_sha256 "$plan")" --arg cache "$cache" --argjson block "$SLURM_ARRAY_TASK_ID" --argjson tp "$parallel" \
     '{job:$job,host:$host,endpoint:$endpoint,model:$model,revision:$revision,
-      image_sha256:$image,plan_sha256:$plan,block:$block,compute_cache:$cache}' >"$runtime_receipt.tmp"
+      image_sha256:$image,plan_sha256:$plan,block:$block,compute_cache:$cache,tensor_parallel_size:$tp}' >"$runtime_receipt.tmp"
 mv "$runtime_receipt.tmp" "$runtime_receipt"
 "$AF_PYTHON" -m scripts.iclr_controlled_search run --root "$AF_SEARCH_ROOT" \
     --block "$SLURM_ARRAY_TASK_ID" --base-url "$endpoint" --seconds "$AF_BLOCK_SECONDS"

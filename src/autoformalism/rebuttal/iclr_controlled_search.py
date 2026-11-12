@@ -323,13 +323,13 @@ def run_block(
                 if i == 0 and arm == "fixed_gamma":
                     share_initial(root, tasks[0], task)
                     continue
-                paired = "fixed_gamma" in plan["arms"] and arm in {
-                    "fixed_gamma",
-                    "full",
-                }
-                start = io.read_round(root, task, 0) if i and paired else None
+                needs_start = (
+                    "fixed_gamma" in plan["arms"]
+                    or plan.get("require_fitted_full_start", False)
+                ) and arm in {"fixed_gamma", "full"}
+                start = io.read_round(root, task, 0) if i and needs_start else None
                 if start and start["selected"] is None:
-                    # A paired representation comparison requires a common usable start.
+                    # Standalone Full inherits the paired anchor's visit-zero rule.
                     sealed_write(
                         io.round_path(root, task, i) / "result.json",
                         {

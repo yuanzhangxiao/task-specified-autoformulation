@@ -69,17 +69,30 @@ def worker_env(tmp_path):
     }
 
 
-@pytest.mark.parametrize("shared_cache", [False, True])
-def test_compute_cache_and_durable_receipt(tmp_path, worker_env, shared_cache):
+@pytest.mark.parametrize(
+    ("shared_cache", "parallel"), [(False, 1), (True, 1), (False, 2)]
+)
+def test_compute_cache_and_durable_receipt(
+    tmp_path, worker_env, shared_cache, parallel
+):
+    scratch = Path(worker_env["AF_SEARCH_ROOT"])
+    if parallel == 2:
+        plan = scratch / "plan.json"
+        plan.write_text(
+            json.dumps(
+                {**json.loads(plan.read_text()), "proposer_tensor_parallel_size": 2}
+            )
+        )
     if shared_cache:
         worker_env["AF_COMPUTE_CACHE_ROOT"] = str(tmp_path / "shared")
     subprocess.run(
         ["bash", str(WORKER)], env=worker_env, check=True, capture_output=True
     )
-    scratch = Path(worker_env["AF_SEARCH_ROOT"])
     receipt = json.loads((scratch / "runtime/service-425.json").read_text())
     cache = Path(receipt["compute_cache"])
     args = (scratch / "server-args").read_text().splitlines()
+    assert receipt["tensor_parallel_size"] == parallel
+    assert args[args.index("--tensor-parallel-size") + 1] == str(parallel)
     for name, subdir in (
         ("TRITON_CACHE_DIR", "triton"),
         ("VLLM_CACHE_ROOT", "vllm"),

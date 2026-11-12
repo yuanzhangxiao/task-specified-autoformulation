@@ -6,7 +6,12 @@ repo=$PWD
 commit=$(git rev-parse HEAD)
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
-release="$stage/iclr-nonbaseline-aces"
+case "${1:-default}" in
+    default) name=iclr-nonbaseline-aces ;;
+    full-120b) name="iclr-anchors-full-120b-${commit:0:7}" ;;
+    *) echo 'Use package_iclr_aces.sh [full-120b]' >&2; exit 2 ;;
+esac
+release="$stage/$name"
 code="$release/code"
 mkdir -p "$code" "$release/inputs" "$code/assets/harmony"
 git archive "$commit" src scripts configs schemas pyproject.toml docs/PROJECT_CONTEXT.md \
@@ -18,6 +23,7 @@ printf '%s\n' "$commit" >"$code/SOURCE_COMMIT"
 AF_VOCAB_DIR=${AF_VOCAB_DIR:-$repo/output/insulin-revision-delivery-20261105/bundle-smoke/phase-c-insulin-revision-v1/assets/harmony}
 python3 "$code/scripts/harmony_vocab.py" verify --directory "$AF_VOCAB_DIR" >/dev/null
 cp "$AF_VOCAB_DIR/o200k_base.tiktoken" "$code/assets/harmony/"
+if [[ $name == iclr-nonbaseline-aces ]]; then
 python3 - "$repo/output" "$release/inputs" <<'PY'
 import hashlib
 import shutil
@@ -38,6 +44,7 @@ with ZipFile(analyst) as z:
     for lane, folder in (('anchors','anchor-search-plan'), ('stress','stress-search-plan')):
         (dest / (lane + '-design.json')).write_bytes(z.read('plans/' + folder + '/plan.json'))
 PY
+fi
 python3 - "$release" "$stage/delivery.tar.gz" <<'PY'
 import hashlib
 import sys
@@ -51,5 +58,5 @@ lines = [hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.relative_to(root)
 with tarfile.open(sys.argv[2], "w:gz", format=tarfile.GNU_FORMAT) as archive:
     archive.add(root, arcname=root.name)
 PY
-mv "$stage/delivery.tar.gz" "$repo/output/iclr-nonbaseline-aces.tar.gz"
-printf 'Source %s\n%s\n' "$commit" "$repo/output/iclr-nonbaseline-aces.tar.gz"
+mv "$stage/delivery.tar.gz" "$repo/output/$name.tar.gz"
+printf 'Source %s\n%s\n' "$commit" "$repo/output/$name.tar.gz"
