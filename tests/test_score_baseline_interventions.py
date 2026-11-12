@@ -436,3 +436,183 @@ def test_the_extrapolation_suite_leaves_the_training_range_in_four_directions():
         )
         signs.add((cf > 0, cf < 0, tjf > 0, tjf < 0))
     assert len(signs) == 4
+
+
+def _combined():
+    import json
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "configs"
+        / "cstr_combined_interventions_v1.json"
+    )
+    return json.loads(path.read_text())
+
+
+def test_each_probe_is_paired_with_the_control_it_names():
+    suite = _combined()
+    table = scoring.suite_schedules(CSTR, suite)
+    controls = {c["name"] for c in suite["controls"]}
+    assert {k for k, v in table.items() if v["role"] == "control"} == controls
+    for probe_case in suite["probes"]:
+        item = table[probe_case["name"]]
+        assert item["control"] == probe_case["control"]
+        assert item["events"] == probe_case["events"]
+        PhaseBProtocol.model_validate(item["protocol"])
+        shift = probe_case["specification"].get("initial_shift")
+        own = table[item["control"]]["protocol"]["specification"].get("initial_shift")
+        assert shift == own  # the control starts where the probe starts
+        assert shift is None or shift[0] == shift[2] == 0.0
+        for event in probe_case["events"]:
+            low, high = event["window"]
+            assert 0.0 <= low < high <= 30.0
+
+
+def test_a_suite_must_pair_every_probe_with_one_of_its_controls():
+    suite = _combined()
+    stray = {**suite["probes"][0], "control": "nowhere"}
+    with pytest.raises(ValueError, match="names no control"):
+        scoring.suite_schedules(CSTR, {**suite, "probes": [stray]})
+    with pytest.raises(ValueError, match="either one control"):
+        scoring.suite_schedules(CSTR, {**suite, "control": suite["controls"][0]})
+    broken = {
+        **suite["probes"][0],
+        "specification": {
+            "kind": "composite",
+            "channels": [
+                [{"shape": "step", "start": 5, "end": 40, "value": 1}],
+                [],
+                [],
+            ],
+        },
+    }
+    with pytest.raises(ValueError, match="horizon"):
+        scoring.suite_schedules(CSTR, {**suite, "probes": [broken]})
+
+
+def _toy_plan(tmp_path):
+    """A frozen plan with a validity rule and toy schedules of every outcome."""
+    from autoformalism.rebuttal.prefit_replay import sealed_write
+
+    flat = {"kind": "constant", "value": [0.0, 0.0, 0.0]}
+    pulse = {"kind": "step", "start": 5.0, "end": 9.0, "value": [1.0, 0.0, 0.0]}
+    suite = {
+        "status": "frozen_before_references",
+        "cell": CSTR,
+        "base_protocol": "train_zero",
+        "calibration": [],
+        "controls": [
+            {"name": "basal", "specification": flat},
+            {"name": "broken_basal", "specification": flat},
+        ],
+        "probes": [
+            {
+                "name": n,
+                "group": "toy",
+                "control": c,
+                "specification": pulse,
+                "window": [5.0, 30.0],
+                "events": [],
+            }
+            for n, c in (
+                ("good", "basal"),
+                ("edge", "basal"),
+                ("negative", "basal"),
+                ("disagree", "basal"),
+                ("orphan", "broken_basal"),
+            )
+        ],
+    }
+    rule = _combined()["validity"]
+    plan = {
+        "protocol": scoring.PROTOCOL,
+        "evaluator": scoring.evaluator_identity(),
+        "schedules": {CSTR: scoring.suite_schedules(CSTR, suite)},
+        "validity_rule": rule,
+        "rows": [],
+        "study_rows": [],
+    }
+    return sealed_write(tmp_path / "plan.json", plan)
+
+
+def _toy_reactor(monkeypatch):
+    """References and scaled simulations for the toy plan's cases."""
+    time = np.round(np.arange(0.0, 30.05, 0.1), 10)
+    bump = np.exp(-((time - 8.0) ** 2))
+
+    def temperature(name, scale=None, factor=1.0):
+        if name in ("basal", "broken_basal"):
+            return np.full(len(time), 350.0)
+        gain = 1.0 + (factor - 1.0) * (
+            60.0 if name == "edge" and scale == "reaction_heat" else 1.0
+        )
+        return 350.0 + 5.0 * gain * bump
+
+    def reference(cell, item, data_root, method):
+        name = item["protocol"]["protocol_id"].removeprefix("test_probe_")
+        shift = (
+            1e-2 if method == "Radau" and name in ("disagree", "broken_basal") else 0.0
+        )
+        concentration = np.full(len(time), 0.5)
+        if name == "negative":
+            concentration[100:120] = -0.01
+        return {
+            "time": time.tolist(),
+            "T": (temperature(name) + shift).tolist(),
+            "C": concentration.tolist(),
+        }
+
+    class Run:
+        state_names = ("C", "T", "Tj")
+
+        def __init__(self, protocol, scales):
+            ((scale, factor),) = scales.items()
+            name = protocol.protocol_id.removeprefix("test_probe_")
+            self.states = np.column_stack(
+                [
+                    np.full(len(time), 0.5),
+                    temperature(name, scale, factor),
+                    np.zeros(len(time)),
+                ]
+            )
+
+    def simulate(protocol, *, data_root, private_mechanism_scales, solver):
+        return Run(protocol, private_mechanism_scales)
+
+    monkeypatch.setattr(scoring.anchor, "reference", reference)
+    monkeypatch.setattr(scoring, "simulate_phase_b", simulate)
+
+
+def test_the_validity_rule_drops_only_failing_trajectories(tmp_path, monkeypatch):
+    _toy_reactor(monkeypatch)
+    plan = _toy_plan(tmp_path)
+    verdict = scoring.validity(tmp_path, tmp_path)
+    assert verdict["plan"] == plan["artifact_sha256"]
+    assert verdict["kept"] == ["good"]
+    assert verdict["dropped"] == [
+        "broken_basal",
+        "disagree",
+        "edge",
+        "negative",
+        "orphan",
+    ]
+    reasons = {r["case"]: " ".join(r["reasons"]) for r in verdict["rows"]}
+    assert "reaction_heat" in reasons["edge"]
+    assert "positive" in reasons["negative"]
+    assert "solver disagreement" in reasons["disagree"]
+    assert "broken_basal" in reasons["orphan"]
+    good = next(r for r in verdict["rows"] if r["case"] == "good")
+    assert good["knife_edge"]["rse"] == pytest.approx(1e-4, rel=1e-6)
+    with pytest.raises(ValueError, match="already applied"):
+        scoring.validity(tmp_path, tmp_path)
+
+
+def test_no_model_is_scored_before_the_validity_rule(tmp_path, monkeypatch):
+    _toy_reactor(monkeypatch)
+    _toy_plan(tmp_path)
+    with pytest.raises(ValueError, match="before scoring a model"):
+        scoring.score(tmp_path, tmp_path)
+    (tmp_path / "subjects").mkdir()
+    with pytest.raises(ValueError, match="scored before the validity rule"):
+        scoring.validity(tmp_path, tmp_path)

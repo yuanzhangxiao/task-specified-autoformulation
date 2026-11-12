@@ -1,0 +1,1888 @@
+{
+ "schema": "intervention-suite-2",
+ "suite": "cstr-combined-interventions-1",
+ "status": "frozen_before_references",
+ "cell": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1",
+ "purpose": "Held-out interventions that combine the features that expose wrong mechanisms: inputs far beyond the training range on every input in both directions, inputs faster than the hidden states' lag, all three inputs at once, several events on one trajectory, the same event in different reactor states, starts away from the operating point, and several shapes (staircases, ramps, rectangular pulses of three widths, multisines, random binary sequences). The study's test panel stays near the training range and is slower than the hidden lag; the extrapolation suite moves two inputs with steps only; the mechanism probes move one input at a time and never combine events. Designed on 2026-11-12 at the user's request, after the test panel, the extrapolation suite and the mechanism probes had been scored, by an agent that knows the simulator's form from the mechanism scoring: it covers every input, both directions and every shape by principle rather than aiming at any model, and every model, Full included, is scored by the same rule. Frozen before any reference response was computed and before any model was scored on it. Every scored model was frozen beforehand.",
+ "design_basis": {
+  "input_units": "Specification values are in training steps: feed concentration 0.25, feed temperature 10 K, jacket feed 12 K per unit (the largest training step of each input, read from the public training trajectories).",
+  "training_range": "Training moved each input within one step of its base (sines of amplitude 0.75 and period 12, pulses 4 units wide, steps up to 20 units), and the temperature within 349.9-377.0 K.",
+  "hidden_lag": "In the public training data the temperature changes fastest 0.6 time units after a feed-concentration or jacket step and 0.2 after a feed-temperature step: the concentration and jacket pathways add a lag of about 0.4.",
+  "steady_gains": "A feed-concentration step of +1 moved the temperature +11.8 K and a jacket step of +1 moved it +10.5 K in the public training data.",
+  "settling": "The temperature settles within a few time units of a step (public training data), so levels are held at least 6 units and events are spaced to show each recovery.",
+  "sampling": "Horizon 30 and sampling 0.1, as in training. As for every protocol, an input is linear between 0.1-unit knots and its declared jumps; every event time lies on the 0.1 grid.",
+  "preparation": "Hidden quantities reset to the same preparation before every run and only the temperature reading may vary (public prompt, section B); set E shifts the reading by 10 K, as the mechanism probes did, against a basal run with the same shift."
+ },
+ "groups": {
+  "A_range": "Every input up and down to 3 steps, as staircases and as a slow ramp.",
+  "B_time_scale": "Every input inside the training range, faster than training: pulse trains of three widths and multisines down to period 1.",
+  "C_joint": "All three inputs at once: multisines on separate periods, random binary sequences, compounding and opposing steps.",
+  "D_memory_state": "The same event repeated at different times and reactor states, and overlapping events.",
+  "E_operating_point": "Starts 10 K away from the operating temperature with a step right away."
+ },
+ "base_protocol": "train_zero",
+ "calibration": [
+  "train_zero",
+  "train_cf_plus_step",
+  "train_tjf_pulse",
+  "train_tf_minus_step"
+ ],
+ "controls": [
+  {
+   "name": "basal",
+   "specification": {
+    "kind": "constant",
+    "value": [
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "basal_hot",
+   "specification": {
+    "kind": "constant",
+    "value": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "initial_shift": [
+     0.0,
+     10.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "basal_cold",
+   "specification": {
+    "kind": "constant",
+    "value": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "initial_shift": [
+     0.0,
+     -10.0,
+     0.0
+    ]
+   }
+  }
+ ],
+ "probes": [
+  {
+   "name": "a_cf_staircase_up",
+   "group": "A_range",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "step",
+       "start": 2.0,
+       "end": 8.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 8.0,
+       "end": 14.0,
+       "value": 2.0
+      },
+      {
+       "shape": "step",
+       "start": 14.0,
+       "end": 20.0,
+       "value": 3.0
+      }
+     ],
+     [],
+     []
+    ]
+   },
+   "window": [
+    2.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "level_1x",
+     "window": [
+      2.0,
+      8.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_2x",
+     "window": [
+      8.0,
+      14.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_3x",
+     "window": [
+      14.0,
+      20.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "The feed concentration held 6 units at 1, 2 and 3 times the largest training step (above its base), then returned: the settled temperature at each level traces the mechanisms' dependence on temperature and concentration far outside the training range."
+  },
+  {
+   "name": "a_cf_staircase_down",
+   "group": "A_range",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "step",
+       "start": 2.0,
+       "end": 8.0,
+       "value": -1.0
+      },
+      {
+       "shape": "step",
+       "start": 8.0,
+       "end": 14.0,
+       "value": -2.0
+      },
+      {
+       "shape": "step",
+       "start": 14.0,
+       "end": 20.0,
+       "value": -3.0
+      }
+     ],
+     [],
+     []
+    ]
+   },
+   "window": [
+    2.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "level_1x",
+     "window": [
+      2.0,
+      8.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_2x",
+     "window": [
+      8.0,
+      14.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_3x",
+     "window": [
+      14.0,
+      20.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "The feed concentration held 6 units at 1, 2 and 3 times the largest training step (below its base), then returned: the settled temperature at each level traces the mechanisms' dependence on temperature and concentration far outside the training range."
+  },
+  {
+   "name": "a_cf_triangle_ramp",
+   "group": "A_range",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "ramp",
+       "points": [
+        [
+         1.0,
+         0.0
+        ],
+        [
+         8.0,
+         3.0
+        ],
+        [
+         22.0,
+         -3.0
+        ],
+        [
+         29.0,
+         0.0
+        ]
+       ]
+      }
+     ],
+     [],
+     []
+    ]
+   },
+   "window": [
+    1.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "rise_to_3x",
+     "window": [
+      1.0,
+      8.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "fall_to_minus_3x",
+     "window": [
+      8.0,
+      22.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      22.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "A slow triangle ramp of the feed concentration from its base to 3 steps above, down to 3 below and back: a ramp rather than steps sweeps the same range continuously, much slower than any lag."
+  },
+  {
+   "name": "a_tf_staircase_up",
+   "group": "A_range",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [
+      {
+       "shape": "step",
+       "start": 2.0,
+       "end": 8.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 8.0,
+       "end": 14.0,
+       "value": 2.0
+      },
+      {
+       "shape": "step",
+       "start": 14.0,
+       "end": 20.0,
+       "value": 3.0
+      }
+     ],
+     []
+    ]
+   },
+   "window": [
+    2.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "level_1x",
+     "window": [
+      2.0,
+      8.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_2x",
+     "window": [
+      8.0,
+      14.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_3x",
+     "window": [
+      14.0,
+      20.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "The feed temperature held 6 units at 1, 2 and 3 times the largest training step (above its base), then returned: the settled temperature at each level traces the mechanisms' dependence on temperature and concentration far outside the training range."
+  },
+  {
+   "name": "a_tf_staircase_down",
+   "group": "A_range",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [
+      {
+       "shape": "step",
+       "start": 2.0,
+       "end": 8.0,
+       "value": -1.0
+      },
+      {
+       "shape": "step",
+       "start": 8.0,
+       "end": 14.0,
+       "value": -2.0
+      },
+      {
+       "shape": "step",
+       "start": 14.0,
+       "end": 20.0,
+       "value": -3.0
+      }
+     ],
+     []
+    ]
+   },
+   "window": [
+    2.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "level_1x",
+     "window": [
+      2.0,
+      8.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_2x",
+     "window": [
+      8.0,
+      14.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_3x",
+     "window": [
+      14.0,
+      20.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "The feed temperature held 6 units at 1, 2 and 3 times the largest training step (below its base), then returned: the settled temperature at each level traces the mechanisms' dependence on temperature and concentration far outside the training range."
+  },
+  {
+   "name": "a_tf_triangle_ramp",
+   "group": "A_range",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [
+      {
+       "shape": "ramp",
+       "points": [
+        [
+         1.0,
+         0.0
+        ],
+        [
+         8.0,
+         3.0
+        ],
+        [
+         22.0,
+         -3.0
+        ],
+        [
+         29.0,
+         0.0
+        ]
+       ]
+      }
+     ],
+     []
+    ]
+   },
+   "window": [
+    1.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "rise_to_3x",
+     "window": [
+      1.0,
+      8.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "fall_to_minus_3x",
+     "window": [
+      8.0,
+      22.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      22.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "A slow triangle ramp of the feed temperature from its base to 3 steps above, down to 3 below and back: a ramp rather than steps sweeps the same range continuously, much slower than any lag."
+  },
+  {
+   "name": "a_tjf_staircase_up",
+   "group": "A_range",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [],
+     [
+      {
+       "shape": "step",
+       "start": 2.0,
+       "end": 8.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 8.0,
+       "end": 14.0,
+       "value": 2.0
+      },
+      {
+       "shape": "step",
+       "start": 14.0,
+       "end": 20.0,
+       "value": 3.0
+      }
+     ]
+    ]
+   },
+   "window": [
+    2.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "level_1x",
+     "window": [
+      2.0,
+      8.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_2x",
+     "window": [
+      8.0,
+      14.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_3x",
+     "window": [
+      14.0,
+      20.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "The jacket-feed temperature held 6 units at 1, 2 and 3 times the largest training step (above its base), then returned: the settled temperature at each level traces the mechanisms' dependence on temperature and concentration far outside the training range."
+  },
+  {
+   "name": "a_tjf_staircase_down",
+   "group": "A_range",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [],
+     [
+      {
+       "shape": "step",
+       "start": 2.0,
+       "end": 8.0,
+       "value": -1.0
+      },
+      {
+       "shape": "step",
+       "start": 8.0,
+       "end": 14.0,
+       "value": -2.0
+      },
+      {
+       "shape": "step",
+       "start": 14.0,
+       "end": 20.0,
+       "value": -3.0
+      }
+     ]
+    ]
+   },
+   "window": [
+    2.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "level_1x",
+     "window": [
+      2.0,
+      8.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_2x",
+     "window": [
+      8.0,
+      14.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "level_3x",
+     "window": [
+      14.0,
+      20.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "The jacket-feed temperature held 6 units at 1, 2 and 3 times the largest training step (below its base), then returned: the settled temperature at each level traces the mechanisms' dependence on temperature and concentration far outside the training range."
+  },
+  {
+   "name": "a_tjf_triangle_ramp",
+   "group": "A_range",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [],
+     [
+      {
+       "shape": "ramp",
+       "points": [
+        [
+         1.0,
+         0.0
+        ],
+        [
+         8.0,
+         3.0
+        ],
+        [
+         22.0,
+         -3.0
+        ],
+        [
+         29.0,
+         0.0
+        ]
+       ]
+      }
+     ]
+    ]
+   },
+   "window": [
+    1.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "rise_to_3x",
+     "window": [
+      1.0,
+      8.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "fall_to_minus_3x",
+     "window": [
+      8.0,
+      22.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      22.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "A slow triangle ramp of the jacket-feed temperature from its base to 3 steps above, down to 3 below and back: a ramp rather than steps sweeps the same range continuously, much slower than any lag."
+  },
+  {
+   "name": "b_cf_pulse_train",
+   "group": "B_time_scale",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "step",
+       "start": 2.0,
+       "end": 6.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 12.0,
+       "end": 13.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 20.0,
+       "end": 20.3,
+       "value": 1.0
+      }
+     ],
+     [],
+     []
+    ]
+   },
+   "window": [
+    2.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "pulse_width_4",
+     "window": [
+      2.0,
+      12.0
+     ],
+     "timing": true
+    },
+    {
+     "name": "pulse_width_1",
+     "window": [
+      12.0,
+      20.0
+     ],
+     "timing": true
+    },
+    {
+     "name": "pulse_width_0_3",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": true
+    }
+   ],
+   "rationale": "Three pulses of the feed concentration at the largest training step, 4, 1 and 0.3 units wide (training pulses are 4 wide), each followed by its recovery: below about one unit the hidden states' lag shapes the response."
+  },
+  {
+   "name": "b_cf_multisine",
+   "group": "B_time_scale",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "sine",
+       "period": 12.0,
+       "amplitude": 0.3
+      },
+      {
+       "shape": "sine",
+       "period": 4.0,
+       "amplitude": 0.3
+      },
+      {
+       "shape": "sine",
+       "period": 2.0,
+       "amplitude": 0.3
+      },
+      {
+       "shape": "sine",
+       "period": 1.0,
+       "amplitude": 0.3
+      }
+     ],
+     [],
+     []
+    ]
+   },
+   "window": [
+    0.0,
+    30.0
+   ],
+   "events": [],
+   "rationale": "Four sines of the feed concentration at once, periods 12 (training's), 4, 2 and 1, amplitude 0.3 each (peak 0.90, inside the training range): the attenuation and phase at each period follow the hidden states' dynamics."
+  },
+  {
+   "name": "b_tf_pulse_train",
+   "group": "B_time_scale",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [
+      {
+       "shape": "step",
+       "start": 2.0,
+       "end": 6.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 12.0,
+       "end": 13.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 20.0,
+       "end": 20.3,
+       "value": 1.0
+      }
+     ],
+     []
+    ]
+   },
+   "window": [
+    2.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "pulse_width_4",
+     "window": [
+      2.0,
+      12.0
+     ],
+     "timing": true
+    },
+    {
+     "name": "pulse_width_1",
+     "window": [
+      12.0,
+      20.0
+     ],
+     "timing": true
+    },
+    {
+     "name": "pulse_width_0_3",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": true
+    }
+   ],
+   "rationale": "Three pulses of the feed temperature at the largest training step, 4, 1 and 0.3 units wide (training pulses are 4 wide), each followed by its recovery: below about one unit the hidden states' lag shapes the response."
+  },
+  {
+   "name": "b_tf_multisine",
+   "group": "B_time_scale",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [
+      {
+       "shape": "sine",
+       "period": 12.0,
+       "amplitude": 0.3
+      },
+      {
+       "shape": "sine",
+       "period": 4.0,
+       "amplitude": 0.3
+      },
+      {
+       "shape": "sine",
+       "period": 2.0,
+       "amplitude": 0.3
+      },
+      {
+       "shape": "sine",
+       "period": 1.0,
+       "amplitude": 0.3
+      }
+     ],
+     []
+    ]
+   },
+   "window": [
+    0.0,
+    30.0
+   ],
+   "events": [],
+   "rationale": "Four sines of the feed temperature at once, periods 12 (training's), 4, 2 and 1, amplitude 0.3 each (peak 0.90, inside the training range): the attenuation and phase at each period follow the hidden states' dynamics."
+  },
+  {
+   "name": "b_tjf_pulse_train",
+   "group": "B_time_scale",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [],
+     [
+      {
+       "shape": "step",
+       "start": 2.0,
+       "end": 6.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 12.0,
+       "end": 13.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 20.0,
+       "end": 20.3,
+       "value": 1.0
+      }
+     ]
+    ]
+   },
+   "window": [
+    2.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "pulse_width_4",
+     "window": [
+      2.0,
+      12.0
+     ],
+     "timing": true
+    },
+    {
+     "name": "pulse_width_1",
+     "window": [
+      12.0,
+      20.0
+     ],
+     "timing": true
+    },
+    {
+     "name": "pulse_width_0_3",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": true
+    }
+   ],
+   "rationale": "Three pulses of the jacket-feed temperature at the largest training step, 4, 1 and 0.3 units wide (training pulses are 4 wide), each followed by its recovery: below about one unit the hidden states' lag shapes the response."
+  },
+  {
+   "name": "b_tjf_multisine",
+   "group": "B_time_scale",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [],
+     [
+      {
+       "shape": "sine",
+       "period": 12.0,
+       "amplitude": 0.3
+      },
+      {
+       "shape": "sine",
+       "period": 4.0,
+       "amplitude": 0.3
+      },
+      {
+       "shape": "sine",
+       "period": 2.0,
+       "amplitude": 0.3
+      },
+      {
+       "shape": "sine",
+       "period": 1.0,
+       "amplitude": 0.3
+      }
+     ]
+    ]
+   },
+   "window": [
+    0.0,
+    30.0
+   ],
+   "events": [],
+   "rationale": "Four sines of the jacket-feed temperature at once, periods 12 (training's), 4, 2 and 1, amplitude 0.3 each (peak 0.90, inside the training range): the attenuation and phase at each period follow the hidden states' dynamics."
+  },
+  {
+   "name": "c_joint_multisine_2x",
+   "group": "C_joint",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "sine",
+       "period": 6.0,
+       "amplitude": 0.823
+      },
+      {
+       "shape": "sine",
+       "period": 2.0,
+       "amplitude": 0.823
+      },
+      {
+       "shape": "sine",
+       "period": 1.0,
+       "amplitude": 0.823
+      }
+     ],
+     [
+      {
+       "shape": "sine",
+       "period": 5.0,
+       "amplitude": 0.717
+      },
+      {
+       "shape": "sine",
+       "period": 1.7,
+       "amplitude": 0.717
+      },
+      {
+       "shape": "sine",
+       "period": 1.1,
+       "amplitude": 0.717
+      }
+     ],
+     [
+      {
+       "shape": "sine",
+       "period": 4.0,
+       "amplitude": 0.675
+      },
+      {
+       "shape": "sine",
+       "period": 1.4,
+       "amplitude": 0.675
+      },
+      {
+       "shape": "sine",
+       "period": 1.2,
+       "amplitude": 0.675
+      }
+     ]
+    ]
+   },
+   "window": [
+    0.0,
+    30.0
+   ],
+   "events": [],
+   "rationale": "Three sines on each input, with a different set of periods on each (feed concentration 6, 2, 1; feed temperature 5, 1.7, 1.1; jacket feed 4, 1.4, 1.2), each input peaking at 2 steps (amplitudes 0.823, 0.717, 0.675): every input is separable by frequency, and the reactor's nonlinearity mixes them."
+  },
+  {
+   "name": "c_joint_random_binary",
+   "group": "C_joint",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "step",
+       "start": 1.0,
+       "end": 1.8,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 1.8,
+       "end": 3.5,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 3.5,
+       "end": 7.1,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 7.1,
+       "end": 8.0,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 8.0,
+       "end": 9.7,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 9.7,
+       "end": 11.3,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 11.3,
+       "end": 14.1,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 14.1,
+       "end": 15.0,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 15.0,
+       "end": 16.6,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 16.6,
+       "end": 17.4,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 17.4,
+       "end": 19.3,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 19.3,
+       "end": 20.0,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 20.0,
+       "end": 21.9,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 21.9,
+       "end": 25.5,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 25.5,
+       "end": 26.3,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 26.3,
+       "end": 29.0,
+       "value": -1.5
+      }
+     ],
+     [
+      {
+       "shape": "step",
+       "start": 1.0,
+       "end": 2.1,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 2.1,
+       "end": 3.1,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 3.1,
+       "end": 3.9,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 3.9,
+       "end": 7.5,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 7.5,
+       "end": 9.4,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 9.4,
+       "end": 11.7,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 11.7,
+       "end": 15.2,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 15.2,
+       "end": 16.7,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 16.7,
+       "end": 18.4,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 18.4,
+       "end": 19.7,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 19.7,
+       "end": 21.3,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 21.3,
+       "end": 23.0,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 23.0,
+       "end": 26.6,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 26.6,
+       "end": 29.0,
+       "value": -1.5
+      }
+     ],
+     [
+      {
+       "shape": "step",
+       "start": 1.0,
+       "end": 2.0,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 2.0,
+       "end": 2.9,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 2.9,
+       "end": 4.3,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 4.3,
+       "end": 7.9,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 7.9,
+       "end": 11.1,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 11.1,
+       "end": 13.4,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 13.4,
+       "end": 15.3,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 15.3,
+       "end": 16.7,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 16.7,
+       "end": 18.6,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 18.6,
+       "end": 22.5,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 22.5,
+       "end": 25.5,
+       "value": -1.5
+      },
+      {
+       "shape": "step",
+       "start": 25.5,
+       "end": 26.6,
+       "value": 1.5
+      },
+      {
+       "shape": "step",
+       "start": 26.6,
+       "end": 29.0,
+       "value": -1.5
+      }
+     ]
+    ]
+   },
+   "window": [
+    1.0,
+    30.0
+   ],
+   "events": [],
+   "rationale": "Random binary sequences on all three inputs between -1.5 and +1.5 steps, switching after dwell times drawn uniformly from 0.5 to 4 units (rounded to 0.1; numpy default_rng(20261112), inputs in the order feed concentration, feed temperature, jacket feed), from t = 1 to 29: broadband rectangular excitation of every pathway at once."
+  },
+  {
+   "name": "c_joint_all_up_2x",
+   "group": "C_joint",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "step",
+       "start": 5.0,
+       "end": 20.0,
+       "value": 2.0
+      }
+     ],
+     [
+      {
+       "shape": "step",
+       "start": 5.0,
+       "end": 20.0,
+       "value": 2.0
+      }
+     ],
+     [
+      {
+       "shape": "step",
+       "start": 5.0,
+       "end": 20.0,
+       "value": 2.0
+      }
+     ]
+    ]
+   },
+   "window": [
+    5.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "step_on",
+     "window": [
+      5.0,
+      20.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "All three inputs stepped up by 2 steps at once: their effects compound, taking the temperature to its highest level in the suite."
+  },
+  {
+   "name": "c_joint_all_down_2x",
+   "group": "C_joint",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "step",
+       "start": 5.0,
+       "end": 20.0,
+       "value": -2.0
+      }
+     ],
+     [
+      {
+       "shape": "step",
+       "start": 5.0,
+       "end": 20.0,
+       "value": -2.0
+      }
+     ],
+     [
+      {
+       "shape": "step",
+       "start": 5.0,
+       "end": 20.0,
+       "value": -2.0
+      }
+     ]
+    ]
+   },
+   "window": [
+    5.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "step_on",
+     "window": [
+      5.0,
+      20.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "All three inputs stepped down by 2 steps at once: their effects compound, taking the temperature to its lowest level in the suite."
+  },
+  {
+   "name": "c_joint_opposing_cf_tjf_2x",
+   "group": "C_joint",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "step",
+       "start": 5.0,
+       "end": 20.0,
+       "value": 2.0
+      }
+     ],
+     [],
+     [
+      {
+       "shape": "step",
+       "start": 5.0,
+       "end": 20.0,
+       "value": -2.2
+      }
+     ]
+    ]
+   },
+   "window": [
+    5.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "step_on",
+     "window": [
+      5.0,
+      20.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "Feed concentration up 2 steps with the jacket feed down 2.2: by the public training gains (+11.8 K and +10.5 K per step) their settled effects nearly cancel, so the response is the two hidden pathways' dynamics and nonlinearity at twice the training size."
+  },
+  {
+   "name": "d_feed_pulses_jacket_warm",
+   "group": "D_memory_state",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "step",
+       "start": 3.0,
+       "end": 5.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 13.0,
+       "end": 15.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 23.0,
+       "end": 25.0,
+       "value": 1.0
+      }
+     ],
+     [],
+     [
+      {
+       "shape": "step",
+       "start": 9.0,
+       "end": 19.0,
+       "value": 2.0
+      }
+     ]
+    ]
+   },
+   "window": [
+    3.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "feed_pulse_at_base",
+     "window": [
+      3.0,
+      9.0
+     ],
+     "timing": true
+    },
+    {
+     "name": "jacket_warm_on",
+     "window": [
+      9.0,
+      13.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "feed_pulse_jacket_warm",
+     "window": [
+      13.0,
+      19.0
+     ],
+     "timing": true
+    },
+    {
+     "name": "jacket_return",
+     "window": [
+      19.0,
+      23.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "feed_pulse_at_base_again",
+     "window": [
+      23.0,
+      30.0
+     ],
+     "timing": true
+    }
+   ],
+   "rationale": "The same 2-unit feed-concentration pulse three times; the jacket feed is held 2 steps up around the second, so the reactor is hot when it arrives: a correct model changes the pulse's effect with the reactor's state and repeats it exactly at the base state."
+  },
+  {
+   "name": "d_feed_pulses_jacket_cool",
+   "group": "D_memory_state",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "step",
+       "start": 3.0,
+       "end": 5.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 13.0,
+       "end": 15.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 23.0,
+       "end": 25.0,
+       "value": 1.0
+      }
+     ],
+     [],
+     [
+      {
+       "shape": "step",
+       "start": 9.0,
+       "end": 19.0,
+       "value": -2.0
+      }
+     ]
+    ]
+   },
+   "window": [
+    3.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "feed_pulse_at_base",
+     "window": [
+      3.0,
+      9.0
+     ],
+     "timing": true
+    },
+    {
+     "name": "jacket_cool_on",
+     "window": [
+      9.0,
+      13.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "feed_pulse_jacket_cool",
+     "window": [
+      13.0,
+      19.0
+     ],
+     "timing": true
+    },
+    {
+     "name": "jacket_return",
+     "window": [
+      19.0,
+      23.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "feed_pulse_at_base_again",
+     "window": [
+      23.0,
+      30.0
+     ],
+     "timing": true
+    }
+   ],
+   "rationale": "The same 2-unit feed-concentration pulse three times; the jacket feed is held 2 steps down around the second, so the reactor is cold when it arrives: a correct model changes the pulse's effect with the reactor's state and repeats it exactly at the base state."
+  },
+  {
+   "name": "d_jacket_pulses_overlapping",
+   "group": "D_memory_state",
+   "control": "basal",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [],
+     [
+      {
+       "shape": "step",
+       "start": 4.0,
+       "end": 5.0,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 5.5,
+       "end": 6.5,
+       "value": 1.0
+      },
+      {
+       "shape": "step",
+       "start": 20.0,
+       "end": 21.0,
+       "value": 1.0
+      }
+     ]
+    ]
+   },
+   "window": [
+    4.0,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "jacket_pulse_1",
+     "window": [
+      4.0,
+      5.5
+     ],
+     "timing": false
+    },
+    {
+     "name": "jacket_pulse_2_overlapping",
+     "window": [
+      5.5,
+      20.0
+     ],
+     "timing": true
+    },
+    {
+     "name": "jacket_pulse_3_isolated",
+     "window": [
+      20.0,
+      30.0
+     ],
+     "timing": true
+    }
+   ],
+   "rationale": "Three 1-unit jacket-feed pulses: the second starts 0.5 after the first ends, before its effect has decayed, and the third is isolated: carry-over between events and repeatability in time. The first pulse's window closes when the second begins, so only its direction is read, not its peak time."
+  },
+  {
+   "name": "e_hot_start_feed_up_2x",
+   "group": "E_operating_point",
+   "control": "basal_hot",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [
+      {
+       "shape": "step",
+       "start": 0.5,
+       "end": 10.0,
+       "value": 2.0
+      }
+     ],
+     [],
+     []
+    ],
+    "initial_shift": [
+     0.0,
+     10.0,
+     0.0
+    ]
+   },
+   "window": [
+    0.5,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "step_on",
+     "window": [
+      0.5,
+      10.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      10.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "Start 10 K above the operating temperature and step the feed concentration up 2 steps at once: the reaction is fastest while the reactor is hot."
+  },
+  {
+   "name": "e_cold_start_jacket_cool_2x",
+   "group": "E_operating_point",
+   "control": "basal_cold",
+   "specification": {
+    "kind": "composite",
+    "channels": [
+     [],
+     [],
+     [
+      {
+       "shape": "step",
+       "start": 0.5,
+       "end": 10.0,
+       "value": -2.0
+      }
+     ]
+    ],
+    "initial_shift": [
+     0.0,
+     -10.0,
+     0.0
+    ]
+   },
+   "window": [
+    0.5,
+    30.0
+   ],
+   "events": [
+    {
+     "name": "step_on",
+     "window": [
+      0.5,
+      10.0
+     ],
+     "timing": false
+    },
+    {
+     "name": "return",
+     "window": [
+      10.0,
+      30.0
+     ],
+     "timing": false
+    }
+   ],
+   "rationale": "Start 10 K below the operating temperature and cool the jacket feed 2 steps at once: exchange and reaction far below the operating point."
+  }
+ ],
+ "validity": {
+  "applied": "To the references alone, after they are computed and before any model is scored. A trajectory that fails is dropped and reported as dropped; a control that fails drops every trajectory measured against it.",
+  "solver_agreement": {
+   "solvers": [
+    "DOP853",
+    "Radau"
+   ],
+   "tolerance": 2e-06
+  },
+  "concentration_positive": true,
+  "knife_edge": {
+   "mechanism_scales": [
+    "reactant_reaction",
+    "feed_transport",
+    "reaction_heat",
+    "jacket_exchange",
+    "jacket_dynamics"
+   ],
+   "factors": [
+    0.99,
+    1.01
+   ],
+   "quantity": "T",
+   "solver": "DOP853",
+   "max_response_rse": 0.05,
+   "meaning": "Each of the simulator's mechanism scales (its own sensitivity hook) changed by 1% in turn, trajectory and control alike: the temperature response must stay within 0.05 RSE of the unchanged one, so that no trajectory sits on a knife edge where a tiny error flips the outcome."
+  }
+ },
+ "metrics": {
+  "response_rse": "Primary. The study's evaluate_one effect_rse of the temperature response against the matched control over the whole trajectory; predicting no response gives 1.",
+  "trajectory_nmse": "The study's absolute_nmse: squared temperature error over the trajectory divided by the training variance, as in the test column.",
+  "events": "For an event window a <= t < b (half-open, so it never holds the first sample of the next event), the event's effect is the response's change since a: e(t) = d(t) - d(a). Direction: the signs of the true and predicted effects at their largest magnitudes agree; a predicted effect below the study's floor counts as wrong. Peak delay, for timing events only: time of the predicted largest effect minus time of the true one. Event RSE: mean((e_pred - e_true)^2) / mean(e_true^2) over the window.",
+  "failure": "A rollout that fails, disagrees between solvers or cannot be read, and a seed that retained no model, count as failed, worse than any value.",
+  "exposure": "A model is exposed by a trajectory when it fails there, its response RSE is 1 or more (no better than predicting no response), or it gets the direction of any event wrong."
+ },
+ "test_data_opened": false
+}

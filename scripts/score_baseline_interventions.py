@@ -23,6 +23,8 @@ Stages, in order:
   study's own frozen models may join the scored subjects.
 * ``rehearse``: the same predictor on the public validation trajectories, beside
   each run's recorded validation error.
+* ``validity``: for a suite that declares a validity rule, its references and
+  the rule applied to them alone, before any model is scored.
 * ``score``: reference responses and paired metrics. Optionally rescores named
   models of the study itself, to show the shared code reproduces its numbers.
 * ``report``: one row per method, cell, case and seed, and a summary over seeds.
@@ -46,6 +48,10 @@ from autoformalism.baselines.d3_rollout import NativeMap
 from autoformalism.baselines.d3_rollout import predict as native_rollout
 from autoformalism.baselines.hybrid_networks import NetworkSpec
 from autoformalism.baselines.models import BaselineDevelopmentResult
+from autoformalism.benchmarks.phase_b_generation import (
+    PhaseBProtocol,
+    simulate_phase_b,
+)
 from autoformalism.benchmarks.phase_c_protocols import phase_c_protocols
 from autoformalism.benchmarks.phase_c_release import SPEC_PATHS, load_public_cell
 from autoformalism.expressions import (
@@ -55,6 +61,7 @@ from autoformalism.expressions import (
 )
 from autoformalism.fitting import FitConfig, simulate_trajectory
 from autoformalism.fitting import public_fitting as public
+from autoformalism.rebuttal import composite_inputs
 from autoformalism.rebuttal import llm_sr_transcriptions as transcriptions
 from autoformalism.rebuttal import phase_c_baseline_mechanisms as mechanisms
 from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
@@ -62,6 +69,7 @@ from autoformalism.rebuttal.llm_sr_programs import observation_step
 from autoformalism.rebuttal.mechanism_probes import _native
 from autoformalism.rebuttal.phase_c_baselines import load_cell, tier_of, verify_release
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
+from autoformalism.reference_integration import ReferenceSolver
 from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.public_fitting import PublicSplit
 from scripts import evaluate_t2_latent_dynamics as probe
@@ -96,7 +104,12 @@ def _digest(path: Path) -> str:
 
 def evaluator_identity() -> dict:
     """The study code whose schedules, references and metrics are reused."""
-    files = (Path(anchor.__file__), Path(probe.__file__), Path(__file__))
+    files = (
+        Path(anchor.__file__),
+        Path(probe.__file__),
+        Path(__file__),
+        Path(composite_inputs.__file__),
+    )
     return {path.name: _digest(path) for path in files}
 
 
@@ -125,9 +138,10 @@ def public_cells(release: Path, names) -> dict:
 def suite_schedules(cell: str, suite: dict) -> dict:
     """A frozen suite's schedules, built as the study builds its own.
 
-    Calibration schedules are the named training protocols; the control and
+    Calibration schedules are the named training protocols; each control and
     every probe copy the base training protocol with only their input
-    specification changed, as ``anchor.cases`` does.
+    specification changed, as ``anchor.cases`` does. A suite names one
+    ``control``, or several ``controls`` with each probe naming its own.
     """
     if suite.get("status") != "frozen_before_references" or suite["cell"] != cell:
         raise ValueError("the suite is not frozen for this cell")
@@ -144,30 +158,42 @@ def suite_schedules(cell: str, suite: dict) -> dict:
     base = by_id[suite["base_protocol"]].model_dump(mode="json")
 
     def protocol(name, specification):
+        if specification.get("kind") == composite_inputs.KIND:
+            composite_inputs.validate(specification, base["duration"])
         return base | {
             "protocol_id": "test_probe_" + name,
             "split": "test",
             "specification": specification,
         }
 
-    control = suite["control"]
-    table[control["name"]] = {
-        "protocol": protocol(control["name"], control["specification"]),
-        "role": "control",
-        "control": None,
-        "window": None,
-    }
+    if ("control" in suite) == ("controls" in suite):
+        raise ValueError("a suite names either one control or a list of controls")
+    controls = suite["controls"] if "controls" in suite else [suite["control"]]
+    for control in controls:
+        if control["name"] in table:
+            raise ValueError(f"control {control['name']} repeats a schedule name")
+        table[control["name"]] = {
+            "protocol": protocol(control["name"], control["specification"]),
+            "role": "control",
+            "control": None,
+            "window": None,
+        }
     for probe_case in suite["probes"]:
         name = probe_case["name"]
         if name in table:
             raise ValueError(f"probe {name} repeats a schedule name")
+        named = probe_case.get("control") if "controls" in suite else None
+        if "controls" in suite and table.get(named, {}).get("role") != "control":
+            raise ValueError(f"probe {name} names no control of the suite")
         table[name] = {
             "protocol": protocol(name, probe_case["specification"]),
             "role": "contrast",
-            "control": control["name"],
+            "control": named or controls[0]["name"],
             "window": list(probe_case["window"]),
             "group": probe_case["group"],
         }
+        if "events" in probe_case:
+            table[name]["events"] = probe_case["events"]
     return table
 
 
@@ -511,6 +537,7 @@ def freeze(
                 else anchor.cases(c, MODE)
                 for c in sorted(cells)
             },
+            "validity_rule": frozen_suite.get("validity") if frozen_suite else None,
             "study_rows": (
                 [r for c in sorted(cells) for r in study_rows(study_models, c)]
                 if study_models
@@ -631,39 +658,177 @@ def _parity_rows(paths: list[Path], keep: set[str]) -> list[dict]:
     return rows
 
 
+def references(root: Path, data_root: Path, plan: dict) -> dict:
+    """Each schedule's reference record, DOP853 checked against Radau.
+
+    Under a suite's validity rule a reference the solvers cannot agree on is
+    recorded, so the rule drops its trajectory; otherwise it stops the run.
+    """
+    rule = plan.get("validity_rule")
+    tolerance = rule["solver_agreement"]["tolerance"] if rule else 2e-6
+    records = {}
+    with composite_inputs.extended():
+        for cell, schedule in plan["schedules"].items():
+            records[cell] = {}
+            for case, item in schedule.items():
+                path = root / "references" / cell / f"{case}.json"
+                if not path.exists():
+                    try:
+                        a, b = (
+                            anchor.reference(cell, item, data_root, method)
+                            for method in ("DOP853", "Radau")
+                        )
+                        gap = probe.solver_agreement(a, b, tolerance)
+                        value = {"reference": a, "solver_gap": gap}
+                    except (ValueError, RuntimeError, ArithmeticError) as exc:
+                        if not rule:
+                            raise
+                        value = {"error": str(exc)}
+                    sealed_write(path, {"plan": plan["artifact_sha256"], **value})
+                record = sealed_read(path)
+                if record["plan"] != plan["artifact_sha256"]:
+                    raise ValueError("stale reference checkpoint")
+                records[cell][case] = record
+    return records
+
+
+def _response_rse(changed: np.ndarray, nominal: np.ndarray) -> float:
+    return float(np.mean((changed - nominal) ** 2) / np.mean(nominal**2))
+
+
+def validity(root: Path, data_root: Path) -> dict:
+    """Apply the frozen suite's validity rule to the references alone.
+
+    Runs before any model is scored. A trajectory is dropped when its reference
+    or its control's cannot be agreed by the two solvers, when the hidden
+    concentration does not stay positive, or when changing one of the
+    simulator's mechanism scales by the rule's factors moves the response by
+    the rule's RSE or more (a knife edge, where a tiny error flips the outcome).
+    """
+    plan = sealed_read(root / "plan.json")
+    rule = plan.get("validity_rule")
+    if plan["protocol"] != PROTOCOL or plan["evaluator"] != evaluator_identity():
+        raise ValueError("the plan or the study's evaluator changed since freezing")
+    if not rule:
+        raise ValueError("this plan declares no validity rule")
+    if (root / "validity.json").exists():
+        raise ValueError("the validity rule was already applied")
+    if any((folder / "subjects").exists() for folder in (root, root / "study")):
+        raise ValueError("a model was scored before the validity rule was applied")
+    edge = rule["knife_edge"]
+    records = references(root, data_root, plan)
+    rows, dropped = [], set()
+    scaled: dict = {}
+
+    def response(schedule, case, scale, factor):
+        """The temperature with one mechanism scale changed, computed once."""
+        key = (case, scale, factor)
+        if key not in scaled:
+            traj = simulate_phase_b(
+                PhaseBProtocol.model_validate(schedule[case]["protocol"]),
+                data_root=data_root,
+                private_mechanism_scales={scale: factor},
+                solver=ReferenceSolver(method=edge["solver"]),
+            )
+            scaled[key] = traj.states[:, traj.state_names.index(edge["quantity"])]
+        return scaled[key]
+
+    with composite_inputs.extended():
+        for cell, schedule in plan["schedules"].items():
+            if cell != anchor.fits.CSTR:
+                raise ValueError("the validity rule is defined for the reactor")
+            refs = records[cell]
+            for name, item in schedule.items():
+                if item["role"] == "control" and "error" in refs[name]:
+                    dropped.add(name)
+            for case, item in schedule.items():
+                if item["role"] != "contrast":
+                    continue
+                control = item["control"]
+                row = {"case": case, "control": control, "reasons": []}
+                failed = [n for n in (case, control) if "error" in refs[n]]
+                for name in failed:
+                    row["reasons"].append(f"{name}: {refs[name]['error']}")
+                if not failed:
+                    lowest = min(
+                        min(refs[n]["reference"]["C"]) for n in (case, control)
+                    )
+                    row["lowest_concentration"] = lowest
+                    if rule.get("concentration_positive") and lowest <= 0:
+                        row["reasons"].append(
+                            "the concentration does not stay positive"
+                        )
+                    quantity = edge["quantity"]
+                    nominal = np.subtract(
+                        refs[case]["reference"][quantity],
+                        refs[control]["reference"][quantity],
+                    )
+                    worst = {"rse": 0.0, "scale": None, "factor": None}
+                    for scale in edge["mechanism_scales"]:
+                        for factor in edge["factors"]:
+                            changed = response(
+                                schedule, case, scale, factor
+                            ) - response(schedule, control, scale, factor)
+                            rse = _response_rse(changed, nominal)
+                            if rse > worst["rse"]:
+                                worst = {"rse": rse, "scale": scale, "factor": factor}
+                    row["knife_edge"] = worst
+                    if worst["rse"] >= edge["max_response_rse"]:
+                        row["reasons"].append(
+                            f"{worst['scale']} x{worst['factor']:g} moves the response "
+                            f"by RSE {worst['rse']:.3g}"
+                        )
+                row["kept"] = not row["reasons"]
+                if not row["kept"]:
+                    dropped.add(case)
+                rows.append(row)
+    return sealed_write(
+        root / "validity.json",
+        {
+            "plan": plan["artifact_sha256"],
+            "rule": rule,
+            "rows": rows,
+            "kept": sorted(r["case"] for r in rows if r["kept"]),
+            "dropped": sorted(dropped),
+            "models_scored": False,
+            "private_reference_opened": True,
+        },
+    )
+
+
 def score(
     root: Path,
     data_root: Path,
     parity_models: list[Path] | None = None,
     parity_ids: set[str] | None = None,
 ) -> dict:
-    """Reference responses, then the study's paired metrics for every subject."""
+    """Reference responses, then the study's paired metrics for every subject.
+
+    Under a suite's validity rule, only the trajectories the rule kept are
+    scored, and the rule must have been applied first.
+    """
     plan = sealed_read(root / "plan.json")
     if plan["protocol"] != PROTOCOL or plan["evaluator"] != evaluator_identity():
         raise ValueError("the plan or the study's evaluator changed since freezing")
+    schedules = plan["schedules"]
+    if plan.get("validity_rule"):
+        if not (root / "validity.json").exists():
+            raise ValueError("apply the suite's validity rule before scoring a model")
+        verdict = sealed_read(root / "validity.json")
+        if verdict["plan"] != plan["artifact_sha256"]:
+            raise ValueError("the validity record belongs to another plan")
+        schedules = {
+            cell: {k: v for k, v in s.items() if k not in verdict["dropped"]}
+            for cell, s in schedules.items()
+        }
+    records = references(root, data_root, plan)
     refs = {}
-    for cell, schedule in plan["schedules"].items():
+    for cell, schedule in schedules.items():
         refs[cell] = {}
-        for case, item in schedule.items():
-            path = root / "references" / cell / f"{case}.json"
-            if not path.exists():
-                a, b = (
-                    anchor.reference(cell, item, data_root, method)
-                    for method in ("DOP853", "Radau")
-                )
-                gap = probe.solver_agreement(a, b, 2e-6)
-                sealed_write(
-                    path,
-                    {
-                        "plan": plan["artifact_sha256"],
-                        "reference": a,
-                        "solver_gap": gap,
-                    },
-                )
-            record = sealed_read(path)
-            if record["plan"] != plan["artifact_sha256"]:
-                raise ValueError("stale reference checkpoint")
-            refs[cell][case] = record["reference"]
+        for case in schedule:
+            if "error" in records[cell][case]:
+                raise ValueError(f"{case} has no reference: {records[cell][case]}")
+            refs[cell][case] = records[cell][case]["reference"]
     # The study's own models are scored under a root of their own, so a subject
     # index always names the same model as its checkpoints.
     groups = [(root, plan["rows"], False)]
@@ -685,7 +850,7 @@ def score(
                         folder,
                         i,
                         row,
-                        plan["schedules"][cell],
+                        schedules[cell],
                         refs[cell],
                         plan["artifact_sha256"],
                         plan["training_sd"][cell],
@@ -796,7 +961,9 @@ def _sources(values: list[str]) -> dict[str, Path]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=("freeze", "rehearse", "score", "report"))
+    parser.add_argument(
+        "stage", choices=("freeze", "rehearse", "validity", "score", "report")
+    )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument(
         "--release", type=Path, default=Path("artifacts/phase-c-development-final-v2")
@@ -823,6 +990,11 @@ if __name__ == "__main__":
         print(out["artifact_sha256"], len(out["rows"]), "subjects")
     elif a.stage == "rehearse":
         print(json.dumps(rehearse(a.root, a.release)["rows"], indent=1))
+    elif a.stage == "validity":
+        out = validity(a.root, a.data_root)
+        print(
+            out["artifact_sha256"], "kept", len(out["kept"]), "dropped", out["dropped"]
+        )
     elif a.stage == "score":
         out = score(a.root, a.data_root, a.parity_models, set(a.parity_id))
         for part in out.get("scores", [out]):
