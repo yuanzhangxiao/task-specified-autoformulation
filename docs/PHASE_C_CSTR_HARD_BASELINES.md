@@ -55,5 +55,28 @@ the previous one has ended. From a clean checkout of this branch on js2:
 nohup bash scripts/jetstream/run_phase_c_cstr_hard.sh > ~/af/runs/cstr-hard-chain.log 2>&1 < /dev/null &
 ```
 
+## HDTwinGen and spec-informed SINDy
+
+These two ran first on the nine Phase B cases, whose staged inputs their
+runners read. A plan may now name the Phase C release instead
+(`inputs_protocol: phase-c-development-2` with its `release_summary_sha256`);
+its cell is then read from the release as Phase C D3 reads it, with that cell's
+public context. The nine-case plans and runs are unchanged
+(`tests/test_phase_c_cstr_hard_hybrid_plans.py`).
+
+| Plan (`configs/…`) | Frozen source | Tasks |
+|---|---|---|
+| `phase_c_cstr_hard_hdtwingen_hosted_120b_v1` | `phase_b_nine_case_hdtwingen_hosted_120b_v1` | 3, at most 117 requests |
+| `phase_c_cstr_hard_spec_sindy_hosted_120b_v1` | `phase_b_nine_case_spec_sindy_hosted_120b_v1` | 3, 3 requests |
+
+Only the cell and where it is read from differ; the nine-case plans already
+ran seeds 0, 1 and 2. From a clean checkout of branch
+`phase-c-cstr-hard-hybrid` on js2:
+
+```bash
+bash scripts/jetstream/run_phase_b_hosted.sh hdtwingen configs/phase_c_cstr_hard_hdtwingen_hosted_120b_v1.json phase-c-cstr-hard-hdtwingen-hosted-120b-v1 3
+bash scripts/jetstream/run_phase_b_hosted.sh spec_sindy configs/phase_c_cstr_hard_spec_sindy_hosted_120b_v1.json phase-c-cstr-hard-spec-sindy-hosted-120b-v1 3
+```
+
 Scoring is a separate step: every pick is frozen first, failures included, and
 then scored on the study's held-out intervention schedules.

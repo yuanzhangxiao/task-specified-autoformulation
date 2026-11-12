@@ -20,6 +20,7 @@ from autoformalism.baselines.d3 import (
     run_d3_native_no_tools_development,
 )
 from autoformalism.baselines.d3_rollout import evaluate_validation
+from autoformalism.baselines.hybrid_networks import NetworkSpec
 from autoformalism.baselines.models import BaselineConfig, BaselineDevelopmentResult
 from autoformalism.data import BenchmarkRegistry, DevelopmentDataset
 from autoformalism.expressions import ValidationContext
@@ -399,6 +400,12 @@ def discover_and_seal(
                 data.validation,
                 seconds=trajectory_seconds,
                 saved_one_step_nmse=selected.validation_normalized_mse,
+                # A hybrid model's networks; a white-box model has none.
+                networks=tuple(
+                    NetworkSpec.model_validate(item)
+                    for item in payload.get("networks", ())
+                ),
+                network_weights=payload.get("network_weights"),
             )
             status = (
                 evaluation["phase_b_rollout"]["status"]

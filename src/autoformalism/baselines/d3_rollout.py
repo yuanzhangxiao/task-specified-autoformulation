@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from time import monotonic
 from types import SimpleNamespace
 
@@ -14,6 +15,12 @@ from autoformalism.baselines.d3_native import (
     _ordered_processes,
     _target_scales,
     validate_native_candidate,
+)
+from autoformalism.baselines.hybrid_networks import (
+    NetworkSpec,
+    check_networks,
+    check_weights,
+    numpy_outputs,
 )
 from autoformalism.data import DatasetSplit, SplitName, TrainingScaler, Trajectory
 from autoformalism.expressions.baseline_functions import NUMPY_BASELINE_FUNCTIONS
@@ -70,6 +77,10 @@ class NativeMap:
     processes: tuple[tuple[str, ast.AST], ...]
     equations: tuple[ast.AST, ...]
     bounds_violations: tuple[dict, ...]
+    #: A hybrid model's networks, their parsed inputs and fitted weights.
+    networks: tuple[NetworkSpec, ...] = ()
+    network_inputs: dict = field(default_factory=dict)
+    network_weights: dict = field(default_factory=dict)
 
     @classmethod
     def build(
@@ -78,10 +89,27 @@ class NativeMap:
         parameters: dict[str, float],
         observed: tuple[str, ...],
         inputs: tuple[str, ...],
+        *,
+        networks: tuple[NetworkSpec, ...] = (),
+        network_weights: Mapping[str, list[dict]] | None = None,
     ) -> NativeMap:
         """Reject malformed models, but audit native Adam's unenforced bounds."""
-        validate_native_candidate(candidate, observed, inputs)
         names = {item.name for item in candidate.parameters}
+        parsed_networks = check_networks(
+            networks,
+            input_symbols={*observed, *inputs, *names, "t"},
+            taken={
+                *observed,
+                *inputs,
+                *names,
+                *(item.name for item in candidate.processes),
+                "t",
+            },
+        )
+        arrays = check_weights(networks, network_weights or {}) if networks else {}
+        validate_native_candidate(
+            candidate, observed, (*inputs, *(spec.name for spec in networks))
+        )
         if set(parameters) != names:
             raise ValueError("require exactly every saved global parameter")
         if not all(
@@ -92,7 +120,7 @@ class NativeMap:
         ):
             raise ValueError("saved parameters must be finite")
         parser = baseline_parser()
-        available = {*observed, *inputs, *names, "t"}
+        available = {*observed, *inputs, *names, "t", *parsed_networks}
         processes = tuple(
             (item.name, parser.parse(item.expression, location=item.name).tree.body)
             for item in _ordered_processes(candidate, available)
@@ -117,12 +145,26 @@ class NativeMap:
                 parser.parse(rhs[state], location=state).tree.body for state in states
             ),
             violations,
+            tuple(networks),
+            parsed_networks,
+            arrays,
         )
 
     def increment(self, environment: dict) -> np.ndarray:
         """Evaluate only restricted ASTs; never reinterpret increments as rates."""
         environment = {**environment, **self.parameters}
         with np.errstate(over="raise", divide="raise", invalid="raise"):
+            if self.networks:
+                environment.update(
+                    numpy_outputs(
+                        self.networks,
+                        self.network_inputs,
+                        self.network_weights,
+                        environment,
+                        _evaluate,
+                        _NUMPY,
+                    )
+                )
             for name, node in self.processes:
                 environment[name] = _evaluate(node, environment, _NUMPY)
             values = np.asarray(
@@ -245,8 +287,13 @@ def evaluate_validation(
     *,
     seconds: float = 120.0,
     saved_one_step_nmse: float | None = None,
+    networks: tuple[NetworkSpec, ...] = (),
+    network_weights: Mapping[str, list[dict]] | None = None,
 ) -> dict:
-    """Compare native one-step and Phase-B target-recursive validation only."""
+    """Compare native one-step and Phase-B target-recursive validation only.
+
+    A hybrid model passes its declared `networks` and their fitted weights.
+    """
     if not np.isfinite(seconds) or seconds <= 0:
         raise ValueError("require a positive finite trajectory time limit")
     if train.name is not SplitName.TRAIN or validation.name is not SplitName.VALIDATION:
@@ -267,7 +314,14 @@ def evaluate_validation(
             or set(trajectory.fixed_covariates) != set(first.fixed_covariates)
         ):
             raise ValueError("development channel identities differ")
-    model = NativeMap.build(candidate, parameters, observed, inputs)
+    model = NativeMap.build(
+        candidate,
+        parameters,
+        observed,
+        inputs,
+        networks=networks,
+        network_weights=network_weights,
+    )
     native = _metrics(
         model,
         validation,
@@ -317,6 +371,8 @@ def evaluate_sealed_test(
     test: DatasetSplit,
     *,
     seconds: float = 300.0,
+    networks: tuple[NetworkSpec, ...] = (),
+    network_weights: Mapping[str, list[dict]] | None = None,
 ) -> dict:
     """Replay the native increment map on sealed test trajectories.
 
@@ -344,7 +400,14 @@ def evaluate_sealed_test(
             raise ValueError("require at least two samples per trajectory")
         if set(trajectory.targets) != set(targets):
             raise ValueError("sealed test target identities differ from training")
-    model = NativeMap.build(candidate, parameters, observed, inputs)
+    model = NativeMap.build(
+        candidate,
+        parameters,
+        observed,
+        inputs,
+        networks=networks,
+        network_weights=network_weights,
+    )
     fitted = TrainingScaler().fit(train).scales
     scales = {
         name: float(fitted[f"target:{name}"].standard_deviation) for name in targets
