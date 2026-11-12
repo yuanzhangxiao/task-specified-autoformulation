@@ -32,7 +32,7 @@ def _terms(text):
     tree = ast.parse(text, mode="eval").body
     return [
         (sign, ast.unparse(node))
-        for sign, node in declared.split_terms(tree, _classify)
+        for sign, node, _ in declared.split_terms(tree, _classify)
     ]
 
 
@@ -60,6 +60,15 @@ def test_sums_split_and_common_factors_distribute():
     assert _terms("k * Cf * (Tf - T)") == [(1, "k * Cf * (Tf - T)")]
     assert _terms("(Tf - T) / tau") == [(1, "(Tf - T) / tau")]
     assert _terms("-(a - b)") == [(-1, "a"), (1, "b")]
+
+
+def test_a_distributed_factor_never_decides_a_mechanism():
+    # D3 seed 1's form: a heat capacity containing Cf divides terms of several
+    # mechanisms; the ambient loss must not become reaction heat through it.
+    text = "(a*(T - Tamb) + b*(Tf - T) + c*(Tjf - T)) * reciprocal(Cp0 + CpC*Cf)"
+    parts = declared.split_terms(ast.parse(text, mode="eval").body, _classify)
+    assert [_classify(own) for _, _, own in parts] == [None, "feed", "jacket"]
+    assert all("reciprocal" in ast.unparse(term) for _, term, _ in parts)
 
 
 def test_function_names_are_not_variables():

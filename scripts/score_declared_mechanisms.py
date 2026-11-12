@@ -68,27 +68,31 @@ def _digest(path: Path) -> str:
 # --- the rule -----------------------------------------------------------------
 
 
-def split_terms(node: ast.AST, classify=None) -> list[tuple[int, ast.AST]]:
-    """Additive terms with signs.
+def split_terms(node: ast.AST, classify=None) -> list[tuple[int, ast.AST, ast.AST]]:
+    """Additive terms as (sign, term, own content).
 
     Sums and differences split. A factor or divisor common to a sum (a heat
     capacity, say) is distributed over the sum's terms only when those terms
     belong to different mechanisms by ``classify``, so a difference such as
-    ``(Tf - T)`` inside a term stays whole.
+    ``(Tf - T)`` inside a term stays whole. A term's own content excludes the
+    distributed factor, which therefore never decides its mechanism.
     """
 
     def spans(parts):
         if classify is None:
             return True
-        return len({classify(term) for _, term in parts} - {None}) >= 2
+        return len({classify(own) for _, _, own in parts} - {None}) >= 2
 
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add | ast.Sub):
         right = split_terms(node.right, classify)
         if isinstance(node.op, ast.Sub):
-            right = [(-sign, term) for sign, term in right]
+            right = [(-sign, term, own) for sign, term, own in right]
         terms = split_terms(node.left, classify) + right
     elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-        terms = [(-sign, term) for sign, term in split_terms(node.operand, classify)]
+        terms = [
+            (-sign, term, own)
+            for sign, term, own in split_terms(node.operand, classify)
+        ]
     elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd):
         terms = split_terms(node.operand, classify)
     elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
@@ -96,21 +100,31 @@ def split_terms(node: ast.AST, classify=None) -> list[tuple[int, ast.AST]]:
             split_terms(node.left, classify),
             split_terms(node.right, classify),
         )
-        left = left if len(left) > 1 and spans(left) else [(1, node.left)]
-        right = right if len(right) > 1 and spans(right) else [(1, node.right)]
-        if len(left) == len(right) == 1:
-            return [(1, node)]
-        terms = [
-            (a * b, ast.BinOp(x, ast.Mult(), y)) for a, x in left for b, y in right
-        ]
+        split_left = len(left) > 1 and spans(left)
+        split_right = len(right) > 1 and spans(right)
+        if not split_left and not split_right:
+            return [(1, node, node)]
+        left = left if split_left else [(1, node.left, None)]
+        right = right if split_right else [(1, node.right, None)]
+        terms = []
+        for a, x, x_own in left:
+            for b, y, y_own in right:
+                own = (
+                    ast.BinOp(x_own, ast.Mult(), y_own)
+                    if x_own is not None and y_own is not None
+                    else (x_own if x_own is not None else y_own)
+                )
+                terms.append((a * b, ast.BinOp(x, ast.Mult(), y), own))
     elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         numerator = split_terms(node.left, classify)
         if len(numerator) == 1 or not spans(numerator):
-            return [(1, node)]
-        terms = [(a, ast.BinOp(x, ast.Div(), node.right)) for a, x in numerator]
+            return [(1, node, node)]
+        terms = [
+            (a, ast.BinOp(x, ast.Div(), node.right), own) for a, x, own in numerator
+        ]
     else:
-        return [(1, node)]
-    return terms if len(terms) <= MAX_TERMS else [(1, node)]
+        return [(1, node, node)]
+    return terms if len(terms) <= MAX_TERMS else [(1, node, node)]
 
 
 def names_in(node: ast.AST) -> set[str]:
@@ -160,10 +174,10 @@ def attribute(view: dict) -> dict:
         return _kind(names_in(expanded(ast.unparse(node), processes, grammar)), kinds)
 
     terms = []
-    for sign, node in split_terms(tree, classify):
+    for sign, node, own in split_terms(tree, classify):
         text = ast.unparse(node)
-        written = names_in(node)
-        inlined = names_in(expanded(text, processes, grammar))
+        written = names_in(own)
+        inlined = names_in(expanded(ast.unparse(own), processes, grammar))
         kind = _kind(inlined, kinds)
         reaction_named = any(
             name in processes and ("react" in name.lower() or "rxn" in name.lower())
