@@ -135,6 +135,16 @@ def test_the_study_scores_a_baseline_with_its_own_metrics(tmp_path):
     assert hidden == {"physical_correspondence_unavailable", "no_correspondence"}
 
 
+def test_a_rollout_past_its_time_limit_is_a_failed_rollout(monkeypatch):
+    monkeypatch.setattr(scoring, "SECONDS", 0.0)
+    time = np.linspace(0.0, 2.0, 21)
+    with (
+        scoring.baseline_predictions(),
+        pytest.raises(ValueError, match="time limit"),
+    ):
+        anchor.predict(_row(), _trajectory(time), "Radau")
+
+
 def test_a_contract_mismatch_is_refused():
     row = _row()
     row["model"]["context"] = {**row["model"]["context"], "auxiliaries": ["C"]}

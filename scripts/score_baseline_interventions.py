@@ -405,7 +405,14 @@ def baseline_predictions():
 
     def route(row, tr, solver):
         if row.get("source_protocol") == PROTOCOL:
-            return predict(row, tr, solver)
+            try:
+                return predict(row, tr, solver)
+            except TimeoutError as exc:
+                # The study records a rollout it cannot finish as failed only
+                # when the error is one of its own kinds, so say so in those.
+                raise ValueError(
+                    f"rollout exceeded the {SECONDS:g} s time limit"
+                ) from exc
         return original(row, tr, solver)
 
     anchor.predict = route
