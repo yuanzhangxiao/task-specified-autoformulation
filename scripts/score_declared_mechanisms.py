@@ -215,13 +215,22 @@ def attribute(view: dict) -> dict:
 # --- the models ---------------------------------------------------------------
 
 
+#: Latent baselines the rule cannot read, and the status their rows get: the
+#: latent ODE has no equations, and latent-state SINDy writes its equations in
+#: standardized coordinates, mixed with latent states that name no quantity.
+UNREAD = {
+    "latent_neural_ode": "no_explicit_equation",
+    "latent_sindy": "standardized_latent_equations",
+}
+
+
 def view_of(row: dict) -> dict | None:
     """A frozen model as the rule and the rollout read it, or None without equations."""
     if row["status"] != "ready":
         return None
     if "model" in row:  # an external baseline, read with its own grammar
         model = row["model"]
-        if model["semantics"] == "latent_neural_ode":
+        if model["semantics"] in UNREAD:
             return None
         return {
             "candidate": model["candidate"],
@@ -402,7 +411,9 @@ def attribute_stage(root: Path, out: Path) -> dict:
         }
         if view is None:
             entry["status"] = (
-                "no_explicit_equation" if row["status"] == "ready" else row["status"]
+                UNREAD[row["model"]["semantics"]]
+                if row["status"] == "ready"
+                else row["status"]
             )
         else:
             entry |= {"status": "declared", **attribute(view)}

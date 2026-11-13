@@ -346,6 +346,82 @@ def test_the_study_probes_a_latent_ode_like_its_own_models(tmp_path):
     assert "calibration_unavailable" not in probes
 
 
+def _latent_sindy_model():
+    """Scaled T relaxes and is driven by one latent that starts at 0.5 and decays."""
+    from autoformalism.baselines import latent_sindy
+
+    terms = latent_sindy.library_terms(5)  # T, one latent, three inputs
+    coefficients = np.zeros((len(terms), 2))
+    coefficients[terms.index((0,)), 0] = -3.0
+    coefficients[terms.index((1,)), 0] = 0.6
+    coefficients[terms.index((3,)), 0] = 0.3
+    coefficients[terms.index((1,)), 1] = -3.0
+    return {
+        "semantics": "latent_sindy",
+        "context": CONTEXT.model_dump(mode="json"),
+        "targets": ["T"],
+        "inputs": ["Cf", "Tf", "Tjf"],
+        "tau": 3.0,
+        "standardization": {
+            "target_mean": [350.0],
+            "target_sd": [5.0],
+            "input_mean": [0.0, 0.0, 0.0],
+            "input_sd": [1.0, 1.0, 1.0],
+        },
+        "coefficients": coefficients.tolist(),
+        "mask": np.ones_like(coefficients).tolist(),
+        "initializer": [[0.0, 0.0, 0.0, 0.0, 0.5]],
+    }
+
+
+def test_a_latent_sindy_model_gives_its_target_and_latent_coordinate():
+    row = {**_row(), "method": "latent_sindy", "model": _latent_sindy_model()}
+    time = np.linspace(0.0, 2.0, 21)
+    radau = scoring.predict(row, _trajectory(time), "Radau")
+    bdf = scoring.predict(row, _trajectory(time), "BDF")
+    assert set(radau) == {"T", "latent.h0"}
+    assert radau["T"][0] == pytest.approx(350.0)
+    assert radau["latent.h0"][0] == pytest.approx(0.5)
+    assert radau["T"][-1] > 350.0  # the latent drives the temperature up
+    assert np.max(np.abs(np.subtract(radau["T"], bdf["T"]))) < 1e-5
+
+
+def test_a_latent_selection_is_read_only_under_its_own_protocol(tmp_path):
+    from autoformalism.baselines import latent_ode, latent_sindy
+    from autoformalism.rebuttal.prefit_replay import sealed_write
+
+    def sealed(root, protocol):
+        plan = sealed_write(root / "plan.json", {"protocol": protocol})
+        sealed_write(
+            root / "selection.json",
+            {
+                "plan_sha256": plan["artifact_sha256"],
+                "test_data_opened": False,
+                "rows": [
+                    {
+                        "benchmark_id": CSTR,
+                        "repetition": 0,
+                        "status": "complete",
+                        "validation_nmse": 0.01,
+                        "model": _latent_sindy_model(),
+                    },
+                    {"benchmark_id": CSTR, "repetition": 1, "status": "rollout_failed"},
+                ],
+            },
+        )
+        return root
+
+    other = sealed(tmp_path / "ode", latent_ode.PROTOCOL)
+    with pytest.raises(ValueError, match="latent_sindy selection belongs to another"):
+        scoring.latent_rows("latent_sindy", other)
+    own = sealed(tmp_path / "sindy", latent_sindy.PROTOCOL)
+    ready, failed = scoring.latent_rows("latent_sindy", own)
+    assert ready["method"] == "latent_sindy" and ready["status"] == "ready"
+    assert ready["recorded"] == ["selection.validation_nmse", 0.01]
+    assert failed["status"] == "method_failure"
+    assert failed["failure"] == "rollout_failed"
+
+
 def _suite():
     import json
     from pathlib import Path

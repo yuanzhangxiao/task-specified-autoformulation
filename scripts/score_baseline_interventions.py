@@ -43,7 +43,7 @@ from time import monotonic
 
 import numpy as np
 
-from autoformalism.baselines import latent_ode
+from autoformalism.baselines import latent_ode, latent_sindy
 from autoformalism.baselines.d3_rollout import NativeMap
 from autoformalism.baselines.d3_rollout import predict as native_rollout
 from autoformalism.baselines.hybrid_networks import NetworkSpec
@@ -84,6 +84,16 @@ CONTEXT_FIELDS = ("targets", "auxiliaries", "external_inputs", "fixed_covariates
 #: The latent neural ODE (``baselines.latent_ode``), which runs outside the
 #: vendored campaigns and is sealed by ``scripts/run_latent_ode_baseline.py``.
 LATENT_ODE = "latent_ode"
+#: Latent-state SINDy (``baselines.latent_sindy``), sealed the same way by
+#: ``scripts/run_latent_sindy_baseline.py``.
+LATENT_SINDY = "latent_sindy"
+#: Each latent baseline's plan protocol, by method.
+LATENT = {LATENT_ODE: latent_ode.PROTOCOL, LATENT_SINDY: latent_sindy.PROTOCOL}
+#: The replay of a latent baseline's saved model, by its semantics.
+REPLAYS = {
+    "latent_neural_ode": latent_ode.LatentODE,
+    "latent_sindy": latent_sindy.LatentSINDy,
+}
 #: Runs of the nine-case runners on a Phase C cell, by their plan's protocol:
 #: HDTwinGen's hybrid one-step map (``scripts/phase_b_nine_case_d3.py``) and
 #: specification-informed SINDy (``scripts/phase_b_nine_case_spec_sindy.py``).
@@ -93,7 +103,7 @@ NINE_CASE = {
 }
 #: Outcomes of the service, not the method: such a task is rerun, not assessed.
 SERVICE_STATUSES = frozenset({"endpoint_unavailable", "infrastructure_failure"})
-METHODS = (*mechanisms.METHODS, LATENT_ODE, *NINE_CASE)
+METHODS = (*mechanisms.METHODS, *LATENT, *NINE_CASE)
 #: The study's stress aliases, for rescoring its own models.
 ALIASES = anchor.ALIASES
 
@@ -114,7 +124,7 @@ def evaluator_identity() -> dict:
 
 
 def _run_cells(method: str, root: Path) -> set[str]:
-    if method == LATENT_ODE:
+    if method in LATENT:
         return {r["benchmark_id"] for r in sealed_read(root / "selection.json")["rows"]}
     if method in ("sindy", "pysr"):
         lines = (root / "frozen" / "task_plan.jsonl").read_text().splitlines()
@@ -237,16 +247,16 @@ def subject(row: dict, bundle: str) -> dict:
     }
 
 
-def latent_ode_rows(root: Path) -> list[dict]:
-    """The latent ODE's selected model per cell and seed, failures included."""
+def latent_rows(method: str, root: Path) -> list[dict]:
+    """A latent baseline's selected model per cell and seed, failures included."""
     plan = sealed_read(root / "plan.json")
     selection = sealed_read(root / "selection.json")
     if (
-        plan["protocol"] != latent_ode.PROTOCOL
+        plan["protocol"] != LATENT[method]
         or selection["plan_sha256"] != plan["artifact_sha256"]
         or selection.get("test_data_opened") is not False
     ):
-        raise ValueError("the latent ODE selection belongs to another plan")
+        raise ValueError(f"the {method} selection belongs to another plan")
     sources = [
         mechanisms._file(root / "plan.json"),
         mechanisms._file(root / "selection.json"),
@@ -254,7 +264,7 @@ def latent_ode_rows(root: Path) -> list[dict]:
     rows = []
     for r in selection["rows"]:
         name = r["benchmark_id"]
-        row = mechanisms._row(LATENT_ODE, name, tier_of(name), int(r["repetition"]))
+        row = mechanisms._row(method, name, tier_of(name), int(r["repetition"]))
         if r["status"] != "complete":
             rows.append(mechanisms._failure(row, sources, r["status"]))
             continue
@@ -374,8 +384,8 @@ def predict(row: dict, tr, solver: str, seconds: float | None = None) -> dict:
         or context.fixed_covariates
     ):
         raise ValueError("model violates public input or initialization contract")
-    if model["semantics"] == "latent_neural_ode":
-        ode = latent_ode.LatentODE(model)
+    if model["semantics"] in REPLAYS:
+        ode = REPLAYS[model["semantics"]](model)
         supplied = {**tr.external_inputs, **tr.auxiliaries}
         inputs = np.stack(
             [np.asarray(supplied[n], dtype=float) for n in ode.inputs], -1
@@ -478,8 +488,8 @@ def freeze(
     )
     rows = []
     for method, path in sorted(sources.items()):
-        if method == LATENT_ODE:
-            rows += latent_ode_rows(path)
+        if method in LATENT:
+            rows += latent_rows(method, path)
         elif method in ("sindy", "pysr"):
             found = mechanisms.classical_rows(path, public_by_name)
             rows += [r for r in found if r["method"] == method]
@@ -491,8 +501,8 @@ def freeze(
     bundle = public.content_sha256(rows)
     subjects = [subject(r, bundle) for r in rows]
     for s in subjects:
-        if s["status"] == "ready" and s["model"]["semantics"] == "latent_neural_ode":
-            latent_ode.LatentODE(s["model"])
+        if s["status"] == "ready" and s["model"]["semantics"] in REPLAYS:
+            REPLAYS[s["model"]["semantics"]](s["model"])
         elif s["status"] == "ready" and s["model"]["semantics"] == "native_increment":
             _map(s["model"])
         elif s["status"] == "ready":
@@ -564,8 +574,8 @@ def _recorded_validation(row: dict):
     SINDy and PySR record ``validation_normalized_mse``; LLM-ODE and LLM-SR
     ``development_rollout_error``; D3 and HDTwinGen their recursive
     ``phase_b_rollout`` beside the one-step loss they select on; specification-
-    informed SINDy ``validation_normalized_mse``; the latent ODE the error it was
-    selected on.
+    informed SINDy ``validation_normalized_mse``; the latent ODE and latent-state
+    SINDy the error they were selected on.
     """
     if row.get("recorded"):
         key, value = row["recorded"]

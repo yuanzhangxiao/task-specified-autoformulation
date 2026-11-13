@@ -258,3 +258,15 @@ def test_only_the_trajectories_a_validity_rule_kept_are_scored(tmp_path):
     other = {**plan, "artifact_sha256": "0" * 64}
     with pytest.raises(ValueError, match="another plan"):
         declared.kept_schedule(tmp_path, other, cell)
+
+
+def test_latent_baselines_are_left_unread_with_their_reason():
+    for semantics, status in (
+        ("latent_neural_ode", "no_explicit_equation"),
+        ("latent_sindy", "standardized_latent_equations"),
+    ):
+        assert (
+            declared.view_of({"status": "ready", "model": {"semantics": semantics}})
+            is None
+        )
+        assert declared.UNREAD[semantics] == status
