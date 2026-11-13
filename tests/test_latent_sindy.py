@@ -157,3 +157,19 @@ def test_the_noise_plan_is_frozen_with_the_default_settings():
     assert plan["settings"] == ls.LatentSINDyConfig().model_dump(mode="json")
     assert plan["seeds"] == [0, 1, 2]
     assert plan["cells"] == [f"acquisition_{i:02d}" for i in range(4)]
+
+
+def test_the_reactor_plan_keeps_the_noise_plan_settings():
+    plan = json.loads((REPO / "configs" / "cstr_hard_latent_sindy_v1.json").read_text())
+    noise = json.loads((REPO / "configs" / "t2_noise_latent_sindy_v1.json").read_text())
+    latent_ode = json.loads(
+        (REPO / "configs" / "latent_ode_intervention_v1.json").read_text()
+    )
+    assert plan["status"] == "frozen_before_training"
+    assert plan["settings"] == noise["settings"]
+    assert plan["seeds"] == noise["seeds"]
+    assert plan["cells"] == [
+        "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1"
+    ]
+    for key in ("release_protocol", "release_summary_sha256"):
+        assert plan[key] == latent_ode[key]

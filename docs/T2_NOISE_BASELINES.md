@@ -88,3 +88,13 @@ formulation (`autoformalism.baselines.latent_sindy`,
 A 20-iteration feasibility check before freezing changed only the input scaling
 (standardized pulses had made the first rollouts diverge) and the divergence
 recovery; no setting was chosen from a validation score.
+
+The same frozen settings also run on the Phase C CSTR-hard cell
+(`configs/cstr_hard_latent_sindy_v1.json`), seeds 0, 1 and 2, so that the
+reactor intervention study can score a latent equation-discovery baseline;
+nothing was changed for that cell:
+
+    PYTHONPATH=src python scripts/run_latent_sindy_baseline.py plan --root <root> \
+        --release <phase-c-development-final-v2> --config configs/cstr_hard_latent_sindy_v1.json
+    PYTHONPATH=src python scripts/run_latent_sindy_baseline.py train --root <root> --index <0-8>
+    PYTHONPATH=src python scripts/run_latent_sindy_baseline.py select --root <root>

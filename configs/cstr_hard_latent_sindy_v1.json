@@ -1,0 +1,40 @@
+{
+  "schema": "latent-sindy-frozen-plan-1",
+  "status": "frozen_before_training",
+  "purpose": "Latent-state SINDy on the Phase C CSTR-hard cell with seeds 0, 1 and 2, for the reactor intervention study, which scores models on this cell: the observed target is augmented with k latent coordinates (k = 1, 2 or 3), every state's derivative is a sparse combination of a degree-2 polynomial library of the scaled state and supplied channels divided by a fixed tenth of the training horizon, and the latent part of the initial state is a linear function of the first readings and inputs, fitted on training trajectories only. Coefficients are fitted by matching RK4 rollouts of the training trajectories, first with an L1 penalty, then, for each threshold, with the coefficients below it fixed at zero (sequential thresholding). Validation free-rollout error stops each phase early and chooses the latent dimension and threshold per seed. The settings are the frozen T2-hard noise plan's (configs/t2_noise_latent_sindy_v1.json), unchanged for this cell; no setting was chosen from any score on it. The cell is read from the Phase C release as the latent neural ODE's intervention plan reads it. The user asked for this run on 2026-11-12 (HST).",
+  "release_protocol": "phase-c-development-2",
+  "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
+  "cells": [
+    "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "settings": {
+    "latent_dimensions": [
+      1,
+      2,
+      3
+    ],
+    "thresholds": [
+      0.01,
+      0.03,
+      0.1
+    ],
+    "l1": 0.001,
+    "learning_rate": 0.01,
+    "iterations": 2000,
+    "refit_iterations": 500,
+    "evaluate_every": 25,
+    "gradient_clip": 1.0,
+    "initial_scale": 0.01,
+    "restarts_after_divergence": 3,
+    "rk4_substeps": 2,
+    "horizon_fraction_for_tau": 0.1,
+    "replay_rtol": 1e-08,
+    "replay_atol": 1e-10,
+    "replay_seconds": 45.0
+  }
+}
