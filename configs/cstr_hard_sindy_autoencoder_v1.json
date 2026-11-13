@@ -1,0 +1,51 @@
+{
+  "schema": "sindy-autoencoder-frozen-plan-1",
+  "status": "frozen_before_training",
+  "purpose": "The SINDy autoencoder (Champion, Lusch, Kutz and Brunton, PNAS 2019) on time-delay coordinates of the single measured quantity (Bakarji, Champion, Kutz and Brunton, Proc. R. Soc. A 2023), on the Phase C CSTR-hard cell with seeds 0, 1 and 2, for the reactor intervention study: a latent equation-discovery method from the literature. The encoder reads a causal window of the standardized temperature (samples before a record's first are filled with the first reading, the reactor at rest before the record starts), the first latent coordinate is asked to equal the temperature, and the latent coordinates follow a sparse degree-2 polynomial model whose library also holds the measured inputs (SINDy with control, Brunton, Proctor and Kutz 2016). Losses and weights are equation 15 of Bakarji et al. with the weights of their code's real-data case; the encoder widths are Champion et al.'s Lorenz widths and the activation is the delay code's ELU; sequential thresholding at 0.1 and a refinement phase without the L1 penalty follow Champion et al. The latent dimension (2, 3 or 4, the temperature included) and the window (5, 10 or 20 samples) are chosen per seed by validation free-rollout error, as the other latent baselines' sizes are. The coefficients start near zero, N(0, 0.01^2), as latent-state SINDy's do: in a 30-epoch feasibility check on the training data the papers' starts, scaled to their systems (all ones; N(0, 10^2)), left the first latent coordinate away from the temperature and every coefficient above the threshold. No setting was chosen from a validation or test score. The cell is read from the Phase C release as the latent neural ODE's intervention plan reads it. The user asked for this baseline on 2026-11-12 (HST).",
+  "release_protocol": "phase-c-development-2",
+  "release_summary_sha256": "200deb42d60614915e2226070f405a98295c439626832e40191d2a0207b19665",
+  "cells": [
+    "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "settings": {
+    "latent_dimensions": [
+      2,
+      3,
+      4
+    ],
+    "delays": [
+      5,
+      10,
+      20
+    ],
+    "widths": [
+      64,
+      32
+    ],
+    "weight_reconstruction": 0.3,
+    "weight_dh": 0.001,
+    "weight_dz": 0.001,
+    "weight_first_coordinate": 0.01,
+    "weight_consistency": 0.1,
+    "weight_l1": 1e-05,
+    "learning_rate": 0.001,
+    "batch_size": 32,
+    "epochs": 300,
+    "threshold": 0.1,
+    "threshold_every": 100,
+    "refinement_epochs": 100,
+    "evaluate_every": 10,
+    "initial_coefficient": 0.0,
+    "initial_scale": 0.01,
+    "consistency_clip": 500.0,
+    "rk4_substeps": 2,
+    "replay_rtol": 1e-08,
+    "replay_atol": 1e-10,
+    "replay_seconds": 45.0
+  }
+}
