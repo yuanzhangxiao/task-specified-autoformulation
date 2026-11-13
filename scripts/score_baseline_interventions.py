@@ -43,7 +43,7 @@ from time import monotonic
 
 import numpy as np
 
-from autoformalism.baselines import latent_ode, latent_sindy
+from autoformalism.baselines import latent_ode, latent_sindy, sindy_autoencoder
 from autoformalism.baselines.d3_rollout import NativeMap
 from autoformalism.baselines.d3_rollout import predict as native_rollout
 from autoformalism.baselines.hybrid_networks import NetworkSpec
@@ -87,12 +87,20 @@ LATENT_ODE = "latent_ode"
 #: Latent-state SINDy (``baselines.latent_sindy``), sealed the same way by
 #: ``scripts/run_latent_sindy_baseline.py``.
 LATENT_SINDY = "latent_sindy"
+#: The delay SINDy autoencoder (``baselines.sindy_autoencoder``), sealed the same
+#: way by ``scripts/run_sindy_autoencoder_baseline.py``.
+SINDY_AUTOENCODER = "sindy_autoencoder"
 #: Each latent baseline's plan protocol, by method.
-LATENT = {LATENT_ODE: latent_ode.PROTOCOL, LATENT_SINDY: latent_sindy.PROTOCOL}
+LATENT = {
+    LATENT_ODE: latent_ode.PROTOCOL,
+    LATENT_SINDY: latent_sindy.PROTOCOL,
+    SINDY_AUTOENCODER: sindy_autoencoder.PROTOCOL,
+}
 #: The replay of a latent baseline's saved model, by its semantics.
 REPLAYS = {
     "latent_neural_ode": latent_ode.LatentODE,
     "latent_sindy": latent_sindy.LatentSINDy,
+    "sindy_autoencoder": sindy_autoencoder.SindyAutoencoder,
 }
 #: Runs of the nine-case runners on a Phase C cell, by their plan's protocol:
 #: HDTwinGen's hybrid one-step map (``scripts/phase_b_nine_case_d3.py``) and

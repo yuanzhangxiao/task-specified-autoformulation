@@ -386,6 +386,53 @@ def test_a_latent_sindy_model_gives_its_target_and_latent_coordinate():
     assert np.max(np.abs(np.subtract(radau["T"], bdf["T"]))) < 1e-5
 
 
+def _sindy_autoencoder_model():
+    """Scaled T, read from the window's newest entry, relaxes towards a constant."""
+    from autoformalism.baselines import latent_sindy
+
+    terms = latent_sindy.library_terms(5)  # z1, z2, three inputs
+    coefficients = np.zeros((len(terms), 2))
+    coefficients[terms.index(()), 0] = 1.0
+    coefficients[terms.index((0,)), 0] = -1.0
+    coefficients[terms.index((1,)), 1] = -1.0
+    return {
+        "semantics": "sindy_autoencoder",
+        "context": CONTEXT.model_dump(mode="json"),
+        "targets": ["T"],
+        "inputs": ["Cf", "Tf", "Tjf"],
+        "delays": 3,
+        "standardization": {
+            "target_mean": [350.0],
+            "target_sd": [5.0],
+            "input_mean": [0.0, 0.0, 0.0],
+            "input_sd": [1.0, 1.0, 1.0],
+        },
+        # z1 is the newest entry (the hidden unit stays where ELU is the
+        # identity); z2 starts at 0.5.
+        "encoder": [
+            {"weight": [[1.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "bias": [10.0, 0.0]},
+            {"weight": [[1.0, 0.0], [0.0, 0.0]], "bias": [-10.0, 0.5]},
+        ],
+        "decoder": [],
+        "coefficients": coefficients.tolist(),
+        "mask": np.ones_like(coefficients).tolist(),
+    }
+
+
+def test_a_sindy_autoencoder_model_gives_its_target_and_latent_coordinate():
+    row = {**_row(), "method": "sindy_autoencoder", "model": _sindy_autoencoder_model()}
+    time = np.linspace(0.0, 2.0, 21)
+    radau = scoring.predict(row, _trajectory(time), "Radau")
+    bdf = scoring.predict(row, _trajectory(time), "BDF")
+    assert set(radau) == {"T", "latent.h0"}
+    assert radau["T"][0] == pytest.approx(350.0)
+    np.testing.assert_allclose(
+        radau["T"], 350.0 + 5.0 * (1 - np.exp(-time)), rtol=0, atol=1e-6
+    )
+    np.testing.assert_allclose(radau["latent.h0"], 0.5 * np.exp(-time), atol=1e-7)
+    assert np.max(np.abs(np.subtract(radau["T"], bdf["T"]))) < 1e-5
+
+
 def test_a_latent_selection_is_read_only_under_its_own_protocol(tmp_path):
     from autoformalism.baselines import latent_ode, latent_sindy
     from autoformalism.rebuttal.prefit_replay import sealed_write

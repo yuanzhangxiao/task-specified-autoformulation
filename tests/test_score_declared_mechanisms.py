@@ -264,6 +264,7 @@ def test_latent_baselines_are_left_unread_with_their_reason():
     for semantics, status in (
         ("latent_neural_ode", "no_explicit_equation"),
         ("latent_sindy", "standardized_latent_equations"),
+        ("sindy_autoencoder", "learned_latent_coordinates"),
     ):
         assert (
             declared.view_of({"status": "ready", "model": {"semantics": semantics}})

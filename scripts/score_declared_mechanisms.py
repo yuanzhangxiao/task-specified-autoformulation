@@ -216,11 +216,14 @@ def attribute(view: dict) -> dict:
 
 
 #: Latent baselines the rule cannot read, and the status their rows get: the
-#: latent ODE has no equations, and latent-state SINDy writes its equations in
-#: standardized coordinates, mixed with latent states that name no quantity.
+#: latent ODE has no equations; latent-state SINDy writes its equations in
+#: standardized coordinates, mixed with latent states that name no quantity; the
+#: delay SINDy autoencoder's coordinates are an encoder's, and only the first
+#: stands for a measured quantity.
 UNREAD = {
     "latent_neural_ode": "no_explicit_equation",
     "latent_sindy": "standardized_latent_equations",
+    "sindy_autoencoder": "learned_latent_coordinates",
 }
 
 
