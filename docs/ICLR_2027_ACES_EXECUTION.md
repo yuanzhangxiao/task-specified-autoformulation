@@ -284,6 +284,78 @@ scp aces:/scratch/group/p.nairr260351.000/u.yx126462/iclr-anchors-full-120b-v1/i
 
 `paired_proposer_validation.csv` contains one row per case and seed, with both endpoint statuses, validation NMSE and the 120B-minus-20B difference where both fits exist. Per-visit feedback, fitted endpoints, public graph checks and available Slurm accounting are in the same inspection archive. This launch ends at the validation comparison.
 
+## CSTR-first 120B proposer campaign
+
+The ordered workflow supersedes the combined two-anchor launch above for the
+requested November 14 sequence. It gives each case a separate three-seed plan,
+so CSTR-hard can be frozen and scored before T2-hard has run. It changes the
+proposer to the pinned GPT-OSS-120B snapshot while preserving the Full prompts,
+critic calibration, fitting profile, selection, 15 visits, failed-start rule
+and pruning. One seed runs at a time, using two H100s, eight CPUs and 128 GB RAM.
+The running 20B stress array is independent of this workflow.
+
+The committed roster is `configs/iclr_full_120b_ordered_v1.json`. Its order is:
+
+1. `cstr-hard`: the temperature-only corrected hard anchor.
+2. `t2-hard`: the original two-target hard anchor.
+3. `t1-perturbed`: the named perturbed easy case used for Ewor Q6.
+4. `t1-easy`, `t1-obfuscated`, `t1-perturbed-obfuscated`, `cstr-easy`,
+   `alien-easy`, `t1-hard`, `t2-easy`.
+
+This is the current Phase C counterpart of the original nine-case paper roster,
+plus CSTR-hard: ten cases and 30 seeds. It does not add noise, sampling, sensor,
+dimension-scaling or detention-basin cases. The first three use authenticated
+20B campaign inputs and produce a matched validation comparison. The other
+seven use their existing corrected Phase C public release; they have no matched
+15-visit 20B repetition in this campaign. Their outputs are reported separately.
+
+Build and upload on the Mac:
+
+~~~bash
+bash scripts/hpc/package_iclr_aces.sh ordered-120b
+bundle="iclr-ordered-full-120b-$(git rev-parse --short=7 HEAD)"
+scp "output/$bundle.tar.gz" aces:/scratch/group/p.nairr260351.000/u.yx126462/
+~~~
+
+On ACES, extract that bundle and prepare all ten independent plans. Preparation
+authenticates all public inputs, the original Full configuration and the critic
+calibration. It makes no model calls and needs no API credential.
+
+~~~bash
+cd /scratch/group/p.nairr260351.000/u.yx126462
+tar -xzf "$bundle.tar.gz"
+bash "$bundle/code/scripts/hpc/iclr_full_120b_ordered_aces.sh" prepare all
+~~~
+
+Launch CSTR-hard by itself in an interactive terminal. The command below clears
+only an inherited critic credential, so the launcher reads a fresh hidden key
+and validates it before submitting. Repeating the same case and wave returns
+its recorded job ID, rather than submitting a second array.
+
+~~~bash
+env -u AF_JETSTREAM_API_KEY bash "$bundle/code/scripts/hpc/iclr_full_120b_ordered_aces.sh" run cstr-hard
+~~~
+
+Inspect, then export after the three seeds are terminal:
+
+~~~bash
+bash "$bundle/code/scripts/hpc/iclr_full_120b_ordered_aces.sh" status cstr-hard
+bash "$bundle/code/scripts/hpc/iclr_full_120b_ordered_aces.sh" finish cstr-hard
+~~~
+
+Results live under `iclr-full-120b-ordered-v1/cstr-hard/`; its
+`inspection.tar.gz` contains the frozen models, exact parameters and initial
+conditions, pruning and visit receipts, and `paired_proposer_validation.csv`.
+It can be scored on the existing confirmation panel without waiting for any
+other case. An incomplete case cannot freeze. Resume an interrupted case with
+`run cstr-hard wave2` after its earlier array exits; only unfinished blocks run.
+
+After CSTR-hard is exported, use `run t2-hard`, then export it with
+`finish t2-hard`; next use `run t1-perturbed`. Continue through the listed order.
+Later cases are rejected before any credential prompt or submission if an
+earlier case has not been independently frozen. There is no automatic launch
+of the remaining cases and no test score is returned to discovery.
+
 ## Historical archive recovery
 
 To check whether the original ACES campaign already has final files, run this in the ACES login shell. A nonempty evaluation file can still have missing subjects. Inspect its status counts before using any score. The newer freeze and six-visit submission snapshot are distinct cohorts.

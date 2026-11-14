@@ -9,7 +9,8 @@ trap 'rm -rf "$stage"' EXIT
 case "${1:-default}" in
     default) name=iclr-nonbaseline-aces ;;
     full-120b) name="iclr-anchors-full-120b-${commit:0:7}" ;;
-    *) echo 'Use package_iclr_aces.sh [full-120b]' >&2; exit 2 ;;
+    ordered-120b) name="iclr-ordered-full-120b-${commit:0:7}" ;;
+    *) echo 'Use package_iclr_aces.sh [full-120b|ordered-120b]' >&2; exit 2 ;;
 esac
 release="$stage/$name"
 code="$release/code"
@@ -43,6 +44,28 @@ with ZipFile(analyst) as z:
         z.extract('corrected-easy/'+name, dest)
     for lane, folder in (('anchors','anchor-search-plan'), ('stress','stress-search-plan')):
         (dest / (lane + '-design.json')).write_bytes(z.read('plans/' + folder + '/plan.json'))
+PY
+fi
+if [[ ${1:-default} == ordered-120b ]]; then
+python3 - "$repo" "$code" "$release/inputs/public" <<'PY'
+import hashlib
+import json
+import shutil
+import sys
+from pathlib import Path
+repo, code, dest = map(Path, sys.argv[1:])
+roster = json.loads((code / 'configs/iclr_full_120b_ordered_v1.json').read_text())
+for case in roster['cases']:
+    if case['reference'] != 'public':
+        continue
+    root = repo / 'artifacts/phase-c-development-final-v2/public' / case['cell']
+    for name, expected in case['public_files'].items():
+        source = root / name
+        if hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+            raise ValueError(f'public file changed: {case["cell"]}/{name}')
+        target = dest / case['cell'] / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
 PY
 fi
 python3 - "$release" "$stage/delivery.tar.gz" <<'PY'

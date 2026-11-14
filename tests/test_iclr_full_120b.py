@@ -212,10 +212,11 @@ def test_refuses_different_reference_runtime_or_cell_before_scheduling(
     assert not dest.exists()
 
 
-def test_comparison_keeps_six_pairs_including_failures(reference, tmp_path):
+@pytest.mark.parametrize("cells", [None, ["sensor_00"]])
+def test_comparison_keeps_planned_pairs_including_failures(reference, tmp_path, cells):
     source, gate = reference
     root = tmp_path / "120b"
-    run.prepare(root, source, gate)
+    run.prepare(root, source, gate, cells=cells)
     for folder in (root, source):
         plan = sealed_read(folder / "plan.json")
         rows = []
@@ -250,9 +251,166 @@ def test_comparison_keeps_six_pairs_including_failures(reference, tmp_path):
             },
         )
     pairs = run.paired_validation(root, source)
-    assert len(pairs) == 6
+    count = 2 if cells is None else 1
+    assert len(pairs) == 3 * count
     assert [r["delta_120b_minus_20b"] for r in pairs] == [
         None,
         pytest.approx(-0.1),
         pytest.approx(-0.1),
-    ] * 2
+    ] * count
+
+
+def test_subset_renumbers_scheduler_blocks_and_preserves_full_lineage(
+    reference, tmp_path
+):
+    source, gate = reference
+    root = tmp_path / "cstr-only"
+    original = sealed_read(source / "plan.json")
+    plan = run.prepare(root, source, gate, cells=["sensor_00"])
+    assert run.prepare(root, source, gate, cells=["sensor_00"]) == plan
+    assert set(plan["cells"]) == {"sensor_00"}
+    assert len(plan["blocks"]) == 3
+    assert scheduler.pending_ids(root) == [0, 1, 2]
+    for i, block in enumerate(plan["blocks"]):
+        task = block["tasks"][0]
+        before = original["blocks"][i + 3]["tasks"][0]
+        assert block["block"] == task["block"] == task["index"] == i
+        assert task["task_id"] == f"block{i:04d}_full"
+        assert plan["reference_tasks"][task["task_id"]] == before["task_id"]
+        for key in ("seed", "critic", "scientific_verifier", "shared_processes"):
+            assert task[key] == before[key]
+    with pytest.raises(ValueError, match="distinct cells"):
+        run.prepare(tmp_path / "wrong", source, gate, cells=["unrecognized"])
+    with pytest.raises(ValueError, match="differs from the 20B"):
+        run.prepare(tmp_path / "wrong", source, gate, reference_identity="0" * 64)
+    assert not (tmp_path / "wrong").exists()
+
+
+def test_ordered_case_blocks_later_launch_until_prior_is_frozen(
+    reference, tmp_path, monkeypatch
+):
+    from scripts import iclr_full_120b_ordered as ordered
+
+    source, gate = reference
+    roster = [
+        {"key": k, "cell": c, "reference": "anchors", "public_files": {}}
+        for k, c in (("cstr-hard", "sensor_00"), ("t2-hard", "acquisition_00"))
+    ]
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"cases": roster}))
+    monkeypatch.setattr(ordered, "CONFIG", config)
+    base = tmp_path / "ordered"
+    for c in roster:
+        plan = ordered.prepare_case(
+            base, c["key"], source, tmp_path / "unused", gate, tmp_path / "public"
+        )
+        assert len(plan["blocks"]) == 3
+        ordered.checked_case(base, c["key"])
+    ordered.require_predecessors(base, "cstr-hard")
+    with pytest.raises(ValueError, match="finish and export cstr-hard"):
+        ordered.require_predecessors(base, "t2-hard")
+    with pytest.raises(ValueError, match="complete every planned endpoint"):
+        ordered.finish_case(base, "cstr-hard")
+    assert not (base / "cstr-hard/evaluation_freeze.json").exists()
+    root = base / "cstr-hard"
+    plan = sealed_read(root / "plan.json")
+    for block in plan["blocks"]:
+        task = block["tasks"][0]
+        directory = io.round_path(root, task, 0)
+        proposal = sealed_write(
+            directory / "proposal.json",
+            {"task": task, "round": 0, "parent_sha256": None},
+        )
+        sealed_write(
+            directory / "critic.json",
+            {
+                "identity": plan["artifact_sha256"],
+                "task": task,
+                "round": 0,
+                "proposal_sha256": proposal["artifact_sha256"],
+                "status": "skipped_no_candidate",
+            },
+        )
+        sealed_write(
+            directory / "result.json",
+            {
+                "task": task,
+                "round": 0,
+                "status": "fit_failed",
+                "selected": None,
+                "trial": None,
+                "cost": {},
+                "parent_sha256": None,
+                "proposal_sha256": proposal["artifact_sha256"],
+            },
+        )
+        run.search.run_block(root, block["block"], "http://unused", 60)
+    reference_plan = sealed_read(source / "plan.json")
+    reference_rows = [
+        {
+            "benchmark_id": b["cell"],
+            "repetition": b["seed"],
+            "method": t["treatment"],
+            "source_id": t["task_id"],
+            "status": "no_retained_model",
+            "public_file_sha256": {},
+        }
+        for b in reference_plan["blocks"]
+        for t in b["tasks"]
+    ]
+    freeze = sealed_write(
+        source / "evaluation_freeze.json",
+        {
+            "plan_sha256": reference_plan["artifact_sha256"],
+            "roster_sha256": run.public.content_sha256(reference_rows),
+        },
+    )
+    sealed_write(
+        source / "frozen_models.json",
+        {
+            "plan_sha256": reference_plan["artifact_sha256"],
+            "selection_freeze_sha256": freeze["artifact_sha256"],
+            "rows": reference_rows,
+        },
+    )
+    assert ordered.finish_case(base, "cstr-hard").is_file()
+    ordered.require_predecessors(base, "t2-hard")
+    assert not (base / "t2-hard/evaluation_freeze.json").exists()
+
+
+def test_ordered_new_public_case_authenticates_inputs_and_resumes(
+    reference, tmp_path, monkeypatch
+):
+    from scripts import iclr_full_120b_ordered as ordered
+
+    source, gate = reference
+    config = tmp_path / "config.json"
+    roster = [
+        {
+            "key": "new",
+            "cell": "synthetic_case",
+            "reference": "public",
+            "public_files": {},
+        }
+    ]
+    config.write_text(json.dumps({"cases": roster}))
+    monkeypatch.setattr(ordered, "CONFIG", config)
+    args = (
+        tmp_path / "ordered",
+        "new",
+        source,
+        tmp_path / "unused",
+        gate,
+        tmp_path / "public",
+    )
+    plan = ordered.prepare_case(*args)
+    assert ordered.prepare_case(*args) == plan
+    assert plan["model_settings"]["model"] == run.MODELS["120b"]["model"]
+    assert plan["require_fitted_full_start"]
+    assert (
+        sealed_read(args[0] / "new/ordered_case.json")["has_matched_20b_run"] is False
+    )
+    roster[0]["public_files"] = {"train.json": "incorrect"}
+    config.write_text(json.dumps({"cases": roster}))
+    with pytest.raises((ValueError, FileNotFoundError)):
+        ordered.prepare_case(*args)

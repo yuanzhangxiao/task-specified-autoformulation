@@ -1,0 +1,126 @@
+{
+  "protocol": "iclr-120b-original-order-1",
+  "scope": "Current Phase C counterparts of the original nine paper cases, plus CSTR-hard; no stress variations.",
+  "cases": [
+    {
+      "key": "cstr-hard",
+      "cell": "sensor_00",
+      "benchmark": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1",
+      "reference": "anchors",
+      "public_files": {
+        "specification.json": "ceff351fe949b949555acd842a3924148fd72c1a90197ba4d8ad613946ac40cb",
+        "proposer_prompt.txt": "853bdd459e477e438065ed8c92d1c27488580316e30c808b6cb50475e837bb03",
+        "train.json": "604ab5b663b4dce8283d0589b77bf0bf0b761f28bb0aebccb3d30e1534796b5b",
+        "val.json": "05e91d289f32da6349fd1b7d305c4fc5b2a8ade144becc630763dfe86812c1df"
+      }
+    },
+    {
+      "key": "t2-hard",
+      "cell": "acquisition_00",
+      "benchmark": "phase_c_dalla_man_t2_canonical_named_hard_rates_v1",
+      "reference": "anchors",
+      "public_files": {
+        "specification.json": "11bb71051060963440d643cbf37114307a97437036f82f0e9c13a7669253f45f",
+        "proposer_prompt.txt": "c77385e3a04b7a3d86c2bde92eee93f057aaf28f3b7ff4b02f73c378993aea3b",
+        "train.json": "c9bb4a8fc3e4551069b0e8019390e4e297dfee30502b9fb5a8146926c53b86dd",
+        "val.json": "00078b4ebf7af3b17e4529ca6a534264358b0f1ec04a604e11a1c67e92d4c8c5"
+      }
+    },
+    {
+      "key": "t1-perturbed",
+      "cell": "phase_c_dalla_man_t1_perturbed_named_easy_rates_v1",
+      "benchmark": "phase_c_dalla_man_t1_perturbed_named_easy_rates_v1",
+      "reference": "t1",
+      "public_files": {
+        "specification.json": "55295fa110b494240454cfef2e5ff13fec77c0ec2075f15b60333f1e9fddf469",
+        "proposer_prompt.txt": "03367bc88a0cda7478961c0209a2ac354fc9a4bed644c8709dcba7c23dd5574b",
+        "train.json": "8c935212a9e84aff703568db7cb06d8ed3793d8aac3c0f8b1243166aff8c95d9",
+        "val.json": "6624c51815a579f565c22e99551a45d11186f09617b5dedfe7b2383838168d05"
+      }
+    },
+    {
+      "key": "t1-easy",
+      "cell": "phase_c_dalla_man_t1_canonical_named_easy_rates_v1",
+      "benchmark": "phase_c_dalla_man_t1_canonical_named_easy_rates_v1",
+      "reference": "public",
+      "public_files": {
+        "specification.json": "edd2bfd76a552208ed759e6e0e958128248a47a2f385558a5c0710af20a2beda",
+        "proposer_prompt.txt": "03367bc88a0cda7478961c0209a2ac354fc9a4bed644c8709dcba7c23dd5574b",
+        "train.json": "822cd1dcb14387bad59dea4e05e26429fd75ce5c667f7bf501abee599a223c6a",
+        "val.json": "a142f1035b1d9fa5927b08f669d93c097c209b59e09a50ba677bcdad051405b4"
+      }
+    },
+    {
+      "key": "t1-obfuscated",
+      "cell": "phase_c_anonymous_system_t1_canonical_obfuscated_easy_rates_v1",
+      "benchmark": "phase_c_anonymous_system_t1_canonical_obfuscated_easy_rates_v1",
+      "reference": "public",
+      "public_files": {
+        "specification.json": "1b88365073552692a10aa2c7aae7fe074eea71f690a23e3d884bd7fae8d179f0",
+        "proposer_prompt.txt": "89359914976f9646fef64610706d6df2889601ca30d8aa20fc21ddc18c20e5db",
+        "train.json": "8ad83d4dd513baf1fc49403a957f5799bf7ac5431deb84ffd3c0dc178fa6591d",
+        "val.json": "0b6fc81199cd149a08f449591c9d389c001e161f6fae3519d4794bfa84394942"
+      }
+    },
+    {
+      "key": "t1-perturbed-obfuscated",
+      "cell": "phase_c_anonymous_system_t1_perturbed_obfuscated_easy_rates_v1",
+      "benchmark": "phase_c_anonymous_system_t1_perturbed_obfuscated_easy_rates_v1",
+      "reference": "public",
+      "public_files": {
+        "specification.json": "ce6011b7bf02f4f9e95eb1d71d8d234229db0a6361e12e24c647e8ab4093ac5d",
+        "proposer_prompt.txt": "89359914976f9646fef64610706d6df2889601ca30d8aa20fc21ddc18c20e5db",
+        "train.json": "970960092253924e002877e0abba3a44b3955810603e6e22483f66199ca35e8d",
+        "val.json": "5074bf1900af84254d14ab9ea3062cbbdf25161907408bb93e91fc0136e8e6f3"
+      }
+    },
+    {
+      "key": "cstr-easy",
+      "cell": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1",
+      "benchmark": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_easy_reset_v1",
+      "reference": "public",
+      "public_files": {
+        "specification.json": "7c0730280c097057408d853e05199f1514ce490681c8288aa173844ed79b7f49",
+        "proposer_prompt.txt": "70fd22109db442ca16eae824b3851ab5c178180eeb935273bb9037dc88a36034",
+        "train.json": "6ef8c170b90d7059366838b55dd8b1e39d81cb2b7d2da9bf54efbcc38d30de9e",
+        "val.json": "8e7a2511ad6a30c7fede08c0e716651357e345eb902be94bd2937e4fb78973fb"
+      }
+    },
+    {
+      "key": "alien-easy",
+      "cell": "phase_c_alien_device_unknown_device_mechanism_canonical_functional_easy_reset_v1",
+      "benchmark": "phase_c_alien_device_unknown_device_mechanism_canonical_functional_easy_reset_v1",
+      "reference": "public",
+      "public_files": {
+        "specification.json": "20d6ba0fb77f0666e99291c317ad398e8bf3ffad3500fb69c4ef76a51b998f23",
+        "proposer_prompt.txt": "8af1e2e7bd089bbe4786eb5f5d25abb6b87e6c751eb440636713dee5e857f881",
+        "train.json": "00630e0f774fac018918e8f357a74b16c3ede7c3232c3394bea4aa4123240d42",
+        "val.json": "29dd29b912518066b51bef73976b104e5cb7cd20018d634e6a4d6b0a50da0214"
+      }
+    },
+    {
+      "key": "t1-hard",
+      "cell": "phase_c_dalla_man_t1_canonical_named_hard_rates_v1",
+      "benchmark": "phase_c_dalla_man_t1_canonical_named_hard_rates_v1",
+      "reference": "public",
+      "public_files": {
+        "specification.json": "38e931a6746cdcbcbdd83420cfeabae9cc8794ac657749b315fc7963487a6332",
+        "proposer_prompt.txt": "2587c4207eb96349c1e5a35fea88a86728113e13b3b309697b00172233ff856a",
+        "train.json": "a09d234320b15e60c00ef90dc05f5201a077c03e028a9934a50aaf0f9cefbdd5",
+        "val.json": "f11ca06dc5da76d1f03d33f07bd125a64f3a7e7a345f75f70f5829cf6743334f"
+      }
+    },
+    {
+      "key": "t2-easy",
+      "cell": "phase_c_dalla_man_t2_canonical_named_easy_rates_v1",
+      "benchmark": "phase_c_dalla_man_t2_canonical_named_easy_rates_v1",
+      "reference": "public",
+      "public_files": {
+        "specification.json": "187ced0b40a23986108c769f0e7c9864e5dcffb67a9f535e1405e40dfc3ed454",
+        "proposer_prompt.txt": "0977074f7c5ce540cc9de8e982e405041027bda17d77978c2b47c3dd0f17d3e9",
+        "train.json": "cddb5bed0910ad790c420026126691cfb419857281881743252341dec734ceba",
+        "val.json": "464618cba3bad9f86c72448a128cde7ecbddeb1e781c8a2df23ee7d9abfef8af"
+      }
+    }
+  ]
+}
