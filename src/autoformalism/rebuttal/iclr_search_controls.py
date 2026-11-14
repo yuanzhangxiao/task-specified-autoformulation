@@ -40,7 +40,9 @@ def clauses(prompt: str) -> list[str]:
 
 def family(context: ValidationContext) -> str:
     roles = (set(context.targets), set(context.external_inputs))
-    if roles[0] == {"Gp", "I"} and "insulin_pmol_per_kg_min" in roles[1]:
+    if roles[0] in ({"Gp", "I"}, {"Gp", "I", "U"}) and (
+        "insulin_pmol_per_kg_min" in roles[1]
+    ):
         return "t2"
     if roles[0] == {"Gp"}:
         return "t1"
@@ -57,7 +59,18 @@ def active_spec(prompt: str, context: ValidationContext, arm: str) -> tuple:
         raise ValueError("unknown search treatment")
     items = clauses(prompt)
     kind = family(context)
-    target = {"t1": "Gp", "t2": "Gp", "device": "v01", "cstr": "T"}[kind]
+    if kind == "device" and items == [
+        "a causal mechanism through which input timing and magnitude "
+        "contribute to the observed target."
+    ]:
+        kind = "anonymous_input"
+    target = {
+        "t1": "Gp",
+        "t2": "Gp",
+        "device": "v01",
+        "anonymous_input": "v01",
+        "cstr": "T",
+    }[kind]
     if kind in {"t1", "t2"}:
         meal = [v for v in context.external_inputs if "meal" in v]
         if len(meal) != 1 or "meal" not in items[0].lower():
@@ -67,6 +80,8 @@ def active_spec(prompt: str, context: ValidationContext, arm: str) -> tuple:
             if len(items) != 2 or "delayed insulin" not in items[1].lower():
                 raise ValueError("unrecognized insulin obligation")
             bindings.append(("delayed_insulin_action", ("I",), True))
+    elif kind == "anonymous_input":
+        bindings = [("input_pathway", ("u01",), False)]
     elif kind == "cstr":
         if "reactor-temperature balance" not in items[0] or "jacket" not in items[0]:
             raise ValueError("unrecognized reactor balance")
@@ -132,6 +147,7 @@ def active_spec(prompt: str, context: ValidationContext, arm: str) -> tuple:
             "t2": "post-meal glucose regulation",
             "cstr": "a controlled stirred-tank reactor",
             "device": "an unfamiliar device",
+            "anonymous_input": "an anonymous continuous-time system",
         }[kind]
         source = (
             f"A. Task specification\nConstruct a reduced model of {background}.\n"
@@ -158,7 +174,12 @@ def active_spec(prompt: str, context: ValidationContext, arm: str) -> tuple:
             id=name,
             public_requirement=text,
             required_drivers=drivers,
-            required_targets=(target,),
+            required_targets=(
+                "U"
+                if name in {"delayed_insulin_action", "delayed_meal_disposal"}
+                and "U" in context.targets
+                else target,
+            ),
             requires_dynamic_memory=memory,
         )
         for text, (name, drivers, memory) in zip(active, bindings, strict=False)

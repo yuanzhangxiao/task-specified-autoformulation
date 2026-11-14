@@ -308,6 +308,10 @@ dimension-scaling or detention-basin cases. The first three use authenticated
 20B campaign inputs and produce a matched validation comparison. The other
 seven use their existing corrected Phase C public release; they have no matched
 15-visit 20B repetition in this campaign. Their outputs are reported separately.
+The task adapter recognizes the existing anonymous input-to-target clause
+without assigning it a glucose or device interpretation. For T2-easy, its
+delayed insulin-action requirement binds to the observed disposal target U.
+The CSTR-hard, T2-hard and named T1 public bindings are unchanged.
 
 Build and upload on the Mac:
 

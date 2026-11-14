@@ -6,6 +6,7 @@ from copy import deepcopy
 
 import pytest
 
+from autoformalism.expressions import ValidationContext
 from autoformalism.rebuttal import iclr_controlled_search as campaign
 from autoformalism.rebuttal import iclr_search_controls as controls
 from autoformalism.rebuttal import review_deadline_io as io
@@ -102,6 +103,41 @@ def test_no_spec_removes_insulin_premises_but_preserves_roles_units_and_safety()
     assert controls.certificate(bundle(True), a, {"scientific_verifier": True})[
         "eligible_for_development_selection"
     ]
+
+
+def test_three_target_t2_binds_insulin_pathway_to_observed_disposal():
+    public = cell()
+    public["context"]["targets"].append("U")
+    source, requirements, _ = controls.active_spec(
+        public["prompt"], ValidationContext.model_validate(public["context"]), "full"
+    )
+    assert source == public["prompt"]
+    assert requirements[0].required_targets == ("Gp",)
+    assert requirements[1].required_targets == ("U",)
+    assert requirements[1].required_drivers == ("I",)
+    assert requirements[1].requires_dynamic_memory
+
+
+def test_anonymous_input_path_has_no_invented_domain_or_memory_requirement():
+    ctx = ValidationContext(targets=("v01",), external_inputs=("u01",))
+    text = (
+        "A. Task specification\n- a causal mechanism through which input timing "
+        "and magnitude contribute to the observed target.\n\n"
+        "B. Available data\nv01 and u01.\nC. Modeling requirements\n"
+        "Use shared parameters.\nF. Required response\nProvide equations."
+    )
+    source, (requirement,), _ = controls.active_spec(text, ctx, "full")
+    assert source == text
+    assert requirement.id == "input_pathway"
+    assert requirement.required_targets == ("v01",)
+    assert requirement.required_drivers == ("u01",)
+    assert not requirement.requires_dynamic_memory
+    reduced, requirements, _ = controls.active_spec(text, ctx, "no_spec")
+    assert not requirements and "anonymous continuous-time system" in reduced
+    with pytest.raises(ValueError, match="unrecognized procedural device"):
+        controls.active_spec(
+            text.replace("timing and magnitude", "novel law"), ctx, "full"
+        )
 
 
 def test_no_latent_strict_and_prediction_capacity_are_separate():
