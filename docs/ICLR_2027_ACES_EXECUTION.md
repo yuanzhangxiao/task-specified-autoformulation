@@ -124,6 +124,37 @@ bash /scratch/group/p.nairr260351.000/u.yx126462/iclr-pilot-fit-r1-2334957/launc
 
 Use `--check` in place of the wave name to inspect the next proposed blocks without a submission. Check storage with `showquota` between waves. Run the independent anchor assays directly from the frozen model bundle and its plan and freeze receipts when scoring on a local workstation. The paired clamp accepts adjacent float64 representations of the same event knot. An earlier clamp run pins its evaluator hash, so a corrected replay needs a separate output directory with the same frozen models and fidelity trajectories.
 
+### Combined November stress wave
+
+Waves 1–7 finished blocks 0–20. Wave 8 (array `2356070`) owns blocks 21–23, the CSTR-hard condition with both auxiliary measurements. The remaining 33 blocks cover corrected CSTR-easy and ten procedural device conditions, with three seeds and paired Full/fixed-state searches per condition. One array covers these 66 endpoints, with two H100s active at most and a 12-hour allocation per block. Each arm retains its original 15 visits and pruning rule.
+
+Run this command on its own in an interactive ACES shell and enter the Jetstream key at the hidden prompt.
+
+~~~bash
+env -u AF_JETSTREAM_API_KEY bash /scratch/group/p.nairr260351.000/u.yx126462/iclr-pilot-fit-r1-2334957/stress-wave9-48b6f1ffc452/launch.sh submit
+~~~
+
+The launcher places blocks `24-56%2` behind wave 8 using Slurm’s `afterany` dependency while the parent array is live. If accounting already shows all three wave-8 jobs have exited, the launcher omits the dependency. Repeating the command returns the original wave-9 job ID. The `check` action verifies the roster, file quota, and pilot without submitting. Check queue and accounting with the recorded IDs.
+
+~~~bash
+campaign=/scratch/group/p.nairr260351.000/u.yx126462/iclr-pilot-fit-r1-2334957
+wave9=$(cat "$campaign/stress/submissions/wave9/array.id")
+squeue -j "2356070,$wave9" -o '%.22i %.10T %.12M %R'
+sacct --array -X -j "2356070,$wave9" --format=JobID,State,Elapsed,ExitCode
+~~~
+
+The first wave-9 worker archives completed wave-8 solver directories and remeasures the quota before starting search. Each subsequent block archives its optimizer work after both arms have terminal pruning dispositions. The models, parameter values, validation scores, critic logs, visit checkpoints and endpoint receipts remain in their original paths. An interrupted block keeps its loose files for deterministic recovery. After the array exits, `bash "$campaign/launch-stress.sh" --check` lists the number of remaining blocks. Submit recovery waves only if the count is positive. At zero, use the existing stress freeze and scoring commands below.
+
+Completed optimizer directories are archived by block under `$campaign/stress/solver-archives-v1` and mirrored in `/scratch/user/u.yx126462/iclr-stress-solver-archive-v1`. To inspect the original files from block 0, for example, extract them into a separate directory on the ACES login node.
+
+~~~bash
+store="$campaign/stress/solver-archives-v1"
+arc=block0000.tar.gz
+(cd "$store" && echo "$(jq -r .sha256 block0000.closed.json)  $arc" | sha256sum -c -)
+inspect=$(mktemp -d)
+tar -xzf "$store/$arc" -C "$inspect"
+~~~
+
 One complete first-wave request reserves at most 72 H100-hours for anchors and 684 for stress, from 6 or 57 blocks at 12 hours each. The historical wave's two GPUs each request 6.5 hours. Actual charges follow Slurm accounting. Subsequent waves request additional time only for remaining work. The following computes a provisional proposer-call and token budget from the **actual** pilot. It applies its one independent initial construction and its mean over two revisions to every planned visit. Scientific rejections, different cells, language-model retries and cost from the separately metered critic can materially change the totals. Token estimates with unreported usage are withheld.
 
 ~~~bash
