@@ -16,9 +16,13 @@ temperature is continuous in time, and its peak delays under the suite's own
 rule must reproduce the suite report's. Peak error: time of the predicted
 largest effect minus time of the true one. Event RSE, the suite's measure of an
 event's time course: the squared error of the effect over the window divided by
-the true effect's. A hidden state is read through the affine map the mechanism
-scores fitted on the training calibration runs; its scale is nonnegative, so the
-map moves no peak, and a state whose map could not be fitted is not timed.
+the true effect's. It counts size and timing together, so the shape RSE repeats
+it after rescaling the predicted effect by the nonnegative factor that fits the
+true effect best (the best scale), leaving only its shape in time. A model with
+no response, or one of the opposite sign, gets a shape RSE of 1. A hidden state
+is read through the affine map the mechanism scores fitted on the training
+calibration runs; its scale is nonnegative, so the map moves no peak, and a
+state whose map could not be fitted is not timed.
 """
 
 from __future__ import annotations
@@ -52,7 +56,7 @@ FAILURES = (
 
 
 def event_timing(time, truth, control_truth, predicted, control_predicted, window):
-    """One event's direction, peak error and RSE, as a change since the prior sample."""
+    """One event's direction, peak error and RSEs, measured from the prior sample."""
     time, truth, control_truth, predicted, control_predicted = map(
         np.asarray, (time, truth, control_truth, predicted, control_predicted)
     )
@@ -70,6 +74,9 @@ def event_timing(time, truth, control_truth, predicted, control_predicted, windo
     if abs(observed[actual]) <= floor:
         return {"status": "negligible_reference_effect"}
     resolvable = abs(estimate[guess]) > floor
+    power = float(np.dot(estimate, estimate))
+    fits = resolvable and power > 0
+    scale = max(0.0, float(np.dot(estimate, observed)) / power) if fits else 0.0
     return {
         "status": "complete",
         "direction_correct": bool(
@@ -81,6 +88,10 @@ def event_timing(time, truth, control_truth, predicted, control_predicted, windo
         "true_peak": float(observed[actual]),
         "predicted_peak": float(estimate[guess]),
         "event_rse": float(np.mean((estimate - observed) ** 2) / np.mean(observed**2)),
+        "best_scale": scale,
+        "shape_rse": float(
+            np.mean((scale * estimate - observed) ** 2) / np.mean(observed**2)
+        ),
     }
 
 
@@ -240,6 +251,8 @@ def main(root: Path, mechanisms: Path, out: Path) -> dict:
         "true_peak",
         "predicted_peak",
         "event_rse",
+        "best_scale",
+        "shape_rse",
     ]
     with (out / "term_timing.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=keys, extrasaction="ignore")
