@@ -739,3 +739,8 @@ def test_no_model_is_scored_before_the_validity_rule(tmp_path, monkeypatch):
     (tmp_path / "subjects").mkdir()
     with pytest.raises(ValueError, match="scored before the validity rule"):
         scoring.validity(tmp_path, tmp_path)
+
+
+def test_a_root_needs_a_baseline_run_or_a_study_export(tmp_path):
+    with pytest.raises(ValueError, match="nothing to score"):
+        scoring.freeze(tmp_path / "root", tmp_path, {}, [anchor.fits.CSTR])

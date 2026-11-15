@@ -479,12 +479,25 @@ def freeze(
     suite: Path | None = None,
     study_models: Path | None = None,
 ) -> dict:
-    """Seal every pick of the named runs on the named cells, failures included."""
+    """Seal every pick of the named runs on the named cells, failures included.
+
+    A root may hold only a study export (``study_models``, verified against its
+    search and freeze receipts) and no baseline run.
+    """
     if (root / "plan.json").exists():
         raise ValueError("this root is already frozen")
     unknown = set(sources) - set(METHODS)
-    if unknown or not sources or not set(cells) <= set(anchor.fits.CELLS):
-        raise ValueError("unknown methods or cells outside the study")
+    if (
+        unknown
+        or not (sources or study_models)
+        or not set(cells) <= set(anchor.fits.CELLS)
+    ):
+        raise ValueError(
+            "unknown methods, nothing to score, or cells outside the study"
+        )
+    if study_models:
+        # A study export is scored only with its search and freeze receipts.
+        anchor.verify_controlled_bundle(study_models, sealed_read(study_models))
     frozen_suite = json.loads(suite.read_text()) if suite else None
     if frozen_suite and len(cells) != 1:
         raise ValueError("a probe suite is frozen for one cell")
