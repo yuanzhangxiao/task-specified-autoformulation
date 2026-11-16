@@ -11,7 +11,6 @@ def test_gain_and_sign_are_separate_from_response_amplitude():
     zero = np.zeros(4)
     row = analysis.response_metrics(truth, zero, 4 * truth, zero)
     assert row["sign_agreement"] == 1
-    assert row["direction_correct"] is True
     assert row["best_scale"] == 0.25
     assert row["shape_rse"] == 0
     # A correct dominant lobe gives 75% agreement, despite a wrong smaller lobe.
@@ -26,7 +25,6 @@ def test_zero_opposite_and_negligible_responses():
     for prediction in (zero, -truth):
         row = analysis.response_metrics(truth, zero, prediction, zero)
         assert row["sign_agreement"] == 0
-        assert row["direction_correct"] is False
         assert row["shape_rse"] == 1
     assert analysis.response_metrics(zero, zero, truth, zero) == {
         "status": "negligible_reference"
@@ -37,10 +35,19 @@ def test_zero_opposite_and_negligible_responses():
         analysis.response_metrics(truth, zero, [1, 2], zero)
 
 
-def test_half_agreement_is_not_a_correct_direction():
-    row = analysis.response_metrics([0, 1, -1], [0, 0, 0], [0, 1, 1], [0, 0, 0])
-    assert row["sign_agreement"] == 0.5
-    assert row["direction_correct"] is False
+def test_run_direction_accuracy_averages_continuous_scores_without_thresholding():
+    half = analysis.response_metrics([0, 1, -1], [0, 0, 0], [0, 1, 1], [0, 0, 0])
+    three_quarters = analysis.response_metrics(
+        [0, 3, -1], [0, 0, 0], [0, 3, 1], [0, 0, 0]
+    )
+    assert half["sign_agreement"] == 0.5
+    assert three_quarters["sign_agreement"] == 0.75
+    diagnostics = [{"status": "negligible_reference"}, half, three_quarters]
+    scores = analysis.aggregate_responses(diagnostics)
+    assert scores["direction_accuracy_pct"] == 62.5
+    assert scores["shape_rse"] == pytest.approx(0.68)
+    with pytest.raises(ValueError, match="two active contrasts"):
+        analysis.aggregate_responses(diagnostics[:2])
 
 
 def test_checkpoint_resume_checks_plan_and_reference(tmp_path, monkeypatch):
@@ -90,16 +97,15 @@ def test_summary_orders_extrema_and_keeps_failed_run_costs():
         "status": "complete",
         "test_nmse": 1,
         "response_rse": 1,
-        "direction_accuracy_pct": 50,
+        "direction_accuracy_pct": 62.5,
         "shape_rse": 0.5,
-        "weighted_sign_agreement_pct": 60,
         "fit_minutes": 1,
         "total_minutes": 2,
         "proposer_tokens_k": 3,
     }
     rows = [
         base,
-        base | {"test_nmse": 5, "direction_accuracy_pct": 100},
+        base | {"test_nmse": 5, "direction_accuracy_pct": 87.5},
         base | {"status": "model_unavailable", "total_minutes": 50},
     ]
     (group,) = analysis.summarize(rows)
@@ -112,8 +118,8 @@ def test_summary_orders_extrema_and_keeps_failed_run_costs():
     }
     assert group["statistics"]["direction_accuracy_pct"] == {
         "median": 75,
-        "worst": 50,
-        "best": 100,
+        "worst": 62.5,
+        "best": 87.5,
         "n": 2,
     }
     assert group["all_attempt_costs"]["total_minutes"]["worst"] == 50

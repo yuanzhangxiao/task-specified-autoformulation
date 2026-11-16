@@ -25,12 +25,15 @@ from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from scripts import iclr_stress_evaluation as stress
 from scripts.iclr_anchor_fidelity import verify_controlled_bundle
 
-PROTOCOL = "iclr-scaling-response-1"
+PROTOCOL = "iclr-scaling-response-2"
 DEFINITIONS = {
     "test_nmse": "Original mean over all three held-out schedules, training variance.",
     "response_rse": "Original mean of integral squared-error ratios, two contrasts.",
     "direction": "sum(abs(delta)*[sign(pred_delta)==sign(delta)])/sum(abs(delta))",
-    "direction_accuracy": "Fraction of active contrasts with direction > 0.5.",
+    "direction_accuracy": (
+        "Mean continuous magnitude-weighted sign agreement over active contrasts; "
+        "reported as a percentage, without thresholding."
+    ),
     "shape_rse": "min_{a>=0} sum((a*pred_delta-delta)^2)/sum(delta^2)",
     "shape_window": "Whole response at the saved uniform time grid; no time shift.",
     "shape_floor": (
@@ -87,9 +90,20 @@ def response_metrics(truth, control, predicted, predicted_control) -> dict:
     return {
         "status": "complete",
         "sign_agreement": agreement,
-        "direction_correct": agreement > 0.5,
         "shape_rse": min(1.0, max(0.0, shape)),
         "best_scale": gain,
+    }
+
+
+def aggregate_responses(diagnostics: list[dict]) -> dict:
+    """Average continuous response scores within a run before run-level summaries."""
+    active = [r for r in diagnostics if r["status"] == "complete"]
+    if len(diagnostics) != 3 or len(active) != 2:
+        raise ValueError("expected three schedules and two active contrasts")
+    return {
+        "direction_accuracy_pct": 100
+        * statistics.mean(r["sign_agreement"] for r in active),
+        "shape_rse": statistics.mean(r["shape_rse"] for r in active),
     }
 
 
@@ -193,8 +207,10 @@ def summarize(rows: list[dict]) -> list[dict]:
     for row in rows:
         grouped[(row["dimension"], row["variant"])].append(row)
     result = []
+
     def order(k):
         return k[1] != "dimension", k[0], k[1]
+
     for (dimension, variant), cohort in sorted(
         grouped.items(), key=lambda kv: order(kv[0])
     ):
@@ -204,7 +220,6 @@ def summarize(rows: list[dict]) -> list[dict]:
             "response_rse",
             "direction_accuracy_pct",
             "shape_rse",
-            "weighted_sign_agreement_pct",
             "fit_minutes",
             "total_minutes",
             "proposer_tokens_k",
@@ -218,10 +233,7 @@ def summarize(rows: list[dict]) -> list[dict]:
                 "statistics": {
                     k: interval(
                         [r[k] for r in kept],
-                        higher_is_better=(
-                            k
-                            in {"direction_accuracy_pct", "weighted_sign_agreement_pct"}
-                        ),
+                        higher_is_better=(k == "direction_accuracy_pct"),
                     )
                     for k in metrics
                 },
@@ -240,13 +252,14 @@ def report(out: Path, summary: list[dict]) -> None:
         "Full complexity study: median [worst, best] over retained models.",
         "Two systems x three search seeds per row. Failed models remain in counts.",
         "NMSE: all 3 held-out schedules. Response metrics: 2 nonzero contrasts.",
-        "Direction accuracy: % contrasts with magnitude-weighted sign agreement >50%.",
+        "Direction accuracy: continuous magnitude-weighted sign agreement, as a %.",
+        "Average the two contrast scores within each run; no thresholding.",
         "Shape: whole-response RSE after a nonnegative gain adjustment; no time shift.",
         "Gain is diagnostic only; original predictions and RSE remain unchanged.",
         "Total: recorded search + pruning, including proposal/critic/fitting work.",
         "Excludes queueing, server startup and evaluation; not allocation time.",
         "Both time columns use retained models, as do the accuracy columns.",
-        "All-attempt costs and continuous sign agreement are in summary.json.",
+        "All-attempt costs and individual continuous scores are in summary.json.",
         "A broader scalability or orders-of-magnitude multiscale claim is unsupported.",
         "",
     ]
@@ -398,9 +411,6 @@ def run(source: Path, out: Path) -> dict:
                             q[channel],
                         )
                     )
-            active = [r for r in diagnostics if r["status"] == "complete"]
-            if len(diagnostics) != 3 or len(active) != 2:
-                raise ValueError("expected three schedules and two active contrasts")
             row.update(
                 {
                     "status": "complete",
@@ -408,11 +418,7 @@ def run(source: Path, out: Path) -> dict:
                     "contrasts": diagnostics,
                     "test_nmse": earlier["test_nmse"],
                     "response_rse": earlier["response_rse"],
-                    "direction_accuracy_pct": 100
-                    * statistics.mean(r["direction_correct"] for r in active),
-                    "weighted_sign_agreement_pct": 100
-                    * statistics.mean(r["sign_agreement"] for r in active),
-                    "shape_rse": statistics.mean(r["shape_rse"] for r in active),
+                    **aggregate_responses(diagnostics),
                     "parity_abs_difference": {
                         k: abs(new[k] - earlier[k])
                         for k in ("test_nmse", "response_rse")
