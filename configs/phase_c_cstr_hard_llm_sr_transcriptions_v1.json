@@ -1,0 +1,133 @@
+{
+  "protocol": "phase-c-llm-sr-ode-transcriptions-1",
+  "status": "proposed_pending_review",
+  "source_run": "phase-c-cstr-hard-llm-sr-hosted-120b-v1",
+  "source_plan_sha256": "3cc8cfe1033f5d4f65e8951d0e86e88b915f14e1bd0d4f1c45c029a00bdc07e6",
+  "rules": {
+    "filter": "A first-order filter recursion z[k] = a*z[k-1] + (1-a)*u, with 0 <= a < 1, becomes dz/dt = (u - z)/T, where T is the recursion's mean delay (the centroid of its impulse response): T = D*a/(1-a) when u is read at the current row k, and T = D/(1-a) when it is read at the previous row k-1. The ODE keeps the filter's gain and its lag behind a ramp. A forward- or backward-Euler filter written with a time constant tau gets T = tau; a copy of the previous row (a = 0) gets T = D. A rearranged form, z[k] = z[k-1] + (1-a)*(u - z[k-1]), is the same filter.",
+    "euler": "Any other row recursion z[k] = z[k-1] + s*g(row values), including a filter whose weight a lies outside (0, 1), is read as one explicit-Euler step: dz/dt = s*g/D, with s the program's own step multiplier (1 if none).",
+    "lag": "A value from the previous row, x[k-1], used beside the current one is the filter rule's copy of the previous row: a state x_prev with d(x_prev)/dt = (x - x_prev)/D. A backward difference x[k] - x[k-1] becomes x - x_prev.",
+    "initial": "Every hidden state starts at the program's own first-row value, written as an expression of first-row observations, inputs, covariates and coefficients.",
+    "guard": "A guard that cannot change any value on the public domain is dropped: a division guard max(area, eps) or area > eps on a surveyed area (every area is 800 or 1200 m^2), the replacement of non-finite values by 0 or NaN masks (they act only where the expression is undefined), and a clamp on a hidden state that its ODE keeps in range (nonnegative inputs and start). Every other guard is kept, written with max, min, clip or heaviside.",
+    "coefficients": "Coefficients are the sealed values after the program's own handling (defaults, padding, clamps such as max(p, 0)); branches on coefficients are resolved with them and only the branch taken is transcribed. Names are the program's, prefixed with the target where a pick has several programs; a name that is a grammar function gains a suffix (gamma -> gamma_c).",
+    "direct": "Code of the current values is rewritten exactly: np.where becomes heaviside, max or min; np.clip clip; np.maximum and np.minimum max and min; np.power **.",
+    "time_unit": "A program that steps its recursions in rows, or with a hard-coded dt, is converted to the cell's time unit through the sample interval D: 1 min (Dalla Man), 0.1 (CSTR, alien device) or 4 min (detention). Its output is already a derivative in the cell's unit: LLM-SR fitted it to numpy.gradient labels."
+  },
+  "transcriptions": [
+    {
+      "task": 0,
+      "benchmark_id": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1",
+      "repetition": 0,
+      "programs": {
+        "T": {
+          "function_sha256": "3ea298a58653a946f3a5c6656fa9e7491037bed388c497dada690a08b94188b3",
+          "parameters": [
+            0.8780444518294216,
+            0.05109595491604063,
+            -10031.880119694157,
+            1.0917257510118745,
+            2.5466276608850387,
+            2.034480375029004,
+            1264.4193904003641,
+            13.92715604756131,
+            -42.16077098515812,
+            -1.0317888247931728
+          ]
+        }
+      },
+      "parameters": {
+        "k_f": 0.8780444518294216,
+        "k_r0": 0.05109595491604063,
+        "Ea_R": -10031.880119694157,
+        "k_j": 1.0917257510118745,
+        "Cp0": 2.5466276608850387,
+        "n": 2.034480375029004,
+        "dT_shift": 1264.4193904003641,
+        "alpha_T": 13.92715604756131,
+        "b": -42.16077098515812,
+        "k_loss": -1.0317888247931728
+      },
+      "processes": {
+        "T_eff": "(1 - alpha_T) * T + alpha_T * T_prev",
+        "feed_term": "k_f * (Tf - T_eff)",
+        "reaction_term": "k_r0 * Cf ** n * exp(-Ea_R / (T_eff + dT_shift))",
+        "jacket_term": "k_j * (Tjf - T_eff)",
+        "loss_term": "-k_loss * (T_eff - 298.0)"
+      },
+      "hidden_states": {
+        "T_prev": {
+          "rhs": "(T - T_prev) / 0.1",
+          "initial": "T",
+          "program_name": "T_prev",
+          "rule": "lag"
+        }
+      },
+      "targets": {
+        "T": "(feed_term + reaction_term + jacket_term + loss_term + b) / Cp0"
+      },
+      "rules": [
+        "lag",
+        "initial",
+        "guard",
+        "coefficients",
+        "direct",
+        "time_unit"
+      ],
+      "notes": [
+        "The program's discrete low-pass T_eff = (1 - alpha_T) T + alpha_T T_prev reads the previous row (T_prev[0] = T[0]); by the lag rule T_prev is the filter rule's copy of the previous row, d(T_prev)/dt = (T - T_prev)/D with D = 0.1, starting at the first-row T.",
+        "alpha_T = 13.93 lies outside (0, 1), so T_eff = T - alpha_T (T - T_prev) extrapolates: about T - 1.39 dT/dt.",
+        "Branches resolved with the sealed coefficients: Cp0 > 0 so Cp = Cp0; alpha_T != 0 so the lag is on; k_loss != 0 so the ambient loss to 298 K is on.",
+        "Dropped guards that cannot change any value on the public domain: the clip of the Arrhenius exponent to [-700, 700] (the exponent is about 6 there) and the replacement of non-finite values by NaN."
+      ]
+    },
+    {
+      "task": 2,
+      "benchmark_id": "phase_c_cstr_controlled_reactor_mechanism_canonical_named_hard_reset_v1",
+      "repetition": 2,
+      "programs": {
+        "T": {
+          "function_sha256": "26795515d5a5721a601c1aebedca325052c90ff9f204c70d39790142d5bad2d2",
+          "parameters": [
+            0.3797547453595235,
+            376.18644297630016,
+            -362.3390790747773,
+            1.0323511280953956,
+            141.98949501097678,
+            -121.17614765516866,
+            0.46262917246434054,
+            -0.006790709219978719,
+            -21.786351959802108,
+            -1096.3103404837482
+          ]
+        }
+      },
+      "parameters": {
+        "k0": 0.3797547453595235,
+        "k1": 376.18644297630016,
+        "k2": -362.3390790747773,
+        "k3": 1.0323511280953956,
+        "k4": 141.98949501097678,
+        "k5": -121.17614765516866,
+        "k6": 0.46262917246434054,
+        "k7": -0.006790709219978719,
+        "k8": -21.786351959802108,
+        "k9": -1096.3103404837482
+      },
+      "processes": {},
+      "hidden_states": {},
+      "targets": {
+        "T": "k0 * (Tf - T) + k1 * Cf * exp(-k2 / T) + k3 * (Tjf - T) + k4 + k5 * Cf ** 2 + k6 * Cf * (Tf - T) + k7 * Cf * (Tjf - T) + k8 * Cf * exp(-k9 / T) + k9 * Cf / (1.0 + abs(Cf) + 2.220446049250313e-16)"
+      },
+      "rules": [
+        "guard",
+        "coefficients",
+        "direct"
+      ],
+      "notes": [
+        "A function of the current values only: it was refused as an expression for an attribute access (np.finfo(T.dtype).eps), not for reading the history; rewritten exactly.",
+        "Branches resolved with the sealed coefficients: every optional coefficient k5..k9 is non-zero, so all optional terms are on; with k9 != 0 the second Arrhenius term uses exp(-k9/T), and the same k9 also scales the saturation term, as the program writes it.",
+        "Dropped guard that cannot change any value on the public domain: safe_T = where(T <= 0, eps, T). The eps added to the saturation denominator is kept as the float64 machine epsilon."
+      ]
+    }
+  ]
+}
