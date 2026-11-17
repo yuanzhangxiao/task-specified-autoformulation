@@ -43,9 +43,10 @@ Split = Literal["train", "validation", "test"]
 # Perturbed CSTR: the reaction rate is multiplied by 1 - a tanh((T - T_eq) / w).
 # The factor is one at the reference equilibrium, so the preparation, the basal
 # state and every other mechanism are unchanged; it is bounded in [1 - a, 1 + a].
-# Above the operating temperature the reaction is less temperature-sensitive
-# than the Arrhenius law, below it more. Heat release and reactant consumption
-# change together because both use the same rate.
+# Near the operating temperature the factor's slope offsets the Arrhenius slope,
+# so the rate is almost temperature-independent within about 5 K on either
+# side; farther away the factor saturates and the Arrhenius law dominates again.
+# Heat release and reactant consumption change together: both use the rate.
 CSTR_PERTURBATION = {"amplitude": 0.35, "width_kelvin": 5.0}
 
 
