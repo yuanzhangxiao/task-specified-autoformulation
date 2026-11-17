@@ -120,8 +120,8 @@ def test_terms_are_assigned_by_the_names_they_use():
         )
     assert by_pathway["meal"] == [(1, "c * M")]
     assert by_pathway["supplied"] == [(1, "d * production"), (-1, "e * Uii")]
-    assert by_pathway["exchange"] == [(-1, "k1 * Gp"), (1, "k2 * Gt")]
-    assert assignment["exchange_is_a_law_of_gp_gt"]
+    assert by_pathway["remainder"] == [(-1, "k1 * Gp"), (1, "k2 * Gt")]
+    assert assignment["remainder_is_a_law_of_gp_gt"]
     assert not assignment["represented"]["mixed"]
 
 
@@ -132,11 +132,11 @@ def test_a_term_mixing_the_meal_with_glucose_is_mixed_and_a_latent_exchange_is_n
     )
     assignment = pathways.attribute(row)
     assert assignment["meal_states"] == []
-    assert {t["pathway"] for t in assignment["terms"]} == {"exchange"}
-    assert not assignment["exchange_is_a_law_of_gp_gt"]
+    assert {t["pathway"] for t in assignment["terms"]} == {"remainder"}
+    assert not assignment["remainder_is_a_law_of_gp_gt"]
     row = _row("c * M * Gt + k1 * Gp")
     assignment = pathways.attribute(row)
-    assert [t["pathway"] for t in assignment["terms"]] == ["mixed", "exchange"]
+    assert [t["pathway"] for t in assignment["terms"]] == ["mixed", "remainder"]
 
 
 def test_measures_of_a_scaled_response():
@@ -144,6 +144,7 @@ def test_measures_of_a_scaled_response():
     true = np.sin(time / 10 * np.pi)
     result = pathways.measures(0.5 * true, true, time)
     assert result["rse"] == pytest.approx(0.25)
+    assert result["rse_window"] == pytest.approx(0.25)
     assert result["A"] == pytest.approx(1.0)
     assert result["S"] == pytest.approx(0.0, abs=1e-12)
     assert result["gain"] == pytest.approx(2.0)
@@ -153,13 +154,65 @@ def test_measures_of_a_scaled_response():
 @pytest.mark.skipif(not EXPORT.exists(), reason="perturbed T1 export absent")
 def test_the_frozen_t1_models_reproduce_their_panel_scores():
     out = pathways.score(
-        EXPORT / "frozen/frozen_models.json", EXPORT / "panel/references" / CELL
+        EXPORT / "frozen/frozen_models.json",
+        EXPORT / "panel/references" / CELL,
+        CELL,
     )
-    seed2 = next(m for m in out["models"] if m["seed"] == 2)
+    seed2 = next(m for m in out["models"] if m["repetition"] == 2)
     meal = seed2["contrasts"]["fed - fasting"]
     assert meal["Gp"]["rse"] == pytest.approx(0.0474, abs=5e-4)
     assert meal["meal"]["integral"] == pytest.approx(78.4, abs=0.1)
     assert meal["meal"]["true_integral"] == pytest.approx(524.8, abs=0.1)
-    assert not seed2["assignment"]["represented"]["exchange"]
-    assert meal["exchange"]["integral"] == 0.0
+    assert not seed2["assignment"]["represented"]["remainder"]
+    assert meal["remainder"]["integral"] == 0.0
+    assert meal["remainder"]["true_integral"] == pytest.approx(-409.0, abs=0.5)
     assert out["best_linear_law"]["explained_variance"] < 0.8
+
+
+def test_an_insulin_driven_latent_is_the_insulin_pathway_even_scaled_by_glucose():
+    row = _row("c * M - g * X * Gp - k1 * Gp")
+    row["context"] = {
+        **CONTEXT,
+        "targets": ["Gp", "I"],
+        "auxiliaries": ["Uii"],
+        "external_inputs": ["meal_rate_g_per_min", "insulin_pmol_per_kg_min"],
+    }
+    candidate = row["candidate"]
+    candidate["states"].append(
+        {
+            "description": "insulin action",
+            "kind": "latent",
+            "mechanisms": [],
+            "name": "X",
+            "unit": "unspecified",
+        }
+    )
+    candidate["states"].append(
+        {
+            "description": "insulin",
+            "kind": "observed",
+            "mechanisms": [],
+            "name": "I",
+            "unit": "unspecified",
+        }
+    )
+    candidate["state_equations"] += [
+        {"state": "X", "rhs": "e * I - d * X"},
+        {"state": "I", "rhs": "a * insulin_pmol_per_kg_min - b * I"},
+    ]
+    assignment = pathways.attribute(row)
+    assert assignment["insulin_states"] == ["X"]
+    assert [t["pathway"] for t in assignment["terms"]] == [
+        "meal",
+        "insulin",
+        "remainder",
+    ]
+
+
+def test_the_t2_panel_marks_contrasts_where_only_insulin_differs():
+    pairs = {p["case"]: p for p in pathways.contrasts(pathways.anchor.fits.T2)}
+    assert pairs["fed"]["control"] == "fasting" and not pairs["fed"]["insulin_only"]
+    assert pairs["fed_long"]["control"] == "fed" and pairs["fed_long"]["insulin_only"]
+    assert all(
+        pairs[k]["insulin_only"] for k in ("short_low", "short_high", "late_long")
+    )
