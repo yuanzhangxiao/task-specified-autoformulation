@@ -14,6 +14,7 @@ from time import monotonic
 import numpy as np
 
 from autoformalism.benchmarks.phase_b_generation import (
+    CSTR_PERTURBATION,
     PhaseBProtocol,
     phase_b_protocols,
     simulate_phase_b,
@@ -46,6 +47,10 @@ from scripts.analyze_t2_hard_selection import match_pair
 VERSION = "iclr-independent-anchor-assays-1"
 LEGACY = probe.CELL
 CELLS = (LEGACY, *fits.CELLS)
+# Cells whose reference dynamics are perturbed but whose public interface,
+# channels and reference-fit family are those of a released base cell.
+CSTR_PERTURBED = fits.CSTR.replace("_canonical_", "_perturbed_")
+PERTURBED_CELLS = {CSTR_PERTURBED: fits.CSTR}
 UNITS = {
     "Gp": "mg/kg",
     "I": "pmol/L",
@@ -62,7 +67,14 @@ UNITS = {
 
 
 def base_cell(cell):
-    return fits.T2 if cell == LEGACY else cell
+    if cell == LEGACY:
+        return fits.T2
+    return PERTURBED_CELLS.get(cell, cell)
+
+
+def dynamics_of(cell):
+    """The private reference dynamics a cell's references are simulated with."""
+    return "perturbed" if cell == fits.T1P or cell in PERTURBED_CELLS else "canonical"
 
 
 def cases(cell: str, mode: str) -> dict:
@@ -175,7 +187,7 @@ def training_sd(cell, public_root, legacy_root):
     _, training, _ = load_public_cell(public_root / cell)
     return {
         n: float(np.std(np.concatenate([tr.targets[n] for tr in training.rows])))
-        for n in fits.TARGETS[cell]
+        for n in fits.TARGETS[base_cell(cell)]
     }
 
 
@@ -405,20 +417,33 @@ def reference(cell, item, data_root, method):
     p = PhaseBProtocol.model_validate(item["protocol"])
     traj = simulate_phase_b(
         p,
-        dynamics="perturbed" if cell == fits.T1P else "canonical",
+        dynamics=dynamics_of(cell),
         data_root=data_root,
         solver=ReferenceSolver(method=method),
     )
     fields = {n: traj.states[:, i] for i, n in enumerate(traj.state_names)}
     fields.update(traj.derived)
     fields.update({n: traj.inputs[:, i] for i, n in enumerate(traj.input_names)})
-    if cell == fits.CSTR:
-        params = json.loads((data_root / SPEC_PATHS["cstr"]).read_text())["parameters"]
+    if base_cell(cell) == fits.CSTR:
+        spec = json.loads((data_root / SPEC_PATHS["cstr"]).read_text())
+        params = spec["parameters"]
+        protected = np.maximum(fields["T"], 250)
+        multiplier = (
+            1.0
+            - CSTR_PERTURBATION["amplitude"]
+            * np.tanh(
+                (protected - spec["equilibrium"]["T"])
+                / CSTR_PERTURBATION["width_kelvin"]
+            )
+            if dynamics_of(cell) == "perturbed"
+            else 1.0
+        )
         fields["reaction_heat"] = (
             params["source_gain"]
             * params["k0"]
-            * np.exp(-params["E_over_R"] / np.maximum(fields["T"], 250))
+            * np.exp(-params["E_over_R"] / protected)
             * np.maximum(fields["C"], 0)
+            * multiplier
         )
         fields["jacket_heat"] = params["exchange_rate"] * (fields["Tj"] - fields["T"])
     c = base_cell(cell)

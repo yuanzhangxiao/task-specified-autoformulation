@@ -700,7 +700,10 @@ def _toy_reactor(monkeypatch):
                 ]
             )
 
-    def simulate(protocol, *, data_root, private_mechanism_scales, solver):
+    def simulate(
+        protocol, *, data_root, private_mechanism_scales, solver, dynamics="canonical"
+    ):
+        assert dynamics == "canonical"
         return Run(protocol, private_mechanism_scales)
 
     monkeypatch.setattr(scoring.anchor, "reference", reference)

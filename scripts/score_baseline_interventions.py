@@ -48,6 +48,7 @@ from autoformalism.baselines.d3_rollout import NativeMap
 from autoformalism.baselines.d3_rollout import predict as native_rollout
 from autoformalism.baselines.hybrid_networks import NetworkSpec
 from autoformalism.baselines.models import BaselineDevelopmentResult
+from autoformalism.benchmarks.audited_release import read_seal
 from autoformalism.benchmarks.phase_b_generation import (
     PhaseBProtocol,
     simulate_phase_b,
@@ -140,6 +141,72 @@ def _run_cells(method: str, root: Path) -> set[str]:
     return {row["benchmark_id"] for row in sealed_read(root / "plan.json")["rows"]}
 
 
+PERTURBED_BUILD = "phase-c-cstr-perturbed-1"
+
+
+def public_root(cell: str, release: Path, perturbed_release: Path | None) -> Path:
+    """Where a cell's public files live: the release, or the perturbed build."""
+    if cell in anchor.PERTURBED_CELLS:
+        if perturbed_release is None:
+            raise ValueError("a perturbed cell needs its sealed perturbed build")
+        return perturbed_release / "public"
+    return release / "public"
+
+
+def perturbed_identity(
+    perturbed_release: Path | None, release: Path, cells: list[str]
+) -> dict | None:
+    """Verify a perturbed build against its seal and the released base cell.
+
+    The build must have passed its own audit and generated no test data; its
+    listed files must be unchanged; and each perturbed cell must keep the base
+    cell's specification (bar its identifier), prompt, critic text, times,
+    inputs and initial target readings, so only the reference dynamics differ.
+    """
+    perturbed = sorted(c for c in cells if c in anchor.PERTURBED_CELLS)
+    if not perturbed:
+        return None
+    if perturbed_release is None:
+        raise ValueError("a perturbed cell needs its sealed perturbed build")
+    summary = read_seal(perturbed_release / "summary.json")
+    if (
+        summary["protocol"] != PERTURBED_BUILD
+        or not summary["audit"]["passed"]
+        or summary["test_generated"]
+        or summary["cell"]["cell"] not in perturbed
+        or len(perturbed) != 1
+    ):
+        raise ValueError("the perturbed build did not pass or does not hold this cell")
+    for name, expected in summary["cell"]["files"].items():
+        if _digest(perturbed_release / name) != expected:
+            raise ValueError(f"perturbed build file changed: {name}")
+    for cell in perturbed:
+        mine, mtrain, mval = load_public_cell(perturbed_release / "public" / cell)
+        base, btrain, bval = load_public_cell(
+            release / "public" / anchor.base_cell(cell)
+        )
+        if {k: v for k, v in mine.items() if k != "benchmark_id"} != {
+            k: v for k, v in base.items() if k != "benchmark_id"
+        }:
+            raise ValueError("the perturbed cell changed its public specification")
+        for a, b in zip(
+            (*mtrain.rows, *mval.rows), (*btrain.rows, *bval.rows), strict=True
+        ):
+            if (
+                a.time != b.time
+                or a.external_inputs != b.external_inputs
+                or {k: v[0] for k, v in a.targets.items()}
+                != {k: v[0] for k, v in b.targets.items()}
+            ):
+                raise ValueError("the perturbed cell changed its public interface")
+    return {
+        "path": str(perturbed_release.resolve()),
+        "summary_sha256": _digest(perturbed_release / "summary.json"),
+        "plan_sha256": summary["plan_sha256"],
+        "cells": perturbed,
+    }
+
+
 def public_cells(release: Path, names) -> dict:
     """Each cell's public context and training split, as the adapters read them."""
     cells = {}
@@ -161,9 +228,12 @@ def suite_schedules(cell: str, suite: dict) -> dict:
     specification changed, as ``anchor.cases`` does. A suite names one
     ``control``, or several ``controls`` with each probe naming its own.
     """
-    if suite.get("status") != "frozen_before_references" or suite["cell"] != cell:
+    if suite.get("status") != "frozen_before_references" or suite["cell"] not in (
+        cell,
+        anchor.base_cell(cell),
+    ):
         raise ValueError("the suite is not frozen for this cell")
-    if cell != anchor.fits.CSTR:
+    if anchor.base_cell(cell) != anchor.fits.CSTR:
         raise ValueError("only the reactor has a probe suite")
     by_id = {r.protocol_id: r for r in phase_c_protocols("cstr") if r.split == "train"}
     table = {
@@ -478,20 +548,22 @@ def freeze(
     llm_sr_transcriptions: Path | None = None,
     suite: Path | None = None,
     study_models: Path | None = None,
+    perturbed_release: Path | None = None,
 ) -> dict:
     """Seal every pick of the named runs on the named cells, failures included.
 
     A root may hold only a study export (``study_models``, verified against its
-    search and freeze receipts) and no baseline run.
+    search and freeze receipts) and no baseline run. A perturbed cell's public
+    files come from ``perturbed_release``, a sealed build whose cell keeps the
+    base cell's prompt, channels, times and inputs.
     """
     if (root / "plan.json").exists():
         raise ValueError("this root is already frozen")
     unknown = set(sources) - set(METHODS)
-    if (
-        unknown
-        or not (sources or study_models)
-        or not set(cells) <= set(anchor.fits.CELLS)
-    ):
+    allowed = set(anchor.fits.CELLS)
+    if perturbed_release:
+        allowed |= set(anchor.PERTURBED_CELLS)
+    if unknown or not (sources or study_models) or not set(cells) <= allowed:
         raise ValueError(
             "unknown methods, nothing to score, or cells outside the study"
         )
@@ -579,8 +651,12 @@ def freeze(
                 if study_models
                 else None
             ),
+            "perturbed_release": perturbed_identity(perturbed_release, release, cells),
             "training_sd": {
-                c: anchor.training_sd(c, release / "public", Path(".")) for c in cells
+                c: anchor.training_sd(
+                    c, public_root(c, release, perturbed_release), Path(".")
+                )
+                for c in cells
             },
             "rows": subjects,
             "test_data_opened": False,
@@ -626,7 +702,15 @@ def rehearse(root: Path, release: Path) -> dict:
     for row in plan["rows"]:
         if row["status"] != "ready":
             continue
-        cell = release / "public" / row["benchmark_id"]
+        perturbed = plan.get("perturbed_release")
+        cell = (
+            public_root(
+                row["benchmark_id"],
+                release,
+                Path(perturbed["path"]) if perturbed else None,
+            )
+            / row["benchmark_id"]
+        )
         _, train, validation = load_public_cell(cell)
         train_rows = public.unpack_split(train).trajectories
         targets = row["model"]["context"]["targets"]
@@ -751,12 +835,13 @@ def validity(root: Path, data_root: Path) -> dict:
     rows, dropped = [], set()
     scaled: dict = {}
 
-    def response(schedule, case, scale, factor):
+    def response(cell, schedule, case, scale, factor):
         """The temperature with one mechanism scale changed, computed once."""
-        key = (case, scale, factor)
+        key = (cell, case, scale, factor)
         if key not in scaled:
             traj = simulate_phase_b(
                 PhaseBProtocol.model_validate(schedule[case]["protocol"]),
+                dynamics=anchor.dynamics_of(cell),
                 data_root=data_root,
                 private_mechanism_scales={scale: factor},
                 solver=ReferenceSolver(method=edge["solver"]),
@@ -766,7 +851,7 @@ def validity(root: Path, data_root: Path) -> dict:
 
     with composite_inputs.extended():
         for cell, schedule in plan["schedules"].items():
-            if cell != anchor.fits.CSTR:
+            if anchor.base_cell(cell) != anchor.fits.CSTR:
                 raise ValueError("the validity rule is defined for the reactor")
             refs = records[cell]
             for name, item in schedule.items():
@@ -798,8 +883,8 @@ def validity(root: Path, data_root: Path) -> dict:
                     for scale in edge["mechanism_scales"]:
                         for factor in edge["factors"]:
                             changed = response(
-                                schedule, case, scale, factor
-                            ) - response(schedule, control, scale, factor)
+                                cell, schedule, case, scale, factor
+                            ) - response(cell, schedule, control, scale, factor)
                             rse = _response_rse(changed, nominal)
                             if rse > worst["rse"]:
                                 worst = {"rse": rse, "scale": scale, "factor": factor}
@@ -900,7 +985,10 @@ def score(
                         "rows": scored,
                         "failures": failures,
                         "cstr_spec_sha256": _digest(spec)
-                        if anchor.fits.CSTR in plan["cells"]
+                        if any(
+                            anchor.base_cell(c) == anchor.fits.CSTR
+                            for c in plan["cells"]
+                        )
                         else None,
                         "test_data_opened": False,
                         "private_reference_opened": True,
@@ -1004,6 +1092,7 @@ if __name__ == "__main__":
     parser.add_argument("--llm-sr-transcriptions", type=Path)
     parser.add_argument("--suite", type=Path)
     parser.add_argument("--study-models", type=Path)
+    parser.add_argument("--perturbed-release", type=Path)
     parser.add_argument("--data-root", type=Path, default=Path("data_raw"))
     parser.add_argument("--parity-models", type=Path, action="append")
     parser.add_argument("--parity-id", action="append", default=[])
@@ -1017,6 +1106,7 @@ if __name__ == "__main__":
             a.llm_sr_transcriptions,
             a.suite,
             a.study_models,
+            a.perturbed_release,
         )
         print(out["artifact_sha256"], len(out["rows"]), "subjects")
     elif a.stage == "rehearse":
