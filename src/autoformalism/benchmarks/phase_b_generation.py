@@ -40,6 +40,28 @@ from autoformalism.reference_integration import (
 Family = Literal["dalla_man", "cstr", "alien_device"]
 Split = Literal["train", "validation", "test"]
 
+# Perturbed CSTR: the reaction rate is multiplied by 1 - a tanh((T - T_eq) / w).
+# The factor is one at the reference equilibrium, so the preparation, the basal
+# state and every other mechanism are unchanged; it is bounded in [1 - a, 1 + a].
+# Above the operating temperature the reaction is less temperature-sensitive
+# than the Arrhenius law, below it more. Heat release and reactant consumption
+# change together because both use the same rate.
+CSTR_PERTURBATION = {"amplitude": 0.35, "width_kelvin": 5.0}
+
+
+def cstr_rate_multiplier(
+    temperature: float,
+    equilibrium_temperature: float,
+    dynamics: Literal["canonical", "perturbed"],
+) -> float:
+    """Factor applied to the CSTR reaction rate under the given dynamics."""
+    if dynamics == "canonical":
+        return 1.0
+    if dynamics != "perturbed":
+        raise ValueError(f"unknown CSTR dynamics: {dynamics}")
+    shift = (temperature - equilibrium_temperature) / CSTR_PERTURBATION["width_kelvin"]
+    return 1.0 - CSTR_PERTURBATION["amplitude"] * float(np.tanh(shift))
+
 
 class PhaseBProtocol(BaseModel):
     """One immutable simulator protocol in the frozen Phase-B design."""
@@ -197,14 +219,18 @@ def simulate_phase_b(
 
     if protocol.family == "dalla_man":
         return _simulate_dalla(protocol, dynamics, scales, offsets, solver)
-    if dynamics != "canonical":
-        raise ValueError("only Dalla Man defines a perturbed dynamics condition")
     if protocol.family == "cstr":
         spec = _load_json(
             data_root
             / "benchmark5_anonymous_nonlinear_process/private/system_specification.json"
         )
-        return _simulate_cstr(protocol, _scale_cstr_spec(spec, scales), offsets, solver)
+        return _simulate_cstr(
+            protocol, _scale_cstr_spec(spec, scales), offsets, solver, dynamics
+        )
+    if dynamics != "canonical":
+        raise ValueError(
+            "only Dalla Man and the CSTR define a perturbed dynamics condition"
+        )
     spec = _load_json(
         data_root / "benchmark6_alien_device/private/selected_system_spec.json"
     )
@@ -659,11 +685,14 @@ def _simulate_cstr(
     spec: Mapping[str, Any],
     initial_offsets: Mapping[str, float],
     solver: ReferenceSolver | None = None,
+    dynamics: Literal["canonical", "perturbed"] = "canonical",
 ) -> PrivateTrajectory:
     p = {name: float(value) for name, value in spec["parameters"].items()}
     equilibrium = np.asarray(
         [spec["equilibrium"][name] for name in ("C", "T", "Tj")], dtype=float
     )
+    if dynamics not in ("canonical", "perturbed"):
+        raise ValueError(f"unknown CSTR dynamics: {dynamics}")
     initial = equilibrium + np.asarray(
         protocol.specification.get("initial_shift", [0, 0, 0]), dtype=float
     )
@@ -700,10 +729,12 @@ def _simulate_cstr(
     def rhs(value: float, state: NDArray[np.float64]) -> NDArray[np.float64]:
         concentration, temperature, jacket = state
         cf, tf, tjf = physical_inputs(value)
+        protected = max(float(temperature), 250.0)
         reaction = (
             p["k0"]
-            * np.exp(-p["E_over_R"] / max(float(temperature), 250.0))
+            * np.exp(-p["E_over_R"] / protected)
             * max(float(concentration), 0.0)
+            * cstr_rate_multiplier(protected, float(equilibrium[1]), dynamics)
         )
         return np.asarray(
             [
