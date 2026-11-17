@@ -27,6 +27,10 @@ ARMS = (
     "observed_only",
 )
 MUTATIONS = {"underspecified", "incorrect", "overrestrictive"}
+T1_EXCHANGE_CLAUSE = (
+    "a plasma-tissue exchange mechanism through which glucose transfers between "
+    "plasma glucose mass and the tissue glucose pool."
+)
 
 
 def clauses(prompt: str) -> list[str]:
@@ -76,6 +80,12 @@ def active_spec(prompt: str, context: ValidationContext, arm: str) -> tuple:
         if len(meal) != 1 or "meal" not in items[0].lower():
             raise ValueError("unrecognized glucose mechanism clause")
         bindings = [("meal_pathway", (meal[0],), False)]
+        if kind == "t1" and len(items) == 2 and items[1] == T1_EXCHANGE_CLAUSE:
+            if "Gt" not in context.auxiliaries:
+                raise ValueError(
+                    "exchange-required T1 needs the supplied tissue channel"
+                )
+            bindings.append(("plasma_tissue_exchange", ("Gt",), False))
         if kind == "t2":
             if len(items) != 2 or "delayed insulin" not in items[1].lower():
                 raise ValueError("unrecognized insulin obligation")

@@ -462,8 +462,12 @@ def submit(
     max_blocks: int | None = None,
 ) -> str:
     """Submit the next unfinished blocks in plan order, once per named wave."""
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", wave) or concurrency not in (1, 2):
-        raise ValueError("use a named wave and concurrency one or two")
+    if (
+        not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", wave)
+        or type(concurrency) is not int
+        or not 1 <= concurrency <= 6
+    ):
+        raise ValueError("use a named wave and concurrency between one and six")
     if max_blocks is not None and (type(max_blocks) is not int or max_blocks < 1):
         raise ValueError("max_blocks must be a positive integer")
     plan = sealed_read(root / "plan.json")
@@ -513,6 +517,8 @@ def submit(
         worker = io.REPO / "scripts/hpc/run_iclr_controlled_search_aces.sh"
         partition = "gpu"
         resources = []
+        if plan.get("targeted_protocol") == "iclr-targeted-perturbations-1":
+            resources = ["--job-name=iclr-targeted-20b"]
         if plan.get("proposer_tensor_parallel_size", 1) == 2:
             resources = ["--gres=gpu:h100:2", "--mem=128G", "--job-name=iclr-full-120b"]
         if cached_pilot:

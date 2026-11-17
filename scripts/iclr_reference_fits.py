@@ -283,11 +283,25 @@ def public_data(cell, split):
     ]
 
 
-def fit_start(cell, train, val, start, max_evals, checkpoint):
+def fit_start(
+    cell,
+    train,
+    val,
+    start,
+    max_evals,
+    checkpoint,
+    *,
+    bound_width=0.5,
+    distributed_start=False,
+):
     """Fit one prespecified start to all training samples with equal channel weight."""
     import casadi as ca
     from scipy.linalg import norm
 
+    if not np.isfinite(bound_width) or bound_width <= 0:
+        raise ValueError("positive finite log-bound width required")
+    if cell != CSTR and (bound_width != 0.5 or distributed_start):
+        raise ValueError("extended reference bounds are supported here only for CSTR")
     tr, va = public_data(cell, train), public_data(cell, val)
     names = list(coefficients(cell))
     scales = np.std(np.hstack([d[2] for d in tr]), axis=1)
@@ -336,12 +350,16 @@ def fit_start(cell, train, val, start, max_evals, checkpoint):
         temporary.replace(cache)
         return last[1:]
 
-    lb = np.full(len(names), -0.5)
-    ub = np.full(len(names), 0.5)
+    lb = np.full(len(names), -bound_width)
+    ub = np.full(len(names), bound_width)
     if "b" in names:
         ub[names.index("b")] = np.log(0.98 / coefficients(cell)["b"])
     rng = np.random.default_rng(800 + start)
-    initial = rng.uniform(-0.10, 0.10, len(names))
+    initial = (
+        lb + (ub - lb) * rng.uniform(0.1, 0.9, len(names))
+        if distributed_start
+        else rng.uniform(-0.10, 0.10, len(names))
+    )
     t0 = monotonic()
     result = least_squares(
         lambda z: calculate(z)[0],

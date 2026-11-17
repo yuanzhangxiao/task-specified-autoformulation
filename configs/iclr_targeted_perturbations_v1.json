@@ -1,0 +1,43 @@
+{
+  "arms": [
+    "full"
+  ],
+  "handoff_sha256": "f265ffa3cd9a15b8b860aa417216307e1608e15ae39074c8e94440f1cc3c4289",
+  "maximum_parallel_blocks": 6,
+  "protocol": "iclr-targeted-perturbations-1",
+  "public_files": {
+    "phase_c_cstr_controlled_reactor_mechanism_perturbed_named_hard_reset_v1": {
+      "proposer_prompt.txt": "6d951d2a8aae9417852ea87c078ccc6ce9c297baf79e7b6da16a241aaaae15f0",
+      "specification.json": "1e47c3397b82fde95dc1047c3faa27c7665454c5847ebaa6800880007d94709f",
+      "train.json": "d118f0bb094379f307d1896ec3d12c3f336186dbccab6c61ca331af499e1caa3",
+      "val.json": "a9962e55835c7ed7f33a742758a4b582a61243dd6b6704d14168b250121d2c96"
+    },
+    "phase_c_dalla_man_t1_perturbed_named_easy_rates_v1": {
+      "proposer_prompt.txt": "2e16f9821062acca01f3372ef4d7dd3aef397bb8911457e06889a2ef1ea667e7",
+      "specification.json": "665fc95dca9109b6026600d2712b0e6cac42b5857cecb18e02ae6d27561f8146",
+      "train.json": "8c935212a9e84aff703568db7cb06d8ed3793d8aac3c0f8b1243166aff8c95d9",
+      "val.json": "6624c51815a579f565c22e99551a45d11186f09617b5dedfe7b2383838168d05"
+    }
+  },
+  "reference_plan_sha256": "df11f54897898ceeb21eb635938af8eded1ffaea5bed698e02bee46ae0fdb34a",
+  "reference_refits": {
+    "maximum_function_evaluations": 50,
+    "profiles": [
+      "original_bounds",
+      "wide_same_starts",
+      "wide_distributed_starts"
+    ],
+    "starts": [
+      0,
+      1,
+      2
+    ]
+  },
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "test_data_opened": false,
+  "visits": 15
+}
