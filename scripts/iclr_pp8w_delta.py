@@ -406,14 +406,17 @@ def critic_worker(root: Path) -> None:
                 stream.write(secrets.token_urlsafe(40))
         key = credential.read_text().strip()
         with serve(root, critic=True, key=key) as (url, receipt):
+            # Delta nodes can resolve to public IPs. Keep the explicitly allowed
+            # cluster hostname, and check it before spending calibration calls.
+            endpoint = local_judge.checked_url(
+                f"http://{receipt['host']}:{receipt['port']}"
+            )
             calibration.run(root / "calibration", url, lambda: key)
             calibration.bind(
                 root / "search",
                 sealed_read(root / "search/plan.json"),
                 root / "calibration",
             )
-            host = socket.gethostbyname(socket.gethostname())
-            endpoint = local_judge.checked_url(f"http://{host}:{receipt['port']}")
             atomic_json(
                 root / "runtime/critic-service.json",
                 {

@@ -44,10 +44,10 @@ this launch.
 
 ## Delta launch
 
-The delivery archive is `iclr-pp8w-delta-20261118-r1.tar.gz`. From the Mac:
+The delivery archive is `iclr-pp8w-delta-20261118-r2.tar.gz`. From the Mac:
 
 ```bash
-scp /Users/yuanzhangxiao/Projects/autoformalism/output/iclr-pp8w-followup-20261118/iclr-pp8w-delta-20261118-r1.tar.gz delta:/projects/bibo/yxiao2/
+scp /Users/yuanzhangxiao/Projects/autoformalism/output/iclr-pp8w-followup-20261118/iclr-pp8w-delta-20261118-r2.tar.gz delta:/projects/bibo/yxiao2/
 ssh delta
 ```
 
@@ -55,10 +55,19 @@ In the Delta shell, extract into a new source directory, then launch:
 
 ```bash
 mkdir -p /projects/bibo/yxiao2/repos
-tar --keep-old-files -xzf /projects/bibo/yxiao2/iclr-pp8w-delta-20261118-r1.tar.gz -C /projects/bibo/yxiao2/repos
-cd /projects/bibo/yxiao2/repos/iclr-pp8w-delta-20261118-r1
+tar --keep-old-files -xzf /projects/bibo/yxiao2/iclr-pp8w-delta-20261118-r2.tar.gz -C /projects/bibo/yxiao2/repos
+cd /projects/bibo/yxiao2/repos/iclr-pp8w-delta-20261118-r2
 bash scripts/hpc/iclr_pp8w_delta.sh run
 ```
+
+For the already prepared campaign from revision r1, use `submit` instead of
+`run` after extracting r2. Job 24117966 completed all 140 calibration orientations
+and bound the passing result, then stopped while publishing a public numeric IP.
+Revision r2 publishes the recorded Delta node hostname, which the existing
+endpoint policy allows. It changes only the launcher, preserves the scientific
+source/runtime and frozen search plan, and reuses all completed calibration
+records. The original deployment receipt remains intact; the new submission
+receipt records the r2 worker path. No search model existed before this recovery.
 
 Use the existing extracted directory for subsequent checks; do not re-extract
 over an active frozen source tree. Preparation verifies the data hashes, pinned

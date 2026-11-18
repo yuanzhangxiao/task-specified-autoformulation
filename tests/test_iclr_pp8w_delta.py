@@ -3,6 +3,7 @@
 import hashlib
 import json
 import sys
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -171,3 +172,39 @@ def test_worker_refuses_expired_critic_before_starting_any_llm(tmp_path, monkeyp
     )
     with pytest.raises(RuntimeError, match="allocation is ending"):
         delta.search_worker(tmp_path, 0)
+
+
+@pytest.mark.parametrize(
+    "host,accepted",
+    [
+        ("gpub051.delta.ncsa.illinois.edu", True),
+        ("8.8.8.8", False),
+    ],
+)
+def test_controller_publishes_cluster_hostname_before_calibration(
+    tmp_path, monkeypatch, host, accepted
+):
+    plan = sealed_write(tmp_path / "search/plan.json", {"blocks": []})
+    calls = []
+
+    @contextmanager
+    def serve(*args, **kwargs):
+        yield "http://127.0.0.1:19000", {"host": host, "port": 19000}
+
+    monkeypatch.setattr(delta, "serve", serve)
+    monkeypatch.setattr(delta.socket, "gethostbyname", lambda _: "141.142.148.51")
+    monkeypatch.setattr(delta.calibration, "run", lambda *args: calls.append("run"))
+    monkeypatch.setattr(delta.calibration, "bind", lambda *args: calls.append("bind"))
+    monkeypatch.setattr(delta, "pending", lambda _: [])
+    monkeypatch.setattr(delta, "finish_campaign", lambda _: calls.append("finish"))
+    if not accepted:
+        with pytest.raises(ValueError, match="HTTP judge host"):
+            delta.critic_worker(tmp_path)
+        assert not calls
+        assert not (tmp_path / "runtime/critic-service.json").exists()
+        return
+    delta.critic_worker(tmp_path)
+    service = json.loads((tmp_path / "runtime/critic-service.json").read_text())
+    assert service["endpoint"] == "http://gpub051.delta.ncsa.illinois.edu:19000"
+    assert service["search_plan"] == plan["artifact_sha256"]
+    assert calls == ["run", "bind", "finish"]
