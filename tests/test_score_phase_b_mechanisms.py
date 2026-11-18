@@ -224,3 +224,25 @@ def test_a_zero_model_reproduces_the_official_test_nmse(tmp_path):
     assert entry["summary"]["test_nmse"] == pytest.approx(2.136011151353723, rel=1e-6)
     assert entry["missing"] == ["meal"] and "meal" not in entry["summary"]
     assert entry["summary"]["target"] == (0.0, 1.0, 1.0)
+
+
+def test_more_insulin_action_makes_the_true_insulin_terms_more_negative():
+    from types import SimpleNamespace
+
+    from autoformalism.rebuttal.dalla_man import (
+        STATE_INDEX,
+        DallaManParameters,
+        compute_dalla_man_basal,
+    )
+
+    basal = compute_dalla_man_basal(DallaManParameters()).initial_state
+    names = tuple(sorted(STATE_INDEX, key=STATE_INDEX.get))
+    states = np.tile(np.asarray(basal, float), (3, 1))
+    states[1, STATE_INDEX["X"]] += 0.01
+    states[2, STATE_INDEX["Id"]] *= 1.5
+    private = SimpleNamespace(states=states, state_names=names)
+    terms = pb.insulin_terms(private)
+    assert terms[1] < terms[0] and terms[2] < terms[0]
+    assert pb.insulin_terms(SimpleNamespace(states=states[:1], state_names=names))[
+        0
+    ] == pytest.approx(terms[0])

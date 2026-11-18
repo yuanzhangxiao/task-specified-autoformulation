@@ -51,6 +51,7 @@ from autoformalism.fitting.simulation import trajectory_forcing
 from autoformalism.rebuttal import phase_b_nine_case as nine
 from autoformalism.rebuttal import phase_c_baseline_mechanisms as mechanisms
 from autoformalism.rebuttal.basin_algebra import expanded
+from autoformalism.rebuttal.dalla_man import DallaManParameters
 from autoformalism.rebuttal.final_evaluation_adapters import equation_candidate
 from autoformalism.rebuttal.prefit_replay import sealed_read
 from autoformalism.schemas import CandidateModel
@@ -115,23 +116,61 @@ CELLS = {
         "canonical",
     ),
 }
-#: Phase C versions of two cells, for models searched under the current protocol
+#: Phase C versions of the glucose cells, for models searched under the current protocol
 #: (continuous meal rates); scored on the same test protocols in their contract.
 PHASE_C = {
-    "phase_c_dalla_man_t2_canonical_named_hard_rates_v1": (
-        "dalla_man",
-        "T2",
-        "hard",
-        "named",
-        "canonical",
-    ),
-    "phase_c_dalla_man_t1_perturbed_named_easy_rates_v1": (
-        "dalla_man",
-        "T1",
-        "easy",
-        "named",
-        "perturbed",
-    ),
+    f"phase_c_{name}_rates_v1": spec
+    for name, spec in {
+        "dalla_man_t1_canonical_named_easy": (
+            "dalla_man",
+            "T1",
+            "easy",
+            "named",
+            "canonical",
+        ),
+        "anonymous_system_t1_canonical_obfuscated_easy": (
+            "dalla_man",
+            "T1",
+            "easy",
+            "obfuscated",
+            "canonical",
+        ),
+        "dalla_man_t1_perturbed_named_easy": (
+            "dalla_man",
+            "T1",
+            "easy",
+            "named",
+            "perturbed",
+        ),
+        "anonymous_system_t1_perturbed_obfuscated_easy": (
+            "dalla_man",
+            "T1",
+            "easy",
+            "obfuscated",
+            "perturbed",
+        ),
+        "dalla_man_t1_canonical_named_hard": (
+            "dalla_man",
+            "T1",
+            "hard",
+            "named",
+            "canonical",
+        ),
+        "dalla_man_t2_canonical_named_easy": (
+            "dalla_man",
+            "T2",
+            "easy",
+            "named",
+            "canonical",
+        ),
+        "dalla_man_t2_canonical_named_hard": (
+            "dalla_man",
+            "T2",
+            "hard",
+            "named",
+            "canonical",
+        ),
+    }.items()
 }
 CONTRACT = {
     **dict.fromkeys(CELLS, "legacy-events-1"),
@@ -247,6 +286,29 @@ def references(cell: str, data_root: Path) -> dict:
             }
         out["cases"].append(case)
     return out
+
+
+def insulin_terms(private) -> np.ndarray:
+    """The reference's insulin terms along a trajectory, as glucose fluxes.
+
+    Production's suppression by delayed plasma insulin (the Id term of EGP) and
+    the insulin-dependent part of utilization (the X term of Uid), each as its
+    contribution at the trajectory's own state (clipping included). Glucose
+    feedback through insulin-independent terms and portal insulin is excluded.
+    """
+    p = DallaManParameters()
+    state = {
+        n: np.asarray(private.states[:, i], float)
+        for i, n in enumerate(private.state_names)
+    }
+    gp, gt, ipo = (np.maximum(state[n], 0.0) for n in ("Gp", "Gt", "Ipo"))
+    base = p.kp1 - p.kp2 * gp - p.kp4 * ipo
+    production = np.maximum(base - p.kp3 * state["Id"], 0.0) - np.maximum(base, 0.0)
+    saturation = gt / (p.Km0 + gt)
+    utilization = np.maximum(
+        (p.Vm0 + p.Vmx * state["X"]) * saturation, 0.0
+    ) - np.maximum(p.Vm0 * saturation, 0.0)
+    return production - utilization
 
 
 def glucose_truth(private, supplied: list[str]) -> dict:
@@ -613,130 +675,135 @@ def score_row(row: dict, refs: dict, train_var: dict, device: dict | None) -> di
     target = next(
         n for n, s in names.items() if s == ("Gp" if family == "dalla_man" else "y")
     )
-    try:
-        tree, processes, networks, _ = terms_of(model, target)
-        latent = {s["name"] for s in model["candidate"]["states"]} - {target}
-        aux = set(context.auxiliaries)
-        inputs = set(context.external_inputs)
-        grammar = model.get("grammar", "baseline")
-        equations = {
-            e["state"]: e["rhs"] for e in model["candidate"]["state_equations"]
-        }
-        observations = {
-            o["channel"]: o["expression"]
-            for o in model["candidate"]["observation_mappings"]
-        }
-        # time and parameters are shared by a run and its control: no pathway
-        drop = set(model["parameters"]) | {context.time_symbol}
+    if model.get("semantics") in scoring.REPLAYS:
+        # a latent replay has no readable terms: only its outputs are scored
+        groups = []
+        entry["readable_terms"] = False
+    else:
+        try:
+            tree, processes, networks, _ = terms_of(model, target)
+            latent = {s["name"] for s in model["candidate"]["states"]} - {target}
+            aux = set(context.auxiliaries)
+            inputs = set(context.external_inputs)
+            grammar = model.get("grammar", "baseline")
+            equations = {
+                e["state"]: e["rhs"] for e in model["candidate"]["state_equations"]
+            }
+            observations = {
+                o["channel"]: o["expression"]
+                for o in model["candidate"]["observation_mappings"]
+            }
+            # time and parameters are shared by a run and its control: no pathway
+            drop = set(model["parameters"]) | {context.time_symbol}
 
-        def used_by(text: str) -> set[str]:
-            """Private names an equation uses (processes inlined, networks: inputs)."""
-            raw_uses = expand_names(
-                names_in(expanded(text, processes, grammar)),
-                processes,
-                networks,
-                grammar,
-            )
-            return {names.get(n, n) for n in raw_uses} - drop
-
-        uses = {
-            s: used_by(equations[s])
-            for s in latent - aux - set(context.targets)
-            if s in equations
-        }
-        modeled = {
-            names.get(s, s): used_by(equations.get(s, observations.get(s, "0")))
-            for s in (set(equations) | set(observations)) - {target}
-        }
-
-        def driven(sources: set[str]) -> set[str]:
-            """Latent states whose equations use only these sources and such states."""
-            found: set[str] = set()
-            changed = True
-            while changed:
-                changed = False
-                for state, used in uses.items():
-                    channels = used & ({*names.values(), *uses} | sources)
-                    if (
-                        state not in found
-                        and channels & (sources | found)
-                        and channels <= sources | found | {state}
-                    ):
-                        found.add(state)
-                        changed = True
-            return found
-
-        def reaching(sources: set[str]) -> set[str]:
-            """Other modeled states and channels using these sources, transitively."""
-            found: set[str] = set()
-            changed = True
-            while changed:
-                changed = False
-                for key, used in modeled.items():
-                    if key not in found | sources and used & (sources | found):
-                        found.add(key)
-                        changed = True
-            return found
-
-        meal_sources = {"meal_event_g", "meal_rate_g_per_min"}
-        insulin_sources = {"I", "insulin_pmol_per_kg_min"}
-        meal_states, insulin_states = driven(meal_sources), driven(insulin_sources)
-        # e.g. a modeled disposal U, or tissue glucose driven by insulin action
-        carriers = (
-            reaching(insulin_sources | insulin_states) - meal_states
-            if task == "T2"
-            else set()
-        )
-        entry["meal_states"], entry["insulin_states"] = (
-            sorted(meal_states),
-            sorted(insulin_states),
-        )
-        entry["insulin_carriers"] = sorted(carriers)
-
-        def classify(node: ast.AST) -> str | None:
-            """The pathway of a term by the names it uses; None for constants."""
-            raw = expand_names(names_in(node), processes, networks, grammar) - drop
-            if not raw:
-                return None
-            if family != "dalla_man":
-                return (
-                    "memory"
-                    if raw & (latent | aux)
-                    else ("direct_input" if raw & inputs else "output_only")
+            def used_by(text: str) -> set[str]:
+                """Private names an equation uses (processes inlined)."""
+                raw_uses = expand_names(
+                    names_in(expanded(text, processes, grammar)),
+                    processes,
+                    networks,
+                    grammar,
                 )
-            private = {names.get(n, n) for n in raw}
-            meal = bool(private & (meal_sources | meal_states))
-            insulin = bool(private & (insulin_sources | insulin_states | carriers))
-            rest = (
-                private
-                - meal_sources
-                - insulin_sources
-                - meal_states
-                - insulin_states
-                - carriers
-            )
-            if meal and (insulin or rest - {"Gp"}):
-                return "mixed"
-            if meal:
-                return "meal"
-            if insulin and not (rest - {"Gp"}):
-                return "insulin"
-            return "supplied" if private <= set(SIGNS) else "remainder"
+                return {names.get(n, n) for n in raw_uses} - drop
 
-        # a sum inside a term (a deviation such as I - Ib) splits only across pathways
-        constant = "remainder" if family == "dalla_man" else "output_only"
-        groups = [
-            (sign, ast.unparse(node), classify(node) or constant)
-            for sign, node, _ in split_terms(tree, classify)
+            uses = {
+                s: used_by(equations[s])
+                for s in latent - aux - set(context.targets)
+                if s in equations
+            }
+            modeled = {
+                names.get(s, s): used_by(equations.get(s, observations.get(s, "0")))
+                for s in (set(equations) | set(observations)) - {target}
+            }
+
+            def driven(sources: set[str]) -> set[str]:
+                """Latent states driven only by these sources and such states."""
+                found: set[str] = set()
+                changed = True
+                while changed:
+                    changed = False
+                    for state, used in uses.items():
+                        channels = used & ({*names.values(), *uses} | sources)
+                        if (
+                            state not in found
+                            and channels & (sources | found)
+                            and channels <= sources | found | {state}
+                        ):
+                            found.add(state)
+                            changed = True
+                return found
+
+            def reaching(sources: set[str]) -> set[str]:
+                """Other modeled states and channels using these, transitively."""
+                found: set[str] = set()
+                changed = True
+                while changed:
+                    changed = False
+                    for key, used in modeled.items():
+                        if key not in found | sources and used & (sources | found):
+                            found.add(key)
+                            changed = True
+                return found
+
+            meal_sources = {"meal_event_g", "meal_rate_g_per_min"}
+            insulin_sources = {"I", "insulin_pmol_per_kg_min"}
+            meal_states, insulin_states = driven(meal_sources), driven(insulin_sources)
+            # e.g. a modeled disposal U, or tissue glucose driven by insulin action
+            carriers = (
+                reaching(insulin_sources | insulin_states) - meal_states
+                if task == "T2"
+                else set()
+            )
+            entry["meal_states"], entry["insulin_states"] = (
+                sorted(meal_states),
+                sorted(insulin_states),
+            )
+            entry["insulin_carriers"] = sorted(carriers)
+
+            def classify(node: ast.AST) -> str | None:
+                """The pathway of a term by the names it uses; None for constants."""
+                raw = expand_names(names_in(node), processes, networks, grammar) - drop
+                if not raw:
+                    return None
+                if family != "dalla_man":
+                    return (
+                        "memory"
+                        if raw & (latent | aux)
+                        else ("direct_input" if raw & inputs else "output_only")
+                    )
+                private = {names.get(n, n) for n in raw}
+                meal = bool(private & (meal_sources | meal_states))
+                insulin = bool(private & (insulin_sources | insulin_states | carriers))
+                rest = (
+                    private
+                    - meal_sources
+                    - insulin_sources
+                    - meal_states
+                    - insulin_states
+                    - carriers
+                )
+                if meal and (insulin or rest - {"Gp"}):
+                    return "mixed"
+                if meal:
+                    return "meal"
+                if insulin and not (rest - {"Gp"}):
+                    return "insulin"
+                return "supplied" if private <= set(SIGNS) else "remainder"
+
+            # a sum in a term (a deviation like I - Ib) splits only across pathways
+            constant = "remainder" if family == "dalla_man" else "output_only"
+            groups = [
+                (sign, ast.unparse(node), classify(node) or constant)
+                for sign, node, _ in split_terms(tree, classify)
+            ]
+        except (ModelValidationError, ValueError, StopIteration, KeyError) as exc:
+            entry["status"] = f"unreadable: {exc}"[:200]
+            return entry
+        entry["groups"] = [
+            {"sign": s, "expression": t[:160], "group": g} for s, t, g in groups
         ]
-    except (ModelValidationError, ValueError, StopIteration, KeyError) as exc:
-        entry["status"] = f"unreadable: {exc}"[:200]
-        return entry
-    entry["groups"] = [
-        {"sign": s, "expression": t[:160], "group": g} for s, t, g in groups
-    ]
     present = {g for _, _, g in groups}
-    if family == "dalla_man":
+    if family == "dalla_man" and entry.get("readable_terms", True):
         required = ["meal", "insulin"] if task == "T2" else ["meal"]
         entry["missing"] = [p for p in required if p not in present]
     supplied = [names[c] for c in context.auxiliaries if names.get(c) in SIGNS]
@@ -763,12 +830,9 @@ def score_row(row: dict, refs: dict, train_var: dict, device: dict | None) -> di
                 }
             )
             if "counterfactual" in case and "insulin" in present:
-                truth["insulin_effect"] = (
-                    t_run["total"]
-                    - glucose_truth(case["counterfactual"]["private"], supplied)[
-                        "total"
-                    ]
-                )
+                truth["insulin_effect"] = insulin_terms(
+                    case["run"]["private"]
+                ) - insulin_terms(case["counterfactual"]["private"])
         else:
             t_run, t_ctl = (
                 alien_truth(case[k]["private"], device) for k in ("run", "control")
@@ -950,6 +1014,12 @@ if __name__ == "__main__":
         help="models.jsonl of the submitted SINDy and PySR fits",
     )
     parser.add_argument(
+        "--latent",
+        action="append",
+        default=[],
+        help="METHOD=PATH of a sealed latent-model selection (e.g. latent_ode)",
+    )
+    parser.add_argument(
         "--inputs", type=Path, required=True, help="the staged nine-case inputs"
     )
     parser.add_argument("--data-root", type=Path, default=Path("data_raw"))
@@ -965,6 +1035,9 @@ if __name__ == "__main__":
         extra += historical_rows(Path(path), label)
     if a.submitted:
         extra += submitted_rows(a.submitted, a.inputs)
+    for item in a.latent:
+        method, path = item.split("=", 1)
+        extra += scoring.latent_rows(method, Path(path))
     result = main(
         {m: Path(p) for m, p in runs.items()},
         a.inputs,
