@@ -304,7 +304,7 @@
     }
    },
    "targets": {
-    "Gp": "clip(appearance + k_prod + clearance + exchange + insulin_util, -1000000.0, 1000000.0)"
+    "Gp": "appearance + k_prod + clearance + exchange + insulin_util"
    },
    "rules": [
     "filter",
@@ -317,8 +317,8 @@
    "notes": [
     "_exp_ma: alpha = 1/(tau + 1), out[0] = signal[0], out[i] = (1-alpha)*out[i-1] + alpha*signal[i]: a backward-Euler filter of the current row, so T = tau.",
     "Kc_clear > 0 selects the saturable appearance and clearance branches; eps = np.finfo(float).eps.",
-    "The clip to [-1e6, 1e6] is kept; the NaN mask is dropped.",
-    "clearance and exchange filter terms of the target Gp itself, so they start from Gp's first observation."
+    "clearance and exchange filter terms of the target Gp itself, so they start from Gp's first observation.",
+    "The final clip to [-1e6, 1e6] is dropped under the guard rule (user decision 2026-11-18): it cannot change any value on the public domain, and kept it hid the meal term from the pathway split; the NaN mask is dropped as before."
    ]
   },
   {
