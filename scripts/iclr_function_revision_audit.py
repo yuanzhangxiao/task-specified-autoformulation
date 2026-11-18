@@ -4,9 +4,10 @@ Only the frozen, already selected histories are read. Restricted expression ASTs
 are converted to bounded sparse polynomials whose atoms are variables or explicit
 nonlinear kernels. Scalar coefficients are ignored when comparing families.
 This operational signature is not a complete mathematical equivalence prover.
-Primary counts keep the state roster fixed. The separate ``any_roster`` fields
-also inventory joint state/equation edits; these may move an existing nonlinear
-kernel into or out of a memory coordinate, without inventing a new kernel.
+Use the ``any_roster`` fields for inclusive counts of joint state/equation edits.
+The shorter legacy fields retain the fixed-roster subset for comparison. A
+revision may move an existing nonlinear kernel into or out of a memory
+coordinate; a changed equation form need not invent a new operator family.
 """
 
 from __future__ import annotations
