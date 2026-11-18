@@ -246,3 +246,15 @@ def test_more_insulin_action_makes_the_true_insulin_terms_more_negative():
     assert pb.insulin_terms(SimpleNamespace(states=states[:1], state_names=names))[
         0
     ] == pytest.approx(terms[0])
+
+
+@pytest.mark.skipif(not DATA.exists(), reason="Phase B data absent")
+def test_phase_c_cells_render_the_same_six_test_protocols():
+    for cell in (
+        "phase_c_dalla_man_t2_canonical_named_hard_rates_v1",
+        "phase_c_alien_device_unknown_device_mechanism_canonical_functional_easy_reset_v1",
+    ):
+        refs = pb.references(cell, DATA)
+        assert len(refs["cases"]) == 6
+    assert pb.CONTRACT[cell] == "continuous-rates-1"
+    assert sorted(refs["names"]) == ["u01", "v01", "v02", "v03"]

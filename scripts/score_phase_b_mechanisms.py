@@ -48,6 +48,7 @@ from autoformalism.expressions.diagnostics import ModelValidationError
 from autoformalism.expressions.parser import grammar_parser
 from autoformalism.fitting import FitConfig, simulate_trajectory
 from autoformalism.fitting.simulation import trajectory_forcing
+from autoformalism.rebuttal import llm_sr_transcriptions as transcriptions
 from autoformalism.rebuttal import phase_b_nine_case as nine
 from autoformalism.rebuttal import phase_c_baseline_mechanisms as mechanisms
 from autoformalism.rebuttal.basin_algebra import expanded
@@ -172,6 +173,11 @@ PHASE_C = {
         ),
     }.items()
 }
+#: The alien device's Phase C cell: the continuous-rates contract, renamed for its
+#: shared hidden preparation ("reset").
+PHASE_C[
+    "phase_c_alien_device_unknown_device_mechanism_canonical_functional_easy_reset_v1"
+] = ("alien_device", None, "easy", "functional", "canonical")
 CONTRACT = {
     **dict.fromkeys(CELLS, "legacy-events-1"),
     **dict.fromkeys(PHASE_C, "continuous-rates-1"),
@@ -249,7 +255,11 @@ def references(cell: str, data_root: Path) -> dict:
         data_root=data_root,
         input_contract=contract,
     )
-    expected = cell.replace("phase_c_", "phase_b_", 1) if cell in PHASE_C else cell
+    expected = cell
+    if cell in PHASE_C:
+        expected = cell.replace("phase_c_", "phase_b_", 1).replace(
+            "_reset_v1", "_rates_v1"
+        )
     if public.benchmark_id != expected:
         raise ValueError(
             f"{cell}: the public specification renders {public.benchmark_id}"
@@ -434,6 +444,22 @@ def our_rows(
             }
         rows.append(row)
     return rows
+
+
+def campaign_rows(
+    method: str, run_root: Path, reviewed: Path | None = None
+) -> list[dict]:
+    """A Phase C roster campaign's picks (LLM-SR, LLM-ODE) on the scored cells.
+
+    LLM-SR programs that read their history enter only through a reviewed
+    transcription set made for the same run.
+    """
+    names = scoring._run_cells(method, run_root)
+    cells = scoring.public_cells(PHASE_C_RELEASE, names)
+    found = mechanisms.campaign_rows(
+        method, run_root, cells, transcriptions.load(reviewed) if reviewed else None
+    )
+    return [r for r in found if r["benchmark_id"] in CELLS]
 
 
 def submitted_rows(
@@ -1014,6 +1040,17 @@ if __name__ == "__main__":
         help="models.jsonl of the submitted SINDy and PySR fits",
     )
     parser.add_argument(
+        "--campaign",
+        action="append",
+        default=[],
+        help="METHOD=PATH of a sealed Phase C campaign (llm_ode, llm_sr, ...)",
+    )
+    parser.add_argument(
+        "--transcriptions",
+        type=Path,
+        help="reviewed LLM-SR transcriptions for --campaign llm_sr",
+    )
+    parser.add_argument(
         "--latent",
         action="append",
         default=[],
@@ -1035,6 +1072,11 @@ if __name__ == "__main__":
         extra += historical_rows(Path(path), label)
     if a.submitted:
         extra += submitted_rows(a.submitted, a.inputs)
+    for item in a.campaign:
+        method, path = item.split("=", 1)
+        extra += campaign_rows(
+            method, Path(path), a.transcriptions if method == "llm_sr" else None
+        )
     for item in a.latent:
         method, path = item.split("=", 1)
         extra += scoring.latent_rows(method, Path(path))
