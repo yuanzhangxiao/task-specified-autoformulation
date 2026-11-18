@@ -1,0 +1,45 @@
+{
+  "schema": "latent-ode-frozen-plan-1",
+  "status": "frozen_before_training",
+  "purpose": "The same latent neural ODE baseline as the intervention study's (augmented neural ODE driven by the measured inputs, with an encoder of the initial readings), on the eight glucose-insulin and alien-device cells of the Phase B nine-case comparison, with seeds 0, 1 and 2. Settings are copied unchanged from configs/latent_ode_intervention_v1.json. Public training trajectories of the staged nine-case inputs fit it; public validation trajectories stop training early and choose the latent dimension. It reads each cell in the validation context the nine-case D3 campaign used (raw_agent): legacy meal events and the supplied auxiliaries. No test or private file is opened.",
+  "release_protocol": "phase-b-nine-case-inputs-1",
+  "inputs_receipt_sha256": "1ffa6fd9b7c4d31b1393a84e477765f4482fdf1713733c337ab285ccabde37f5",
+  "context": "raw_agent",
+  "cells": [
+    "phase_b_dalla_man_t1_canonical_named_easy",
+    "phase_b_anonymous_system_t1_canonical_obfuscated_easy",
+    "phase_b_dalla_man_t1_perturbed_named_easy",
+    "phase_b_anonymous_system_t1_perturbed_obfuscated_easy",
+    "phase_b_dalla_man_t1_canonical_named_hard",
+    "phase_b_dalla_man_t2_canonical_named_easy",
+    "phase_b_dalla_man_t2_canonical_named_hard",
+    "phase_b_alien_device_unknown_device_mechanism_canonical_functional_easy"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "settings": {
+    "latent_dimensions": [
+      2,
+      4,
+      8
+    ],
+    "width": 64,
+    "depth": 2,
+    "encoder_width": 32,
+    "final_layer_scale": 0.1,
+    "learning_rate": 0.001,
+    "iterations": 2000,
+    "evaluate_every": 25,
+    "gradient_clip": 1.0,
+    "rk4_substeps": 2,
+    "horizon_fraction_for_tau": 0.1,
+    "replay_rtol": 1e-08,
+    "replay_atol": 1e-10,
+    "replay_seconds": 45.0
+  },
+  "test_data_opened": false,
+  "private_reference_opened": false
+}

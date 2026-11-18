@@ -108,3 +108,75 @@ def test_the_frozen_plan_uses_the_default_settings_on_the_study_cells():
         "phase_c_dalla_man_t2_canonical_named_hard_rates_v1",
     ]
     assert not plan["test_data_opened"] and not plan["private_reference_opened"]
+
+
+NINE_CASE_INPUTS = Path(
+    "/Users/yuanzhangxiao/Projects/autoformalism/outputs/release/phase-b-nine-case-v1"
+)
+
+
+def test_the_phase_b_plan_copies_the_intervention_settings_on_eight_cells():
+    phase_c = json.loads(
+        (REPO / "configs" / "latent_ode_intervention_v1.json").read_text()
+    )
+    phase_b = json.loads(
+        (REPO / "configs" / "latent_ode_phase_b_nine_case_v1.json").read_text()
+    )
+    assert phase_b["status"] == "frozen_before_training"
+    assert phase_b["settings"] == phase_c["settings"]
+    assert phase_b["seeds"] == phase_c["seeds"] == [0, 1, 2]
+    assert len(phase_b["cells"]) == 8
+    assert all(c.startswith("phase_b_") for c in phase_b["cells"])
+    assert not any("cstr" in c for c in phase_b["cells"])
+    assert phase_b["release_protocol"] == "phase-b-nine-case-inputs-1"
+    assert phase_b["context"] == "raw_agent"
+    assert not phase_b["test_data_opened"] and not phase_b["private_reference_opened"]
+
+
+def test_the_runner_reads_a_phase_c_cell_unless_the_plan_names_the_nine_cases(
+    monkeypatch,
+):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "runner", REPO / "scripts" / "run_latent_ode_baseline.py"
+    )
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    calls = []
+    monkeypatch.setattr(runner, "load_cell", lambda r, n: calls.append(("c", n)))
+    monkeypatch.setattr(
+        runner.nine, "load_cell", lambda r, n, context: calls.append(("b", n, context))
+    )
+    phase_c = next(iter(runner.BASELINE_CELLS))
+    runner.load(Path("r"), phase_c, None, None)
+    runner.load(Path("r"), phase_c, "phase-c-development-2", None)
+    runner.load(Path("r"), "phase_b_x", runner.nine.PROTOCOL, "raw_agent")
+    assert calls == [("c", phase_c), ("c", phase_c), ("b", "phase_b_x", "raw_agent")]
+    with pytest.raises(ValueError, match="not a Phase C baseline cell"):
+        runner.load(Path("r"), "phase_b_x", None, None)
+
+
+@pytest.mark.skipif(
+    not NINE_CASE_INPUTS.exists(), reason="staged nine-case inputs absent"
+)
+def test_the_phase_b_plan_seals_every_cell_with_the_staged_receipt(tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "runner", REPO / "scripts" / "run_latent_ode_baseline.py"
+    )
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    config = REPO / "configs" / "latent_ode_phase_b_nine_case_v1.json"
+    record = runner.plan(tmp_path / "root", NINE_CASE_INPUTS, config)
+    frozen = json.loads(config.read_text())
+    assert record["release_protocol"] == "phase-b-nine-case-inputs-1"
+    assert set(record["cells"]) == set(frozen["cells"])
+    assert len(record["tasks"]) == 8 * 3 * 3
+    for cell in record["cells"].values():
+        assert (
+            cell["identity"]["inputs_receipt_sha256"] == frozen["inputs_receipt_sha256"]
+        )
+    t1 = record["cells"]["phase_b_dalla_man_t1_canonical_named_easy"]
+    assert t1["targets"] == ["Gp"] and t1["inputs"][0] == "meal_event_g"

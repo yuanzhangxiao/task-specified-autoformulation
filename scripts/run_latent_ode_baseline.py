@@ -1,5 +1,10 @@
 """Train, select and seal the latent neural ODE baseline on Phase C cells.
 
+A plan whose ``release_protocol`` is the staged nine-case inputs
+(``phase_b_nine_case.PROTOCOL``) reads the Phase B nine-case cells instead,
+through that module's loader, in the validation context the plan names; the
+Phase C path is unchanged.
+
     plan    freeze the settings, cells, seeds and public data identities
     train   fit one (cell, seed, latent dimension) task; a sealed task is kept
     select  replay every task's checkpoint on validation; keep the best per seed
@@ -20,10 +25,26 @@ import numpy as np
 
 from autoformalism.baselines import latent_ode as lo
 from autoformalism.fitting import public_fitting as public
-from autoformalism.rebuttal.phase_c_baselines import BASELINE_CELLS, load_cell
+from autoformalism.rebuttal import phase_b_nine_case as nine
+from autoformalism.rebuttal.phase_c_baselines import (
+    BASELINE_CELLS,
+    PhaseCBaselineCell,
+    load_cell,
+)
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 
 PLAN_SCHEMA = "latent-ode-plan-1"
+
+
+def load(
+    release: Path, name: str, protocol: str | None, context: str | None
+) -> PhaseCBaselineCell:
+    """A cell's public data: the Phase C release, or the staged nine-case inputs."""
+    if protocol == nine.PROTOCOL:
+        return nine.load_cell(release, name, context=context or "raw_agent")
+    if name not in BASELINE_CELLS:
+        raise ValueError(f"{name} is not a Phase C baseline cell")
+    return load_cell(release, name)
 
 
 def plan(root: Path, release: Path, config_path: Path) -> dict:
@@ -32,12 +53,19 @@ def plan(root: Path, release: Path, config_path: Path) -> dict:
     if frozen.get("status") != "frozen_before_training":
         raise ValueError("only a frozen plan can be run")
     config = lo.LatentODEConfig.model_validate(frozen["settings"])
+    protocol, context = frozen.get("release_protocol"), frozen.get("context")
     cells = {}
     for name in frozen["cells"]:
-        if name not in BASELINE_CELLS:
-            raise ValueError(f"{name} is not a Phase C baseline cell")
-        cell = load_cell(release, name)
-        if cell.identity["release_summary_sha256"] != frozen["release_summary_sha256"]:
+        cell = load(release, name, protocol, context)
+        if protocol == nine.PROTOCOL:
+            if (
+                cell.identity["inputs_receipt_sha256"]
+                != frozen["inputs_receipt_sha256"]
+            ):
+                raise ValueError("the staged inputs differ from the plan's")
+        elif (
+            cell.identity["release_summary_sha256"] != frozen["release_summary_sha256"]
+        ):
             raise ValueError("the release differs from the plan's")
         targets, inputs = lo.channels(cell.context)
         cells[name] = {
@@ -67,6 +95,8 @@ def plan(root: Path, release: Path, config_path: Path) -> dict:
             },
             "settings": config.model_dump(mode="json"),
             "release": str(release.resolve()),
+            "release_protocol": protocol,
+            "context": context,
             "cells": cells,
             "seeds": frozen["seeds"],
             "tasks": tasks,
@@ -77,7 +107,12 @@ def plan(root: Path, release: Path, config_path: Path) -> dict:
 
 
 def _splits(plan_record: dict, name: str):
-    cell = load_cell(Path(plan_record["release"]), name)
+    cell = load(
+        Path(plan_record["release"]),
+        name,
+        plan_record.get("release_protocol"),
+        plan_record.get("context"),
+    )
     if cell.identity != plan_record["cells"][name]["identity"]:
         raise ValueError(f"public data of {name} changed since the plan")
     targets, inputs = lo.channels(cell.context)
