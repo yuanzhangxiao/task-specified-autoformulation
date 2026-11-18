@@ -40,6 +40,8 @@ def main() -> None:
         "--max-parameters", type=int, help="Predeclared cap shared across every arm"
     )
     prep.add_argument("--visits", type=int, default=15)
+    prep.add_argument("--local-critic", action="store_true")
+    prep.add_argument("--require-fitted-full-start", action="store_true")
     prep.add_argument(
         "--without-critic",
         action="store_true",
@@ -77,6 +79,8 @@ def main() -> None:
             not a.without_critic,
             not a.without_pruning,
             max_parameters=a.max_parameters,
+            local_critic=a.local_critic,
+            require_fitted_full_start=a.require_fitted_full_start,
         )
         result = {
             "plan_sha256": p["artifact_sha256"],

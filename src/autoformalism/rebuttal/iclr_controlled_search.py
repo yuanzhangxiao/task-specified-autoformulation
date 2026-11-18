@@ -112,8 +112,14 @@ def prepare(
     max_parameters: int | None = None,
     *,
     development_pilot: bool = False,
+    local_critic: bool = False,
+    require_fitted_full_start: bool = False,
 ) -> dict:
     """Seal the roster, public inputs, resource caps and runtime."""
+    if local_critic and not critic_on:
+        raise ValueError("local critic requires a critic-enabled campaign")
+    if require_fitted_full_start and "full" not in arms:
+        raise ValueError("a required Full start needs the Full arm")
     if max_parameters is not None and max_parameters < 1:
         raise ValueError("positive parameter cap required")
     if not names or not arms or not seeds or not 1 <= visits <= 15:
@@ -216,6 +222,16 @@ def prepare(
                 "arms": ordered,
                 "seeds": seeds,
                 "critic_enabled": critic_on,
+                **(
+                    {"require_fitted_full_start": True}
+                    if require_fitted_full_start
+                    else {}
+                ),
+                **(
+                    {"critic_transport": critic.local_judge.POLICY}
+                    if local_critic
+                    else {}
+                ),
                 "pruning_enabled": prune,
                 "serving_image_sha256": cfg["serving_image_sha256"],
                 "model_settings": cfg["model_settings"],
@@ -241,6 +257,11 @@ def view(plan: dict, cell: dict) -> dict:
     }
     return {
         "artifact_sha256": plan["artifact_sha256"],
+        **(
+            {"critic_transport": plan["critic_transport"]}
+            if "critic_transport" in plan
+            else {}
+        ),
         "protocol": io.ABLATION_PROTOCOL,
         "control_campaign": True,
         "config": cfg,

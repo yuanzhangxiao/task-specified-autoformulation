@@ -231,12 +231,19 @@ def units(bundle: dict):
 
 
 def _assess(
-    raw: dict, entry: dict, repetition: int, order: str, work: Path, transport
+    raw: dict,
+    entry: dict,
+    repetition: int,
+    order: str,
+    work: Path,
+    transport,
+    *,
+    client_factory=None,
 ) -> dict:
     """Reuse the production scientific stages; labels never enter this function."""
     pair = AdversarialPair.model_validate(raw)
     context = ValidationContext.model_validate(entry["context"])
-    client = jetstream.client(
+    client = (client_factory or jetstream.client)(
         LLMConfig(
             provider="vllm",
             model="openai/gpt-oss-120b",

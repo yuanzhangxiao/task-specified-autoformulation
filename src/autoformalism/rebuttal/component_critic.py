@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from autoformalism.expressions import ValidationContext
 from autoformalism.fitting import public_fitting as public
 from autoformalism.judging.hybrid import FACTOR_SIGN_POLICY as SIGN_POLICY
-from autoformalism.llm import jetstream
+from autoformalism.llm import jetstream, local_judge
 from autoformalism.rebuttal import repair_scientific_judge as judge
 from autoformalism.rebuttal import review_deadline_io as io
 from autoformalism.rebuttal.general_critic import ADVICE_NOTE
@@ -72,9 +73,25 @@ def checked_authorization(root: Path, plan: dict) -> dict:
     if (
         value["identity"] != plan["artifact_sha256"]
         or value["known_case_gate_passed"] is not True
+        or value.get("transport_policy", jetstream.POLICY)
+        != plan.get("critic_transport", jetstream.POLICY)
     ):
         raise ValueError("critic authorization differs from this campaign")
     return value
+
+
+def transport_for(root, plan, directory, key_supplier, progress=None):
+    """Choose only the transport explicitly bound to the immutable campaign."""
+    authorization = checked_authorization(root, plan)
+    if authorization.get("transport_policy", jetstream.POLICY) == local_judge.POLICY:
+        transport = local_judge.LocalJudgeTransport(
+            directory,
+            os.environ["AF_LOCAL_CRITIC_URL"],
+            lambda: os.environ["AF_LOCAL_CRITIC_KEY"],
+        )
+        return transport.base_url, lambda config: local_judge.client(config, transport)
+    transport = jetstream.JetstreamTransport(directory, key_supplier, progress)
+    return jetstream.BASE_URL, lambda config: jetstream.client(config, transport)
 
 
 def needed_bundle(proposal: dict, parent: dict | None):
@@ -198,12 +215,14 @@ def review_one(
     cache = root / "judge_cache" / content_hash(request)
     with public._lock(cache):
         sealed_write(cache / "request.json", {"request": request})
-        transport = jetstream.JetstreamTransport(cache / "wire", key_supplier, progress)
+        base_url, client_factory = transport_for(
+            root, plan, cache / "wire", key_supplier, progress
+        )
         review = (performer or judge.perform_review)(
             request,
             cache,
-            jetstream.BASE_URL,
-            client_factory=lambda config: jetstream.client(config, transport),
+            base_url,
+            client_factory=client_factory,
         )
         if review["request_sha256"] != content_hash(request):
             raise ValueError("judge request identity differs")
@@ -301,12 +320,14 @@ def review_final(root: Path, plan: dict, task: dict, key_supplier, *, performer=
     cache = root / "judge_cache" / content_hash(request)
     with public._lock(cache):
         sealed_write(cache / "request.json", {"request": request})
-        transport = jetstream.JetstreamTransport(cache / "wire", key_supplier)
+        base_url, client_factory = transport_for(
+            root, plan, cache / "wire", key_supplier
+        )
         review = (performer or judge.perform_review)(
             request,
             cache,
-            jetstream.BASE_URL,
-            client_factory=lambda config: jetstream.client(config, transport),
+            base_url,
+            client_factory=client_factory,
         )
         if review["request_sha256"] != content_hash(request):
             raise ValueError("judge request identity differs")
