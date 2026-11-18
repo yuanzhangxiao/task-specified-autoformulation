@@ -115,6 +115,38 @@ endpoints are frozen, score CSTR on the existing 24-intervention panel and T2 on
 the existing six-case stress panel. Test scores must not influence search,
 pruning, selection, or choosing which failed seeds to rerun.
 
+The post-freeze adapter is `scripts/iclr_pp8w_evaluation.py`. It refuses a partial
+roster and checks every model's public input hashes against the follow-up design.
+It scores CSTR targets and the three declared mechanisms, and reuses the existing
+six-case glucose scorer. The primary noisy condition keeps the existing stress
+protocol's noisy initial target observation, with the same noise draw for the
+intervention and its paired control. Three additional evaluations of those same
+noisy-CSTR models use clean initial observations. This secondary diagnostic
+separates forecast initialization error from effects of noisy training; it is
+reported separately and never used for model selection. There are 18 discovery
+searches and 21 post-freeze evaluations, not 21 searches.
+
+Once `completed.json` exists, copy the frozen export to the Mac and evaluate:
+
+```bash
+cd /Users/yuanzhangxiao/Projects/autoformalism
+scp delta:/work/hdd/bibo/yxiao2/phase_c/iclr-pp8w-20261118/search/frozen_models.json output/iclr-pp8w-followup-20261118/delta_frozen_models.json
+export PYTHONPATH="/Users/yuanzhangxiao/Projects/autoformalism-term-timing/src:$PWD/src:$PWD:/Users/yuanzhangxiao/Projects/autoformalism-term-timing"
+.venv/bin/python -m scripts.iclr_pp8w_evaluation freeze \
+  --models output/iclr-pp8w-followup-20261118/delta_frozen_models.json \
+  --design output/iclr-pp8w-followup-20261118/design \
+  --panels output/iclr-pp8w-followup-20261118/anytime/plan.json \
+  --root output/iclr-pp8w-followup-20261118/delta-evaluation
+.venv/bin/python -m scripts.iclr_pp8w_evaluation run \
+  --root output/iclr-pp8w-followup-20261118/delta-evaluation --workers 4
+.venv/bin/python -m scripts.iclr_pp8w_evaluation report \
+  --root output/iclr-pp8w-followup-20261118/delta-evaluation
+```
+
+The analyst ZIP also includes the exact borrowed evaluator dependencies for a
+portable local replay. The source archive intended for Delta contains no saved
+held-out responses, so evaluation remains a separate post-freeze operation.
+
 The calibration source is expected at
 `/work/hdd/bibo/yxiao2/phase_b/judge-jetstream-calibration-inputs-v1.json`.
 Alternatively set `AF_CALIBRATION_INPUTS`. If absent, preparation attempts the
