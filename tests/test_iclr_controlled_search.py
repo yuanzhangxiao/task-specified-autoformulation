@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 
 import pytest
@@ -220,6 +221,52 @@ def test_reject_invalid_roster_before_provider_or_files(tmp_path):
             False,
             True,
         )
+
+
+def test_platform_image_is_sealed_without_changing_legacy_default(
+    tmp_path, monkeypatch
+):
+    source = io.REPO / "configs/final_component_campaign_v1.json"
+    original = source.read_bytes()
+    seen = []
+
+    def read_cell(_path, _root, config):
+        seen.append(config["serving_image_sha256"])
+        return cell()
+
+    monkeypatch.setattr(campaign, "read_cell", read_cell)
+    args = (tmp_path / "public", ["toy"], ["full"], [0], 3, False, True)
+    legacy = campaign.prepare(tmp_path / "legacy", *args)
+    delta = campaign.prepare(tmp_path / "delta", *args, serving_image_sha256="a" * 64)
+    assert (
+        legacy["serving_image_sha256"] == json.loads(original)["serving_image_sha256"]
+    )
+    assert delta["serving_image_sha256"] == "a" * 64
+    assert seen == [legacy["serving_image_sha256"], "a" * 64]
+    assert source.read_bytes() == original
+    assert (
+        campaign.prepare(tmp_path / "delta", *args, serving_image_sha256="a" * 64)
+        == delta
+    )
+    with pytest.raises(ValueError):
+        campaign.prepare(tmp_path / "delta", *args, serving_image_sha256="b" * 64)
+
+
+@pytest.mark.parametrize("digest", ["", "A" * 64, "a" * 63, "not-a-digest"])
+def test_invalid_platform_image_is_rejected_before_creating_files(tmp_path, digest):
+    with pytest.raises(ValueError, match="SHA-256"):
+        campaign.prepare(
+            tmp_path / "run",
+            tmp_path / "public",
+            ["toy"],
+            ["full"],
+            [0],
+            3,
+            False,
+            True,
+            serving_image_sha256=digest,
+        )
+    assert not (tmp_path / "run").exists()
 
 
 def test_parameter_cap_is_visible_and_enforced_on_lowered_coefficients():

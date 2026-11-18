@@ -1,5 +1,6 @@
 """Delta resource requests, transport isolation and resumable terminal checks."""
 
+import hashlib
 import json
 import sys
 from types import SimpleNamespace
@@ -9,6 +10,48 @@ import pytest
 from autoformalism.rebuttal.prefit_replay import sealed_write
 from scripts import iclr_anytime_cost_export as costs
 from scripts import iclr_pp8w_delta as delta
+
+
+def test_assets_reject_changed_image_and_missing_cached_weights(tmp_path, monkeypatch):
+    python = tmp_path / "python"
+    python.write_text("fixture")
+    image = tmp_path / "image.sif"
+    image.write_bytes(b"fixture image")
+    expected = hashlib.sha256(image.read_bytes()).hexdigest()
+    cache = tmp_path / "cache"
+    for size, revision in (
+        ("20b", delta.PROPOSER_REVISION),
+        ("120b", delta.local_judge.REVISION),
+    ):
+        model = (
+            cache / "hub" / f"models--openai--gpt-oss-{size}" / "snapshots" / revision
+        )
+        model.mkdir(parents=True)
+        (model / "config.json").write_text("{}")
+        (model / "tokenizer.json").write_text("{}")
+        (model / "model.safetensors.index.json").write_text(
+            json.dumps({"weight_map": {"weight": "part.safetensors"}})
+        )
+        (model / "part.safetensors").write_bytes(b"fixture weights")
+    monkeypatch.setattr(
+        delta,
+        "paths",
+        lambda: {
+            "python": python,
+            "image": image,
+            "cache": cache,
+        },
+    )
+    monkeypatch.setattr(delta, "IMAGE_SHA", expected)
+    monkeypatch.setattr(delta.harmony_vocab, "verify", lambda _: {"verified": True})
+    assert delta.assets()["image_sha256"] == expected
+    image.write_bytes(b"different image")
+    with pytest.raises(ValueError, match="pinned Delta image"):
+        delta.assets()
+    image.write_bytes(b"fixture image")
+    (model / "part.safetensors").unlink()
+    with pytest.raises(ValueError, match="weight shards"):
+        delta.assets()
 
 
 def test_local_worker_environment_excludes_hosted_credentials(monkeypatch):

@@ -31,15 +31,23 @@ full validation set, not a claim that only four total trajectories are needed.
 
 The 120B critic is hosted locally on Delta. Because its serving backend differs
 from the earlier Jetstream critic, six fresh 16-trajectory control searches are
-included. Both LLMs use pinned model revisions and the existing pinned vLLM
-image. No external baseline or hosted Jetstream call is part of this launch.
+included. Both LLMs use pinned model revisions and Delta's verified vLLM 0.27.1
+image. Delta's SIF checksum is
+`5449f371cabd3178e31797f6f377c9667462544362f5adc271b2e707172ea907`;
+it was built from Docker digest
+`0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967`.
+This platform-specific image identity is sealed in the new search and calibration
+plans; historical ACES plans and defaults retain their original checksum.
+The installed version and both pinned model revisions were verified on Delta
+before submission. No external baseline or hosted Jetstream call is part of
+this launch.
 
 ## Delta launch
 
-The delivery archive is `iclr-pp8w-delta-20261118.tar.gz`. From the Mac:
+The delivery archive is `iclr-pp8w-delta-20261118-r1.tar.gz`. From the Mac:
 
 ```bash
-scp /Users/yuanzhangxiao/Projects/autoformalism/output/iclr-pp8w-followup-20261118/iclr-pp8w-delta-20261118.tar.gz delta:/projects/bibo/yxiao2/
+scp /Users/yuanzhangxiao/Projects/autoformalism/output/iclr-pp8w-followup-20261118/iclr-pp8w-delta-20261118-r1.tar.gz delta:/projects/bibo/yxiao2/
 ssh delta
 ```
 
@@ -47,8 +55,8 @@ In the Delta shell, extract into a new source directory, then launch:
 
 ```bash
 mkdir -p /projects/bibo/yxiao2/repos
-tar --keep-old-files -xzf /projects/bibo/yxiao2/iclr-pp8w-delta-20261118.tar.gz -C /projects/bibo/yxiao2/repos
-cd /projects/bibo/yxiao2/repos/iclr-pp8w-delta-20261118
+tar --keep-old-files -xzf /projects/bibo/yxiao2/iclr-pp8w-delta-20261118-r1.tar.gz -C /projects/bibo/yxiao2/repos
+cd /projects/bibo/yxiao2/repos/iclr-pp8w-delta-20261118-r1
 bash scripts/hpc/iclr_pp8w_delta.sh run
 ```
 

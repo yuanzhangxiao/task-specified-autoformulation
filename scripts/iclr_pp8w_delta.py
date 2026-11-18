@@ -29,7 +29,13 @@ from scripts import iclr_pp8w_followup as design
 from scripts import iclr_stress_data as data
 
 REPO = Path(__file__).resolve().parents[1]
-IMAGE_SHA = "9c56389af06cafbf4aa8bd825393f606ac7f2a18e1a700c5999b1ed47f7f9c1e"
+# Delta's independently built SIF, verified by inspect and installed metadata.
+# The historical ACES image remains unchanged in the default campaign config.
+IMAGE_SHA = "5449f371cabd3178e31797f6f377c9667462544362f5adc271b2e707172ea907"
+IMAGE_ORIGIN = (
+    "docker.io/vllm/vllm-openai@sha256:"
+    "0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967"
+)
 PROPOSER_REVISION = "6cee5e81ee83917806bbde320786a8fb61efebee"
 CRITIC_SECONDS = 24 * 3600
 
@@ -70,7 +76,7 @@ def assets() -> dict:
             digest.update(chunk)
     image = digest.hexdigest()
     if image != IMAGE_SHA:
-        raise ValueError("serving image differs from the frozen Full configuration")
+        raise ValueError("serving image differs from the pinned Delta image")
     models = {}
     for size, revision in (("20b", PROPOSER_REVISION), ("120b", local_judge.REVISION)):
         path = (
@@ -100,7 +106,13 @@ def assets() -> dict:
     harmony = harmony_vocab.verify(
         Path(os.environ.get("AF_HARMONY_ASSETS", str(REPO / "assets/harmony")))
     )
-    return {"image_sha256": image, "models": models, "harmony": harmony}
+    return {
+        "image_sha256": image,
+        "image_origin": IMAGE_ORIGIN,
+        "vllm_version": "0.27.1",
+        "models": models,
+        "harmony": harmony,
+    }
 
 
 def prepare(root: Path, source: Path) -> dict:
@@ -125,6 +137,7 @@ def prepare(root: Path, source: Path) -> dict:
         True,
         local_critic=True,
         require_fitted_full_start=True,
+        serving_image_sha256=IMAGE_SHA,
     )
     bundle = paths()["calibration"]
     if not bundle.is_file():

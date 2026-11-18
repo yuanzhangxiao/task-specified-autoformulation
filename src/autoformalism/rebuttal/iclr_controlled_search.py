@@ -114,8 +114,13 @@ def prepare(
     development_pilot: bool = False,
     local_critic: bool = False,
     require_fitted_full_start: bool = False,
+    serving_image_sha256: str | None = None,
 ) -> dict:
     """Seal the roster, public inputs, resource caps and runtime."""
+    if serving_image_sha256 is not None and not re.fullmatch(
+        r"[0-9a-f]{64}", serving_image_sha256
+    ):
+        raise ValueError("serving image must be a lowercase SHA-256 digest")
     if local_critic and not critic_on:
         raise ValueError("local critic requires a critic-enabled campaign")
     if require_fitted_full_start and "full" not in arms:
@@ -139,6 +144,8 @@ def prepare(
     ) or public_root.resolve().is_relative_to(root.resolve()):
         raise ValueError("development release and campaign output must be disjoint")
     cfg = json.loads((io.REPO / "configs/final_component_campaign_v1.json").read_text())
+    if serving_image_sha256 is not None:
+        cfg["serving_image_sha256"] = serving_image_sha256
     cfg["rounds"] = visits
     blocks = []
     cells = {}
