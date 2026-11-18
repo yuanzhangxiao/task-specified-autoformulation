@@ -159,7 +159,15 @@ def tables(runs: list[dict], mechanisms: list[dict]) -> dict:
                 "role_assigned_latent_count",
                 "guided_feedback_addition_count",
             ]:
-                entry[field] = histogram([r[field] for r in ready])
+                applicable = (
+                    [r for r in ready if r["required_mechanism_count"] > 0]
+                    if field in {
+                        "outside_required_role_count",
+                        "ambiguous_required_relation_count",
+                    }
+                    else ready
+                )
+                entry[field] = histogram([r[field] for r in applicable])
             entry["available_with_requirements"] = sum(
                 r["required_mechanism_count"] > 0 for r in ready
             )
@@ -378,9 +386,10 @@ def report(root: Path, analysis: Path, destination: Path) -> None:
             f"{htext(r['ambiguous_required_relation_count']['counts'])}"
         )
     lines += [
-        "Histograms include every available model; no-spec latents are separately "
-        "listed in no_mechanistic_requirements_count and are not evidence of novelty "
-        "under a mechanistic specification.",
+        "These two role histograms include available models with nonempty mechanism "
+        "requirements. No-spec latents are separately listed in "
+        "no_mechanistic_requirements_count; an empty specification is not evidence "
+        "of novelty under a mechanistic specification.",
         "The two clear outside roles occur in original-campaign ablations: delayed "
         "EGP under a meal-only requirement, and a v05-driven state under a u01-to-v01 "
         "requirement. Three feedback/auxiliary-memory assignments remain ambiguous.",
