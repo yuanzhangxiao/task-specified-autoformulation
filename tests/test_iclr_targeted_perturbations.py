@@ -305,10 +305,12 @@ def test_six_parallel_submissions_are_resumable(prepared, monkeypatch):
     assert "--array=0,1,2,3,4,5%6" in calls[0]
     assert "--job-name=iclr-targeted-20b" in calls[0]
     assert "--exclude=ac042,ac096" in calls[0]
+    assert "--time=04:00:00" in calls[0]
     # Retry the same six pending blocks only after the failed wave has exited.
     monkeypatch.setattr(pilot.subprocess, "check_output", lambda *a, **kw: "")
     assert pilot.submit(root, "wave2", "156264627414", 6) == "1234"
     assert "--exclude=ac042,ac096" in calls[1]
+    assert "--time=04:00:00" in calls[1]
     assert "--array=0,1,2,3,4,5%6" in calls[1]
     for limit in (0, 7, True):
         with pytest.raises(ValueError, match="concurrency"):

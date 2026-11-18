@@ -524,6 +524,7 @@ def submit(
             resources = [
                 "--job-name=iclr-targeted-20b",
                 "--exclude=ac042,ac096",
+                "--time=04:00:00",
             ]
         if plan.get("proposer_tensor_parallel_size", 1) == 2:
             resources = ["--gres=gpu:h100:2", "--mem=128G", "--job-name=iclr-full-120b"]

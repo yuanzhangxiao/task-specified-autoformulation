@@ -24,8 +24,8 @@ if [[ $action == status ]]; then
     exit 0
 fi
 case "$action" in
-    prepare|run|finish) ;;
-    *) echo "Use: bash $0 run [wave1] | prepare | status | finish" >&2; exit 2 ;;
+    prepare|run|finish|shorten) ;;
+    *) echo "Use: bash $0 run [wave1] | prepare | status | finish | shorten JOB OLD_CODE" >&2; exit 2 ;;
 esac
 activation=${AF_ANCHOR_ACTIVATION:-$group/iclr-pilot-fit-r1-2334957/activate.sh}
 [[ -r "$activation" ]] || { echo "Missing anchor environment: $activation" >&2; exit 1; }
@@ -41,10 +41,20 @@ export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432f
 export AF_CASADI_ROOT=${AF_CASADI_ROOT:-$group/iclr-python311-casadi-3.7.2}
 export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
 export AF_COMPUTE_CACHE_ROOT=job-local AF_BLOCK_SECONDS=36000
+# The targeted worker caps this legacy upper bound against the actual Slurm
+# end time, reserving two hours for an active visit/pruning operation to finish.
 export PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 module load GCCcore/13.2.0 Python/3.11.5
 export PYTHONPATH="$targeted_code/src:$targeted_code:$AF_CASADI_ROOT"
 cd "$targeted_code"
+
+if [[ $action == shorten ]]; then
+    [[ $# == 3 ]] || { echo 'Use: shorten JOB OLD_CODE' >&2; exit 2; }
+    sha256sum --quiet -c SHA256SUMS
+    "$AF_PYTHON" scripts/shorten_iclr_targeted_job.py \
+        --root "$root" --job "$2" --code "$3" --replacement "$targeted_code" --apply
+    exit 0
+fi
 
 if [[ $action == prepare || $action == run ]]; then
     sha256sum --quiet -c SHA256SUMS

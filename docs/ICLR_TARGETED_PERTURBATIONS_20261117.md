@@ -4,7 +4,10 @@ Run Full with the anchor method on the two approved public benchmark variants.
 There are six independent fresh lineages: two cells × seeds 0, 1, 2, each with
 15 visits. The ACES array permits all six H100 allocations to run concurrently.
 Slurm still controls their start times. Each allocation requests one H100,
-8 CPUs, 64 GB and 12 hours; the worker reserves time for shutdown and checkpointing.
+8 CPUs, 64 GB and 4 hours. The original delivery requested 12 hours. The shorter
+launcher reads the actual Slurm end time after server startup and stops admitting
+new visits two hours before that end time, retaining the original completion
+headroom. Startup time is therefore included in the allocation allowance.
 An unfinished lineage resumes from the same plan and cached calls in a later wave.
 
 ## Scientific design
@@ -155,6 +158,46 @@ on the chosen platform. These controls never call the proposer or critic.
 ## Implementation and limits
 
 ### Recovery of the first delivery's missing fitter identity file
+
+#### Shorter allocations for the pending recovery array
+
+The 18 November launch requests four hours per array task. The scientific source
+tree, public data, 15 visits, model settings, fitting allowances and critic
+protocol are unchanged. `scripts/iclr_allocation_window.py` reads the running
+task's actual Slurm `EndTime` and subtracts a two-hour completion margin. It
+caps the existing worker allowance after server startup, so slow startup cannot
+silently consume the margin. An unavailable or ambiguous scheduler deadline
+prevents starting scientific work. Each task writes an operational receipt at
+`runtime/allocation-JOB.json`. A proposer deferral at the allocation boundary
+returns `pending` with cached calls preserved.
+
+For array `2376062`, the new bundle supports updating the existing submission:
+
+```bash
+bash NEW_BUNDLE/run_recovery.sh shorten 2376062 OLD_BUNDLE
+```
+
+The updater verifies the saved submission, bundle manifests, unchanged scientific
+files, owner and all six pending tasks before placing a temporary user hold. It
+checks the state again after holding, installs the tested CLI timing adapter in
+the old code directory used by Slurm's cached script, reduces the limit to four
+hours, verifies the result and releases the same job. It preserves original CLI
+bytes and records the deployment. It does not cancel or resubmit the array, or
+reset its submission/accrual time. Slurm still determines priority and start
+time; a shorter request cannot guarantee an immediate allocation. If any task
+has started, the updater refuses to alter its running code or time limit.
+
+The old bundle's original `SHA256SUMS` is deliberately preserved as provenance;
+its patched CLI no longer matches that original manifest. Use the **new bundle**
+for later `status`, `finish`, and `run wave3` commands against the same recovered
+root. Do not run the old bundle's preparation again or delete saved attempts.
+
+The completion margin is conservative headroom, not a proven worst-case bound.
+The frozen critic can make long retries, and a visit or pruning operation already
+in progress is allowed to finish. This change neither shortens individual
+scientific calls nor silently grants an interrupted fit a new budget. If the
+allocation ends before all visits finish, resume its pending blocks in a new
+wave using the new bundle. No automatic follow-up is submitted.
 
 The subsequent recovery array `2374776` was accepted but all six tasks failed
 on `ac096` before vLLM became ready. Both Slurm and vLLM reported a failed NVML

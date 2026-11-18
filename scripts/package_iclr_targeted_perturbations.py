@@ -25,6 +25,7 @@ ENTRIES = (
     "harmony_vocab",
     "package_iclr_targeted_perturbations",
     "recover_iclr_targeted_perturbations",
+    "shorten_iclr_targeted_job",
     "smoke_public_fitting",
 )
 # These files are read/launched by path from src, not imported by a script.

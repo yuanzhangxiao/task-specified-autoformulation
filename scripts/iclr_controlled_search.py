@@ -7,9 +7,25 @@ import argparse
 import json
 from pathlib import Path
 
+from autoformalism.llm.staged_topology import DeferredCall
 from autoformalism.rebuttal import iclr_controlled_search as study
 from autoformalism.rebuttal.iclr_search_controls import ARMS
 from autoformalism.rebuttal.prefit_replay import sealed_read
+from scripts import iclr_allocation_window
+
+
+def run(root: Path, block: int, base_url: str, seconds: int) -> dict:
+    """Respect the targeted allocation window without changing frozen search."""
+    plan = sealed_read(root / "plan.json")
+    if not iclr_allocation_window.applies(plan):
+        return study.run_block(root, block, base_url, seconds)
+    effective = iclr_allocation_window.allowance(root, plan, block, seconds)
+    if effective <= 0:
+        return {"status": "pending", "block": block, "reason": "allocation_draining"}
+    try:
+        return study.run_block(root, block, base_url, effective)
+    except DeferredCall:
+        return {"status": "pending", "block": block, "reason": "allocation_draining"}
 
 
 def main() -> None:
@@ -75,7 +91,7 @@ def main() -> None:
             a.root, p, a.calibration_plan, a.calibration_summary
         )
     elif a.stage == "run":
-        result = study.run_block(a.root, a.block, a.base_url, a.seconds)
+        result = run(a.root, a.block, a.base_url, a.seconds)
     else:
         result = study.report(a.root, a.stage == "export")
         if "rows" in result:
