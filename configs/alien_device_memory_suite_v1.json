@@ -1,0 +1,30 @@
+{
+  "suite": "alien-device-memory-1",
+  "status": "frozen_before_references",
+  "purpose": "Held-out command interventions for the stress study's procedural devices, scored against each device's private equations: the output response after each command ends (carried only by stored state), the response during it, the share of the response a model routes through direct command terms, and the output equation's relaxation and drive.",
+  "design_basis": "Every device was trained on 0-24 time units at 0.25 with no input, pulses of +1 and -1 for 4-5 units, a 12-unit +0.6 pulse and two mixed schedules; validated on +0.8 and -0.6 pulses. The new interventions are shorter, paired, longer, smoother, larger or sustained, and each ends early enough to leave a window for the memory it built, except the step.",
+  "horizon": 24.0,
+  "dt": 0.25,
+  "control": "no input from the shared preparation (z = 0, y = 0), as in the saved held-out records",
+  "interventions": [
+    {"name": "short_pos", "segments": [[4.0, 5.0, 1.0]], "rationale": "1-unit pulse, a quarter of the training width"},
+    {"name": "short_neg", "segments": [[4.0, 5.0, -1.0]], "rationale": "the same pulse with the opposite sign"},
+    {"name": "medium_pos", "segments": [[6.0, 8.0, 0.6]], "rationale": "2-unit pulse at the long training pulse's amplitude"},
+    {"name": "pair_pos", "segments": [[3.0, 4.0, 0.8], [9.0, 10.0, 0.8]], "rationale": "two separated pulses: the second lands on memory left by the first"},
+    {"name": "long_neg", "segments": [[4.0, 14.0, -0.6]], "rationale": "10-unit negative pulse, longer than any negative training input"},
+    {"name": "sine_period8", "sine": {"start": 4.0, "period": 8.0, "amplitude": 0.6, "cycles": 1}, "rationale": "one smooth cycle, positive then negative"},
+    {"name": "amplitude_up", "segments": [[4.0, 6.0, 1.5]], "rationale": "amplitude 1.5, beyond the training range"},
+    {"name": "step_up", "segments": [[5.0, 24.0, 0.5]], "memory_window": false, "rationale": "sustained input: no post-command window; scored during the input only"}
+  ],
+  "saved_held_out": ["test_pulse_1", "test_pulse_2"],
+  "input_rule": "On the 0.25 grid a segment [on, off, a] sets u = a at on <= t <= off and 0 elsewhere; overlapping segments add; between grid points u is linear (a one-sample ramp at each edge). A sine sets u = a sin(2 pi (t - start)/period) for start <= t <= start + cycles period.",
+  "windows": "Pulse window: from the last zero-input sample before the command to the first zero-input sample after it. Memory window: after that sample to t = 24.",
+  "measures": {
+    "memory": "Run minus control output response in the memory window: direction accuracy A, RSE, shape error S.",
+    "pulse": "The same in the pulse window.",
+    "direct_input_share": "In the pulse window, the energy of the response of the model's output terms that use the command directly, over that of those terms plus the terms that use a latent state (the true device has no direct term).",
+    "split": "Models whose output has its own equation: its output-only terms against the true relaxation -d_y y, and its other terms against the true internal drive G(z) = dy/dt + d_y y, as responses over the whole trajectory."
+  },
+  "aggregation": "Per seed: mean A and S, median RSE over interventions with the window; a failed rollout gives A = 0, S = 1, RSE = inf. Across seeds: median [worst, best].",
+  "test_data_opened": false
+}
