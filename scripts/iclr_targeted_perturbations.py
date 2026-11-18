@@ -281,6 +281,9 @@ def finish(root: Path) -> Path:
         for name in ("sacct.psv", "scheduler-cost.csv"):
             if (root / name).exists():
                 members[name] = root / name
+        recovery = root / "packaging_recovery.json"
+        if recovery.is_file():
+            members[recovery.name] = recovery
         (folder / "SHA256SUMS").write_text(
             "".join(
                 f"{search.file_digest(p)}  {n}\n" for n, p in sorted(members.items())

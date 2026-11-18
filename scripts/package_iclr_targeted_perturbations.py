@@ -24,7 +24,12 @@ ENTRIES = (
     "iclr_stress_resources",
     "harmony_vocab",
     "package_iclr_targeted_perturbations",
+    "recover_iclr_targeted_perturbations",
+    "smoke_public_fitting",
 )
+# These files are read/launched by path from src, not imported by a script.
+# The AST import walk cannot discover them.
+RUNTIME_SCRIPTS = ("run_phase_b_fitter_diagnostic", "fitting_timed_worker")
 SHELLS = (
     "scripts/hpc/iclr_targeted_perturbations_aces.sh",
     "scripts/hpc/iclr_targeted_refits.sh",
@@ -34,7 +39,7 @@ SHELLS = (
 
 def script_dependencies() -> list[str]:
     """Include transitive local script imports without unrelated experiment files."""
-    pending, found = list(ENTRIES), set()
+    pending, found = [*ENTRIES, *RUNTIME_SCRIPTS], set()
     while pending:
         module = pending.pop()
         if module in found:
@@ -120,6 +125,16 @@ def build(output: Path, handoff: Path, original_t1: Path, vocabulary: Path) -> d
                 'bundle=$(cd "$(dirname "$0")" && pwd -P)\n'
                 f'exec bash "$bundle/{script}" "$@"\n'
             )
+        (root / "run_recovery.sh").write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
+            'bundle=$(cd "$(dirname "$0")" && pwd -P)\n'
+            'group=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}\n'
+            'export AF_TARGETED_RECOVER_FROM=${AF_TARGETED_RECOVER_FROM:-'
+            '$group/iclr-targeted-perturbations-v1}\n'
+            'export AF_TARGETED_ROOT=${AF_TARGETED_ROOT:-'
+            '$group/iclr-targeted-perturbations-recovered-v1}\n'
+            'exec bash "$bundle/run_aces.sh" "$@"\n'
+        )
         files = sorted(p for p in root.rglob("*") if p.is_file())
         (root / "SHA256SUMS").write_text(
             "".join(

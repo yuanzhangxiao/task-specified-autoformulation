@@ -76,6 +76,7 @@ def fit_receipt(directory, bind, expected, envelope_hash=None):
         "candidate_sha256": fit.get("lowered_candidate_sha256"),
         "request_sha256": fit.get("request_sha256"),
         "fit_status": fit["status"],
+        "fit_message": fit.get("message"),
         "actual_residual_calls": fit.get("actual_residual_calls"),
         "initializer_iterations": init.get("iterations"),
         "refinement_residual_calls": ref.get("actual_residual_calls"),

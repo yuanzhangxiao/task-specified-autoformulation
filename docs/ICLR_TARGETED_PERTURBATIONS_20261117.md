@@ -154,6 +154,60 @@ on the chosen platform. These controls never call the proposer or critic.
 
 ## Implementation and limits
 
+### Recovery of the first delivery's missing fitter identity file
+
+The first delivery (`16fdae7`, array `2373558`) constructed all six initial
+models and obtained their critic reviews, but every fit raised `FileNotFoundError`
+for `scripts/run_phase_b_fitter_diagnostic.py`. The fitter reads that file while
+constructing its runtime identity, before starting collocation or refinement.
+The import-based bundle collector had omitted this path-based dependency.
+Consequently all 84 subsequent visits were recorded as
+`shared_initial_unavailable`, and the six frozen endpoints have no NMSEs. This
+is an infrastructure failure, not evidence about perturbation recovery.
+
+The corrected collector explicitly includes that file and the optional timed
+fitter worker. The launcher exercises the identity read before submission. An
+isolated delivery test reproduces the old failure, then runs a real multi-target
+collocation fit and verifies unchanged resume using only packaged files.
+Future fit receipts include the exception message in the portable export.
+
+Use the corrected bundle's `run_recovery.sh` entry point:
+
+```bash
+bash /scratch/group/p.nairr260351.000/u.yx126462/BUNDLE/run_recovery.sh run
+bash /scratch/group/p.nairr260351.000/u.yx126462/BUNDLE/run_recovery.sh status
+bash /scratch/group/p.nairr260351.000/u.yx126462/BUNDLE/run_recovery.sh finish
+```
+
+It reads `iclr-targeted-perturbations-v1` and prepares
+`iclr-targeted-perturbations-recovered-v1`. It preserves the original evaluation
+freeze, results and cached calls. The new root copies the same plan, public
+inputs, proposals, critic reviews, call journals and fit freezes byte-for-byte.
+The retry is allowed only after authenticating all six exact missing-file
+failures, checking that no backend work exists, and verifying that the remaining
+visits were skipped. It rejects other failures, changed inputs and used fitting
+budgets. This does not modify the fitting algorithm or the Full search rules.
+
+Preparation makes no LLM or optimizer calls. The scheduled run retries fitting
+the six saved proposals, then continues their original 15-visit searches; it does
+not regenerate the initial proposals or repeat their critic reviews. Historical
+proposal/critic cost remains in the reused journals, with explicit provenance in
+`packaging_recovery.json`. The failed attempt's allocated GPU time remains a
+separate cost in the original archive. If a retry fails numerically, the original
+fitted-start rule still applies. No successful numerical outcome is promised.
+
+Download the recovered results from:
+
+```text
+/scratch/group/p.nairr260351.000/u.yx126462/iclr-targeted-perturbations-recovered-v1/targeted-perturbation-results.zip
+```
+
+`run_recovery.sh run wave2` resumes unfinished work with the usual uncertainty
+and active-job guards. `AF_TARGETED_RECOVER_FROM` and `AF_TARGETED_ROOT` override
+the source and destination; they must be disjoint. Never remove the old freeze
+or reset its failed fit files. The optional CSTR reference-fit campaign is
+separate and is not rerun by this recovery.
+
 The change adds public-input staging, exact method/configuration checks, the
 approved T1 operational binding, six-way submission and frozen exports. The
 optional CPU launcher binds its separate numerical plan and exact code/runtime.
