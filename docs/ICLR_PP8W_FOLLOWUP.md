@@ -176,6 +176,12 @@ cases. CSTR RSE retains the original sample-wise convention; the glucose and
 synthetic panels retain their existing conventions. These panel scores should
 not be pooled into a single cross-domain NMSE.
 
+T2 NMSE includes all 12 target/case combinations (six cases, Gp and I). Response
+metrics use the ten combinations with nonzero reference effects: the paired
+initial-condition case has an identically zero response in both targets, making
+RSE, direction, and shape mathematically undefined. These fields remain null;
+the case remains included in forecast NMSE and numerical coverage checks.
+
 `scripts/iclr_anytime_cost_export.py` is a read-only standard-library export of
 the original cost receipts. `scripts/report_iclr_anytime.py` authenticates each
 visit's result hash against its scientific history, joins recorded time and
