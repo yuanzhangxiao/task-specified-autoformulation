@@ -1,6 +1,6 @@
 {
   "protocol": "phase-c-llm-sr-ode-transcriptions-1",
-  "status": "proposed_pending_review",
+  "status": "reviewed",
   "source_run": "phase-c-cstr-hard-llm-sr-hosted-120b-v1",
   "source_plan_sha256": "3cc8cfe1033f5d4f65e8951d0e86e88b915f14e1bd0d4f1c45c029a00bdc07e6",
   "rules": {
