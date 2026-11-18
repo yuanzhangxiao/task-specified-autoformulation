@@ -39,6 +39,7 @@ def worker_env(tmp_path):
     )
     for name, body in {
         "module": "exit 0",
+        "nvidia-smi": "echo '0, NVIDIA H100 80GB HBM3'",
         "apptainer": (
             'printf "%s\\n" "$@" > "$AF_SEARCH_ROOT/server-args"\nexec sleep 30'
         ),
@@ -85,9 +86,16 @@ def test_compute_cache_and_durable_receipt(
         )
     if shared_cache:
         worker_env["AF_COMPUTE_CACHE_ROOT"] = str(tmp_path / "shared")
-    subprocess.run(
-        ["bash", str(WORKER)], env=worker_env, check=True, capture_output=True
+    completed = subprocess.run(
+        ["bash", str(WORKER)],
+        env=worker_env,
+        check=True,
+        capture_output=True,
+        text=True,
     )
+    assert "Stage: gpu-health" in completed.stderr
+    assert "Stage: controlled-search-worker" in completed.stderr
+    assert "Failed during stage" not in completed.stderr
     receipt = json.loads((scratch / "runtime/service-425.json").read_text())
     cache = Path(receipt["compute_cache"])
     args = (scratch / "server-args").read_text().splitlines()
@@ -125,6 +133,92 @@ def test_checkpoint_quota_failure_precedes_serving(tmp_path, worker_env):
     )
     assert result.returncode != 0
     assert "Cannot create a durable checkpoint" in result.stderr
+    assert "Failed during stage: checkpoint-storage" in result.stderr
     scratch = Path(worker_env["AF_SEARCH_ROOT"])
     assert not (scratch / "server-args").exists()
     assert not list((scratch / "runtime").iterdir())
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_gpu_health_failure_precedes_image_and_serving(tmp_path, worker_env, exit_code):
+    probe = tmp_path / "bin/nvidia-smi"
+    probe.write_text(
+        "#!/bin/sh\necho 'Failed to get device handle for GPU0: Unknown Error'\n"
+        f"exit {exit_code}\n"
+    )
+    result = subprocess.run(
+        ["bash", str(WORKER)], env=worker_env, capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert "GPU health check failed" in result.stderr
+    assert "Unknown Error" in result.stderr
+    assert "Failed during stage: gpu-health" in result.stderr
+    assert "Stage: image-verification" not in result.stderr
+    assert not (Path(worker_env["AF_SEARCH_ROOT"]) / "server-args").exists()
+    assert not list(Path(worker_env["TMPDIR"]).iterdir())
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_serving_image_failure_is_explicit(worker_env, missing):
+    image = Path(worker_env["AF_VLLM_IMAGE"])
+    if missing:
+        image.unlink()
+    else:
+        image.write_bytes(b"different image")
+    result = subprocess.run(
+        ["bash", str(WORKER)], env=worker_env, capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert "Failed during stage: image-verification" in result.stderr
+    assert (
+        "Cannot read or hash the serving image"
+        if missing
+        else "Serving image SHA-256 differs from the frozen plan"
+    ) in result.stderr
+    assert not (Path(worker_env["AF_SEARCH_ROOT"]) / "server-args").exists()
+    assert not list(Path(worker_env["TMPDIR"]).iterdir())
+
+
+def test_vllm_failure_shows_bounded_redacted_tail(tmp_path, worker_env):
+    runtime = tmp_path / "bin/apptainer"
+    runtime.write_text(
+        "#!/bin/sh\n"
+        "i=0\nwhile [ $i -lt 100 ]; do echo \"startup line $i\"; i=$((i + 1)); done\n"
+        "echo 'api_key=fixture-credential-not-for-logs'\n"
+        "echo 'pynvml.NVMLError_Unknown: Unknown Error'\nexit 1\n"
+    )
+    (tmp_path / "bin/curl").write_text("#!/bin/sh\nexit 1\n")
+    result = subprocess.run(
+        ["bash", str(WORKER)],
+        env=worker_env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 1
+    assert "Failed during stage: vllm-startup" in result.stderr
+    assert "pynvml.NVMLError_Unknown: Unknown Error" in result.stderr
+    assert "startup line 0\n" not in result.stderr
+    assert "fixture-credential-not-for-logs" not in result.stderr
+    assert "[credential-related log line omitted]" in result.stderr
+    assert "Stage: controlled-search-worker" not in result.stderr
+    assert not list(Path(worker_env["TMPDIR"]).iterdir())
+
+
+def test_worker_failure_reports_stage_without_echoing_credential(tmp_path, worker_env):
+    interpreter = tmp_path / "bin/python"
+    interpreter.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = -c ]; then echo 43210; exit 0; fi\n'
+        'if [ "$2" = verify ]; then exit 0; fi\n'
+        "exit 7\n"
+    )
+    worker_env["AF_JETSTREAM_API_KEY"] = "fixture-key-not-for-logs"
+    result = subprocess.run(
+        ["bash", str(WORKER)], env=worker_env, capture_output=True, text=True
+    )
+    assert result.returncode == 7
+    assert "Failed during stage: controlled-search-worker (exit 7)" in result.stderr
+    assert "fixture-key-not-for-logs" not in result.stdout + result.stderr
+    assert "Server log tail" not in result.stderr
+    assert not list(Path(worker_env["TMPDIR"]).iterdir())

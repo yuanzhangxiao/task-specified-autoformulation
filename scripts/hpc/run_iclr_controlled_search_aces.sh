@@ -7,7 +7,42 @@
 #SBATCH --gres=gpu:h100:1
 #SBATCH --mem=64G
 set -euo pipefail
+stage=module-loading
+pid=""
+ipc=""
+server_log=""
+startup_stage() {
+    stage=$1
+    printf '[iclr-search] Stage: %s\n' "$stage" >&2
+}
+worker_exit() {
+    local status=$?
+    trap - EXIT
+    set +e
+    if (( status != 0 )); then
+        printf '[iclr-search] Failed during stage: %s (exit %s).\n' "$stage" "$status" >&2
+        if [[ $stage == vllm-startup && -s "$server_log" ]]; then
+            printf '[iclr-search] Server log tail (at most 40 lines / 8 KiB):\n' >&2
+            # Do not echo shell commands, environment values, or credential lines.
+            tail -c 8192 "$server_log" | tail -n 40 | awk '
+                tolower($0) ~ /(api.?key|token|authorization|password|secret)/ {
+                    print "[credential-related log line omitted]"; next
+                }
+                { print }
+            ' >&2
+        fi
+    fi
+    if [[ -n "$pid" ]]; then
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    fi
+    if [[ -n "$ipc" ]]; then rm -rf -- "$ipc"; fi
+    exit "$status"
+}
+trap worker_exit EXIT
+startup_stage module-loading
 module load GCCcore/13.2.0 Python/3.11.5 WebProxy
+startup_stage campaign-validation
 : "${AF_REPO_ROOT:?set the checked-out project directory}"
 : "${AF_SEARCH_ROOT:?set the prepared controlled search root}"
 : "${SLURM_ARRAY_TASK_ID:?submit a cell/seed block array}"
@@ -27,6 +62,7 @@ if [[ "$(jq -r .critic_enabled "$plan")" = true ]]; then
     test -s "$AF_SEARCH_ROOT/critic_authorization.json"
 fi
 # Existing plan files can still be readable after the project runs out of inodes.
+startup_stage checkpoint-storage
 if ! mkdir -p "$AF_SEARCH_ROOT/runtime" || ! probe=$(mktemp "$AF_SEARCH_ROOT/runtime/.write-check.XXXXXXXX"); then
     echo "Cannot create a durable checkpoint file. Check ACES file-count and byte quotas before retrying." >&2
     exit 1
@@ -38,8 +74,28 @@ if ! printf 'ready\n' >"$probe"; then
 fi
 rm -- "$probe"
 df -Pi "$AF_SEARCH_ROOT"
-image_digest="$(sha256sum "$AF_VLLM_IMAGE")"
-test "${image_digest%% *}" = "$(jq -r .serving_image_sha256 "$plan")"
+startup_stage gpu-health
+if ! gpu_health="$(nvidia-smi --query-gpu=index,name --format=csv,noheader 2>&1)" ||
+    ! printf '%s\n' "$gpu_health" | awk '
+        !/^[0-9]+,[[:space:]]*[^[:space:]]/ { bad=1 }
+        tolower($0) ~ /(error|unknown|failed|unable)/ { bad=1 }
+        END { exit bad }
+    '; then
+    echo 'GPU health check failed; no serving image or model was started.' >&2
+    printf '%s\n' "$gpu_health" | tail -c 8192 | tail -n 40 >&2
+    exit 1
+fi
+startup_stage image-verification
+if ! image_digest="$(sha256sum "$AF_VLLM_IMAGE")"; then
+    echo 'Cannot read or hash the serving image; no model started.' >&2
+    exit 1
+fi
+expected_image_digest="$(jq -er .serving_image_sha256 "$plan")"
+if [[ ${image_digest%% *} != "$expected_image_digest" ]]; then
+    echo 'Serving image SHA-256 differs from the frozen plan; no model started.' >&2
+    exit 1
+fi
+startup_stage runtime-setup
 model="$(jq -r .model_settings.model "$plan")"
 revision="$(jq -r .model_settings.model_revision "$plan")"
 parallel="$(jq -r '.proposer_tensor_parallel_size // 1' "$plan")"
@@ -47,16 +103,8 @@ port="$("$AF_PYTHON" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0
 endpoint="http://127.0.0.1:$port"
 export NO_PROXY="127.0.0.1,localhost,${NO_PROXY:-}" no_proxy="127.0.0.1,localhost,${no_proxy:-}"
 : "${SLURM_JOB_ID:?}"
+startup_stage compute-cache
 ipc="$(mktemp -d "${TMPDIR:-/tmp}/ics.XXXXXX")"
-pid=""
-cleanup() {
-    if [[ -n "$pid" ]]; then
-        kill "$pid" 2>/dev/null || true
-        wait "$pid" 2>/dev/null || true
-    fi
-    rm -rf -- "$ipc"
-}
-trap cleanup EXIT
 cache="$ipc"
 mounts="$AF_HF_HOME:$AF_HF_HOME,$ipc:$ipc"
 if [[ ${AF_COMPUTE_CACHE_ROOT:-job-local} != job-local ]]; then
@@ -64,13 +112,16 @@ if [[ ${AF_COMPUTE_CACHE_ROOT:-job-local} != job-local ]]; then
     mkdir -p "$cache"
     mounts+=",$cache:$cache"
 fi
+startup_stage container-runtime
 runtime="$(command -v apptainer || command -v singularity)"
 server_log="$AF_SEARCH_ROOT/runtime/server-${SLURM_JOB_ID}.log"
+startup_stage vocabulary-verification
 vocab=()
 if [[ -n "${AF_HARMONY_ASSETS:-}" ]]; then
     "$AF_PYTHON" scripts/harmony_vocab.py verify --directory "$AF_HARMONY_ASSETS" >/dev/null
     vocab=(--bind "$AF_HARMONY_ASSETS:$AF_HARMONY_ASSETS:ro" --env "TIKTOKEN_ENCODINGS_BASE=$AF_HARMONY_ASSETS")
 fi
+startup_stage vllm-startup
 env -u AF_JETSTREAM_API_KEY "$runtime" exec --nv \
     "${vocab[@]}" --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
     --bind "$mounts" \
@@ -83,12 +134,16 @@ env -u AF_JETSTREAM_API_KEY "$runtime" exec --nv \
     --gpu-memory-utilization 0.90 --tensor-parallel-size "$parallel" >"$server_log" 2>&1 &
 pid=$!
 for _ in $(seq 1 300); do
-    kill -0 "$pid" || { echo "vLLM exited; inspect $server_log" >&2; exit 1; }
+    kill -0 "$pid" 2>/dev/null || { echo "vLLM exited; inspect $server_log" >&2; exit 1; }
     if curl --noproxy '*' --silent --fail "$endpoint/v1/models" >/dev/null; then break; fi
     sleep 5
 done
-curl --noproxy '*' --silent --fail "$endpoint/v1/models" |
-    jq -e --arg model "$model" 'any(.data[]; .id == $model)' >/dev/null
+if ! curl --noproxy '*' --silent --fail "$endpoint/v1/models" |
+    jq -e --arg model "$model" 'any(.data[]; .id == $model)' >/dev/null; then
+    echo 'vLLM readiness check failed for the frozen model.' >&2
+    exit 1
+fi
+startup_stage runtime-receipt
 runtime_receipt="$AF_SEARCH_ROOT/runtime/service-${SLURM_JOB_ID}.json"
 jq -n --arg job "$SLURM_JOB_ID" --arg host "$(hostname)" --arg endpoint "$endpoint" \
     --arg model "$model" --arg revision "$revision" --arg image "${image_digest%% *}" \
@@ -96,5 +151,6 @@ jq -n --arg job "$SLURM_JOB_ID" --arg host "$(hostname)" --arg endpoint "$endpoi
     '{job:$job,host:$host,endpoint:$endpoint,model:$model,revision:$revision,
       image_sha256:$image,plan_sha256:$plan,block:$block,compute_cache:$cache,tensor_parallel_size:$tp}' >"$runtime_receipt.tmp"
 mv "$runtime_receipt.tmp" "$runtime_receipt"
+startup_stage controlled-search-worker
 "$AF_PYTHON" -m scripts.iclr_controlled_search run --root "$AF_SEARCH_ROOT" \
     --block "$SLURM_ARRAY_TASK_ID" --base-url "$endpoint" --seconds "$AF_BLOCK_SECONDS"

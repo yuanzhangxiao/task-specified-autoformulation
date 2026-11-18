@@ -12,6 +12,7 @@ from autoformalism.fitting import public_fitting as public
 from autoformalism.rebuttal import component_critic as critic
 from autoformalism.rebuttal import review_deadline_pipeline as pipeline
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
+from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.public_fitting import PublicSplit
 from scripts import iclr_controlled_receipts as receipts
 from scripts import package_iclr_targeted_perturbations as package
@@ -79,12 +80,36 @@ def failed(request, monkeypatch):
                 "status": "reviewed",
             },
         )
-        (directory / "calls").mkdir()
-        (directory / "calls/one.json").write_text('{"raw_response":"saved"}')
         cell = recovery.campaign.search.controls.treatment(raw, "full")
-        request = pipeline.request_for(
-            bundle, recovery.campaign.search.view(plan, cell), task, 0
+        current = recovery.campaign.search.view(plan, cell)
+        client = pipeline._client(
+            root,
+            current,
+            task,
+            0,
+            "http://fixture.invalid",
+            lambda: True,
+            transport=lambda *args, candidate=candidate: {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": json.dumps(candidate)},
+                    }
+                ],
+                "usage": {"total_tokens": 12},
+            },
         )
+        cached = client.call(
+            system="Return the fixture candidate.",
+            user="Use the supplied public channels.",
+            response_model=CandidateModel,
+            step="fixture_construction",
+            attempt=0,
+        )
+        public._write(
+            directory / "construction.json", {"request_hash": cached["request_hash"]}
+        )
+        request = pipeline.request_for(bundle, current, task, 0)
         public.prepare_fit(
             request,
             PublicSplit.model_validate(raw["training"]),
@@ -152,7 +177,8 @@ def test_recovery_preserves_inputs_and_reuses_both_llm_receipts(failed, tmp_path
         assert not (folder / "fit/started.json").exists()
         assert not (folder / "fit/result.json").exists()
         assert not (folder / "result.json").exists()
-        assert (folder / "calls/one.json").exists()
+        (journal,) = (folder / "calls").glob("*.json")
+        assert public._read(journal)["request_hash"] == journal.stem
         assert pipeline.propose_one(destination, {}, task, 0, None) == sealed_read(
             folder / "proposal.json"
         )
@@ -160,6 +186,114 @@ def test_recovery_preserves_inputs_and_reuses_both_llm_receipts(failed, tmp_path
             folder / "critic.json"
         )
     assert all((failed / name).read_bytes() == value for name, value in before.items())
+
+
+def test_recovered_block_reuses_cached_calls_before_one_numerical_attempt(
+    failed, tmp_path, monkeypatch
+):
+    """Exercise the real worker path with no provider or numerical solver calls."""
+    destination = tmp_path / "recovered"
+    receipt = recovery.recover(failed, destination)
+    plan = recovery.campaign.verify(destination)
+    task = plan["blocks"][0]["tasks"][0]
+    directory = recovery.campaign.search.io.round_path(destination, task, 0)
+    preserved = {
+        p: p.read_bytes()
+        for p in directory.rglob("*")
+        if p.is_file() and p.name != ".lock"
+    }
+    attempts = []
+
+    def no_provider(*args, **kwargs):
+        pytest.fail("recovered initial visit attempted a provider call")
+
+    def numerical_result(request, model, train, val, guesses, settings, folder):
+        attempts.append(folder)
+        assert folder == directory / "fit"
+        assert (
+            request.model_dump(mode="json")
+            == public._read(folder / "freeze.json")["request"]
+        )
+        # A numerical failure must preserve the campaign's fitted-start rule.
+        return {"parameters": None, "training": {}, "validation": {}}
+
+    monkeypatch.delenv("AF_JETSTREAM_API_KEY", raising=False)
+    monkeypatch.setattr(critic.judge, "perform_review", no_provider)
+    monkeypatch.setattr(critic.jetstream, "JetstreamTransport", no_provider)
+    monkeypatch.setattr(public, "_run_backend", numerical_result)
+
+    def run():
+        return recovery.campaign.search.run_block(
+            destination,
+            0,
+            "http://127.0.0.1:1",
+            60,
+            transport=no_provider,
+            token_transport=no_provider,
+        )
+
+    assert run() == {"status": "complete", "block": 0}
+    assert attempts == [directory / "fit"]
+    result = sealed_read(directory / "result.json")
+    assert result["status"] == "fit_failed" and result["selected"] is None
+    assert result["trial"]["fit"]["backend_result_sha256"] is not None
+    for index in range(1, plan["visits"]):
+        later = recovery.campaign.search.io.round_path(destination, task, index)
+        assert sealed_read(later / "result.json")["status"] == (
+            "shared_initial_unavailable"
+        )
+        assert not (later / "calls").exists()
+    assert (
+        sealed_read(destination / "pruning" / task["task_id"] / "result.json")["status"]
+        == "skipped_no_finite_parent"
+    )
+    assert all(path.read_bytes() == value for path, value in preserved.items())
+    completed = {
+        p: p.read_bytes()
+        for name in ("results", "pruning")
+        for p in (destination / name).rglob("*.json")
+    }
+    assert recovery.recover(failed, destination) == receipt
+    assert run() == {"status": "complete", "block": 0}
+    assert attempts == [directory / "fit"]
+    assert all(path.read_bytes() == value for path, value in completed.items())
+
+
+@pytest.mark.parametrize("defect", ["namespace", "missing_receipt"])
+def test_recovered_block_rejects_invalid_cached_calls_before_fitting(
+    failed, tmp_path, monkeypatch, defect
+):
+    """The worker must validate journal provenance before reusing a proposal."""
+    destination = tmp_path / "recovered"
+    recovery.recover(failed, destination)
+    plan = recovery.campaign.verify(destination)
+    task = plan["blocks"][0]["tasks"][0]
+    directory = recovery.campaign.search.io.round_path(destination, task, 0)
+    (journal,) = (directory / "calls").glob("*.json")
+    if defect == "namespace":
+        cached = public._read(journal)
+        cached["request"]["namespace"] = "wrong-campaign"
+        cached["request_hash"] = pipeline.content_hash(cached["request"])
+        journal.unlink()
+        public._write(journal.with_name(cached["request_hash"] + ".json"), cached)
+    else:
+        journal.unlink()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid cached provenance reached provider or numerical work")
+
+    monkeypatch.setattr(public, "_run_backend", forbidden)
+    with pytest.raises(ValueError, match=r"provider (request provenance|cache)"):
+        recovery.campaign.search.run_block(
+            destination,
+            0,
+            "http://127.0.0.1:1",
+            60,
+            transport=forbidden,
+            token_transport=forbidden,
+        )
+    assert not (directory / "fit/started.json").exists()
+    assert not (directory / "result.json").exists()
 
 
 @pytest.mark.parametrize(

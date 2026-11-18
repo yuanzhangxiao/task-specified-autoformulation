@@ -156,6 +156,31 @@ on the chosen platform. These controls never call the proposer or critic.
 
 ### Recovery of the first delivery's missing fitter identity file
 
+The subsequent recovery array `2374776` was accepted but all six tasks failed
+on `ac096` before vLLM became ready. Both Slurm and vLLM reported a failed NVML
+GPU device handle (`Unknown Error`). The model-architecture inspection exception
+was downstream of that GPU-access failure; it does not establish an unsupported
+GPT-OSS architecture. No search worker, new proposal, or fit started in this wave.
+
+The next targeted submission explicitly records `--exclude=ac042,ac096` in its
+Slurm intent. The worker now checks GPU accessibility before hashing the image
+or loading the model, names each startup stage in stderr, and includes a bounded,
+credential-filtered server tail on startup failure. These changes do not alter
+the pinned image, model, public inputs, search or fitting.
+
+Use the newest bundle with **the same recovered root**, and a new wave name:
+
+```bash
+bash /scratch/group/p.nairr260351.000/u.yx126462/BUNDLE/run_recovery.sh run wave2
+```
+
+Do not delete `wave1` or any fitting markers. The launcher verifies the copied
+checkpoints and schedules only pending blocks. Its active-job and uncertain-
+acknowledgment guards still apply. Verify the new allocation excludes `ac096`,
+then check for a new service receipt and first fitting result; `RUNNING` alone
+does not establish that model serving or optimization works. This repository
+cannot validate ACES GPU health locally, so live confirmation remains necessary.
+
 The first delivery (`16fdae7`, array `2373558`) constructed all six initial
 models and obtained their critic reviews, but every fit raised `FileNotFoundError`
 for `scripts/run_phase_b_fitter_diagnostic.py`. The fitter reads that file while

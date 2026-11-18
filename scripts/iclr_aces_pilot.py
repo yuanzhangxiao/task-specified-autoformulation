@@ -518,7 +518,13 @@ def submit(
         partition = "gpu"
         resources = []
         if plan.get("targeted_protocol") == "iclr-targeted-perturbations-1":
-            resources = ["--job-name=iclr-targeted-20b"]
+            # ac096: Slurm and vLLM both failed to obtain an NVML device handle
+            # in every element of array 2374776. Also avoid ac042, as in prior runs.
+            # This is placement only: the frozen model/fitting/search stay intact.
+            resources = [
+                "--job-name=iclr-targeted-20b",
+                "--exclude=ac042,ac096",
+            ]
         if plan.get("proposer_tensor_parallel_size", 1) == 2:
             resources = ["--gres=gpu:h100:2", "--mem=128G", "--job-name=iclr-full-120b"]
         if cached_pilot:
