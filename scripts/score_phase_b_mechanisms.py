@@ -454,12 +454,22 @@ def campaign_rows(
     LLM-SR programs that read their history enter only through a reviewed
     transcription set made for the same run.
     """
-    names = scoring._run_cells(method, run_root)
-    cells = scoring.public_cells(PHASE_C_RELEASE, names)
-    found = mechanisms.campaign_rows(
-        method, run_root, cells, transcriptions.load(reviewed) if reviewed else None
-    )
-    return [r for r in found if r["benchmark_id"] in CELLS]
+    plan = sealed_read(run_root / "plan.json")
+    scored = [r for r in plan["rows"] if r["benchmark_id"] in CELLS]
+    cells = scoring.public_cells(PHASE_C_RELEASE, {r["benchmark_id"] for r in scored})
+    reviewed_set = transcriptions.load(reviewed) if reviewed else None
+    tasks = {int(r["index"]) for r in scored}
+    if method == "llm_sr":
+        # a completed program enters only once its transcription is reviewed;
+        # a failed pick is the method's outcome and needs none
+        tasks = {
+            i
+            for i in tasks
+            if reviewed_set.for_task(i)
+            or sealed_read(run_root / "results" / str(i) / "result.json")["status"]
+            != "complete"
+        }
+    return mechanisms.campaign_rows(method, run_root, cells, reviewed_set, tasks)
 
 
 def submitted_rows(

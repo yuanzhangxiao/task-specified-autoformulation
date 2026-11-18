@@ -288,8 +288,12 @@ def campaign_rows(
     run: Path,
     cells: dict,
     reviewed: transcriptions.TranscriptionSet | None = None,
+    tasks: set[int] | None = None,
 ) -> list[dict]:
-    """One row per task of a sealed campaign; outcomes must be final."""
+    """One row per task of a sealed campaign; outcomes must be final.
+
+    ``tasks``, when given, keeps only those campaign tasks.
+    """
     plan = sealed_read(run / "plan.json")
     if method == "llm_sr":
         if reviewed is None:
@@ -299,6 +303,8 @@ def campaign_rows(
     rows = []
     for source in plan["rows"]:
         index, name = int(source["index"]), source["benchmark_id"]
+        if tasks is not None and index not in tasks:
+            continue
         if name not in cells:
             raise ValueError(f"{method} task {index} is off the roster")
         row = {**_row(method, name, source["tier"], int(source["repetition"])),
