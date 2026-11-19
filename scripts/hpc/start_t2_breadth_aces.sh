@@ -4,6 +4,7 @@ set -euo pipefail
 AF_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 export AF_REPO_ROOT
 AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
+AF_MODEL_CACHE_PATH=hub/models--openai--gpt-oss-120b/snapshots/b5c939de8f754692c1647ca79fbf85e8c1e70f8a
 case "${2:-breadth}" in
   breadth)
     export AF_OUTPUT_ROOT=${AF_T2_DEPTH_ROOT:-$AF_GROUP/phase-c-t2-breadth-results-v2}
@@ -14,6 +15,11 @@ case "${2:-breadth}" in
     export AF_OUTPUT_ROOT=${AF_T2_FITTED_ROOT:-$AF_GROUP/phase-c-t2-fitted-revisions-results-v1}
     AF_PROTOCOL=t2-fitted-timing-recovery-1
     AF_PREPARE=(--source "$AF_REPO_ROOT/inputs/fitted-targets.json") ;;
+  fresh-20b)
+    export AF_OUTPUT_ROOT=${AF_T2_FRESH_ROOT:-$AF_GROUP/phase-c-t2-fresh-20b-results-v1}
+    AF_PROTOCOL=t2-fresh-public-targets-20b-1
+    AF_PREPARE=(--source "$AF_REPO_ROOT/inputs/fresh-20b.json")
+    AF_MODEL_CACHE_PATH=hub/models--openai--gpt-oss-20b/snapshots/6cee5e81ee83917806bbde320786a8fb61efebee ;;
   *) echo 'Unknown T2 campaign.' >&2; exit 2 ;;
 esac
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
@@ -28,7 +34,7 @@ case "${1:-}" in
     export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
     if [[ -z "${AF_HF_HOME:-}" ]]; then
       AF_CACHE="$AF_GROUP/huggingface-cache"
-      [[ -f "$AF_CACHE/hub/models--openai--gpt-oss-120b/snapshots/b5c939de8f754692c1647ca79fbf85e8c1e70f8a/config.json" ]] || AF_CACHE=/scratch/user/u.yx126462/huggingface-cache
+      [[ -f "$AF_CACHE/$AF_MODEL_CACHE_PATH/config.json" ]] || AF_CACHE=/scratch/user/u.yx126462/huggingface-cache
       export AF_HF_HOME="$AF_CACHE"
     fi
     export AF_HARMONY_ASSETS=${AF_HARMONY_ASSETS:-$AF_REPO_ROOT/assets/harmony}

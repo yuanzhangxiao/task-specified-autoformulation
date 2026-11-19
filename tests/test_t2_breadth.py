@@ -6,6 +6,7 @@ from copy import deepcopy
 import pytest
 
 from autoformalism.expressions import ValidationContext
+from autoformalism.llm.staged_topology import strict_provider_schema
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.research import t2_breadth as science
 from autoformalism.schemas.staged_topology import PublicScientificBrief
@@ -445,3 +446,193 @@ def test_laws_can_follow_third_topology_correction(experiment):
     assert result["first_27_physical_calls"]["eligible"] == 5
     row = sealed_read(experiment / "results/fresh-104.json")
     assert row["correction_count"] == 3 and row["history"][-1]["stage"] == "laws"
+
+
+def named_proposal():
+    topo, laws = proposal()
+    targets = {}
+    additional = []
+    for component in topo["components"]:
+        if component["name"] in ("Gp", "I", "U"):
+            targets[component["name"]] = {
+                k: v for k, v in component.items() if k != "name"
+            }
+        else:
+            additional.append(component)
+    return {
+        "hypothesis": topo["hypothesis"],
+        "targets": targets,
+        "additional_components": additional,
+    }, laws
+
+
+def test_public_names_are_schema_keys_and_preserve_independent_choices():
+    ctx, brief = public()
+    keyed, _ = named_proposal()
+    form, _ = science.named_topology_forms(tuple(ctx.targets))
+    graph = form.model_validate(keyed).as_topology()
+    assert graph == science.Topology.model_validate(proposal()[0])
+    assert set(
+        strict_provider_schema(form.model_json_schema())["$defs"]["PublicOutputs"][
+            "required"
+        ]
+    ) == set(ctx.targets)
+    other, _ = science.named_topology_forms(("heat", "mass"))
+    assert set(other.model_json_schema()["$defs"]["PublicOutputs"]["required"]) == {
+        "heat",
+        "mass",
+    }
+    # A distinct stored quantity and its measured readout can both be intentional.
+    keyed["additional_components"].append(
+        {"name": "state_Gp", **keyed["targets"]["Gp"]}
+    )
+    keyed["targets"]["Gp"] = {
+        "kind": "algebraic",
+        "sources": ["state_Gp"],
+        "role": "readout",
+    }
+    graph = form.model_validate(keyed).as_topology()
+    science.check_topology(graph, ctx, brief)
+    keyed["additional_components"].append({"name": "Gp", **keyed["targets"]["Gp"]})
+    with pytest.raises(ValueError, match="Gp already has a declaration"):
+        form.model_validate(keyed).as_topology()
+    del keyed["targets"]["Gp"]
+    with pytest.raises(ValueError):
+        form.model_validate(keyed)
+
+
+def test_fresh_20b_complete_corrections_keep_target_contract_and_resume(experiment):
+    root = experiment.parent / "fresh"
+    plan = pilot.prepare(
+        root, experiment / "inputs.json", expected_protocol=pilot.FRESH_20B
+    )
+    assert plan["groups"] == ["fresh"] and plan["maximum_generation_requests"] == 25
+    assert plan["settings"]["model_revision"] == pilot.MODELS["20b"]["revision"]
+    keyed, laws = named_proposal()
+    calls = []
+
+    def transport(url, body, timeout):
+        name = body["response_format"]["json_schema"]["name"]
+        packet = json.loads(body["messages"][1]["content"])
+        assert body["model"] == "openai/gpt-oss-20b" and "current_model" not in packet
+        assert packet["required_target_keys"] == ["Gp", "I", "U"]
+        calls.append((name, body["seed"]))
+        if name == "NamedTargetTopology":
+            if "rejection" not in packet:
+                return reply(
+                    {"components": [{"name": "state_Gp"}, {"name": "target_Gp"}]}
+                )
+            errors = packet["rejection"]
+            assert errors["code"] == "PUBLIC_TARGET_KEYS"
+            assert errors["details"]["missing"] == ["Gp", "I", "U"]
+            assert errors["details"]["other_submitted_names"] == [
+                "state_Gp",
+                "target_Gp",
+            ]
+            return reply(keyed)
+        if name == "Laws":
+            assert packet["topology"] == keyed
+            return reply({**laws, "latent_initials": []})
+        assert name == "NamedTargetCorrection"
+        if packet["correction_number"] == 2:
+            bad = deepcopy(keyed)
+            bad["targets"].pop("I")
+            return reply({"topology": bad, "laws": laws})
+        assert packet["rejection"]["details"]["missing"] == ["I"]
+        return reply({"topology": keyed, "laws": laws})
+
+    report = pilot.run(
+        root, "http://127.0.0.1", transport=transport, token_transport=tokenizer
+    )
+    assert report["physical_requests"] == len(calls) == 25
+    assert len({s for _, s in calls[:5]}) == 5
+    assert [s["initial_sampling_seed"] for s in pilot._rows(root, plan)] == list(
+        range(100, 105)
+    )
+    assert report["fresh_topology"] == {
+        "public_targets": ["Gp", "I", "U"],
+        "initial_attempts_recorded": 5,
+        "initial_replies_with_all_target_declarations": 0,
+        "initial_topology_passes": 0,
+        "branches_sent_to_functions": 5,
+        "eligible_branches": 5,
+    }
+    assert report["representatives"] == ["fresh-100"]
+    assert (
+        pilot.run(
+            root, "http://127.0.0.1", transport=lambda *a: pytest.fail("duplicate call")
+        )
+        == report
+    )
+
+
+def test_fresh_20b_first_pass_and_actual_graph_errors(experiment):
+    root = experiment.parent / "fresh"
+    pilot.prepare(root, experiment / "inputs.json", expected_protocol=pilot.FRESH_20B)
+    keyed, laws = named_proposal()
+    _, data = pilot.load(root)
+    bad = deepcopy(keyed)
+    bad["additional_components"][0]["sources"] = ["X"]
+    held = pilot._assess(data, "fresh", bad, "topology", named_targets=True)
+    assert (
+        held["status"] == "rejected"
+        and "Missing required path" in held["diagnostic"]["message"]
+    )
+
+    def success(url, body, timeout):
+        return reply(
+            laws if body["response_format"]["json_schema"]["name"] == "Laws" else keyed
+        )
+
+    report = pilot.run(
+        root, "http://127.0.0.1", transport=success, token_transport=tokenizer
+    )
+    assert report["physical_requests"] == 10
+    assert report["fresh_topology"]["initial_replies_with_all_target_declarations"] == 5
+    assert report["fresh_topology"]["initial_topology_passes"] == 5
+    assert report["fresh_topology"]["eligible_branches"] == 5
+
+
+def test_fresh_aces_pins_one_20b_gpu_and_resubmission_is_idempotent(
+    experiment, monkeypatch
+):
+    root = experiment.parent / "fresh"
+    pilot.prepare(root, experiment / "inputs.json", expected_protocol=pilot.FRESH_20B)
+    with pytest.raises(ValueError, match="own generation slots"):
+        pilot.prepare(
+            root,
+            experiment / "inputs.json",
+            previous=experiment,
+            expected_protocol=pilot.FRESH_20B,
+        )
+    with pytest.raises(ValueError, match="frozen artifact differs"):
+        pilot.prepare(
+            experiment, experiment / "inputs.json", expected_protocol=pilot.FRESH_20B
+        )
+    calls = []
+
+    def assets(size):
+        assert size == "20b"
+        return experiment / "inputs.json", {
+            "model_revision": pilot.MODELS[size]["revision"]
+        }
+
+    def submit(wave, argv):
+        calls.append(argv)
+        assert "--gres=gpu:h100:1" in argv and "--time=01:00:00" in argv
+        assert "--job-name=phasec-t2-fresh-20b" in argv
+        return "12345"
+
+    monkeypatch.setattr(aces.aces, "_assets", assets)
+    monkeypatch.setattr(aces.aces.harmony_vocab, "verify", lambda _: {"sha256": "test"})
+    monkeypatch.setattr(aces, "_submit_job", submit)
+    assert aces.submit(root)["job"] == aces.submit(root)["job"] == "12345"
+    record = aces.verify(root, check_assets=True)
+    assert len(calls) == 1 and record["maximum_generation_requests"] == 25
+    assert (
+        record["model"]
+        == record["generation_settings"]["model"]
+        == "openai/gpt-oss-20b"
+    )
+    assert record["model_revision"] == record["generation_settings"]["model_revision"]
+    assert record["tensor_parallel_size"] == 1

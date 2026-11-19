@@ -42,9 +42,11 @@ from scripts import structural_revision_campaign as structural
 from scripts import t2_breadth_history as history
 from scripts import t2_fitted_targets as fitted
 from scripts.construction_functions import file_hash
+from scripts.submit_structural_revision_aces import MODELS
 
 REPO = Path(__file__).resolve().parents[1]
 PROTOCOL = "t2-three-origin-breadth-2"
+FRESH_20B = "t2-fresh-public-targets-20b-1"
 INTAKE = "db0b5e78406147a8482c1b05f9d2463dacddbb2937f4f0f542ba9d74700a064c"
 SEEDS = tuple(range(100, 105))
 GROUPS = ("c15", "c21", "fresh")
@@ -91,6 +93,13 @@ GATES = {
     "admission_guard": True,
     "scaled_readout_initials": True,
 }
+TARGET_CONTRACT = (
+    "For every key in targets, choose dynamic (an ODE) or algebraic, describe its "
+    "role, and list the quantities used by its equation. The key is the public "
+    "output's name. List each additional generated quantity separately in "
+    "additional_components, or return an empty list. Use these same names in "
+    "sources and in the later formulas."
+)
 
 
 class FiveInsulinRepairs(StrictSchema):
@@ -99,7 +108,7 @@ class FiveInsulinRepairs(StrictSchema):
     )
 
 
-def _plan(inputs: dict) -> dict:
+def _plan(inputs: dict, *, fresh_20b: bool = False) -> dict:
     fitted_run = inputs.get("protocol") == fitted.INPUT_PROTOCOL
     intake = fitted.INTAKE if fitted_run else INTAKE
     if inputs["artifact_sha256"] != intake:
@@ -130,6 +139,21 @@ def _plan(inputs: dict) -> dict:
         plan["fitted_parents"] = {
             g: inputs[g]["parent_reference"] for g in fitted.GROUPS
         }
+    if fresh_20b:
+        if fitted_run:
+            raise ValueError("Fresh starts require the original public training intake")
+        plan.update(
+            protocol=FRESH_20B,
+            groups=["fresh"],
+            maximum_generation_requests=len(SEEDS) * (2 + MAX_CORRECTIONS),
+            settings={
+                **plan["settings"],
+                "model": MODELS["20b"]["model"],
+                "model_revision": MODELS["20b"]["revision"],
+            },
+        )
+        runner = "scripts/hpc/start_t2_fresh_20b_aces.sh"
+        plan["entrypoints"][runner] = file_hash(REPO / runner)
     return plan
 
 
@@ -141,14 +165,12 @@ def prepare(
     expected_protocol: str | None = None,
 ) -> dict:
     inputs = sealed_read(source)
-    plan = _plan(inputs)
+    plan = _plan(inputs, fresh_20b=expected_protocol == FRESH_20B)
     if expected_protocol and plan["protocol"] != expected_protocol:
         raise ValueError("The supplied intake belongs to a different T2 campaign")
     with _lock(root / "prepare-lock"):
-        if plan["protocol"] == fitted.PROTOCOL and previous is not None:
-            raise ValueError(
-                "The fitted residual campaign has its own generation slots"
-            )
+        if plan["protocol"] != PROTOCOL and previous is not None:
+            raise ValueError("This campaign has its own generation slots")
         history.bind_source(root, previous, plan["intake_sha256"])
         sealed_write(
             root / "inputs.json",
@@ -159,7 +181,7 @@ def prepare(
 
 def load(root: Path):
     saved, inputs = sealed_read(root / "plan.json"), sealed_read(root / "inputs.json")
-    expected = _plan(inputs)
+    expected = _plan(inputs, fresh_20b=saved["protocol"] == FRESH_20B)
     if saved != {**expected, "artifact_sha256": content_hash(expected)}:
         raise ValueError(
             "Frozen intake, settings, source or allocation contract differs."
@@ -167,7 +189,7 @@ def load(root: Path):
     return saved, inputs
 
 
-def _packet(data: dict, group: str) -> tuple[str, dict]:
+def _packet(data: dict, group: str, *, named_targets: bool = False) -> tuple[str, dict]:
     if group in fitted.GROUPS:
         return fitted.packet(data, group)
     brief = data["brief"]
@@ -202,6 +224,22 @@ def _packet(data: dict, group: str) -> tuple[str, dict]:
         ],
     }
     if group == "fresh":
+        if named_targets:
+            ctx = ValidationContext.model_validate(data["evidence"]["context"])
+            public.update(
+                required_target_keys=list(ctx.targets),
+                supplied_inputs=list(ctx.external_inputs),
+                supplied_auxiliaries=list(ctx.auxiliaries),
+            )
+            return (
+                "Construct a fresh topology from the public task and training "
+                "observations. " + TARGET_CONTRACT + " Choose the hidden states, "
+                "shared processes and connections. If an additional quantity models "
+                "a supplied auxiliary, set represents_auxiliary to that channel and "
+                "use the generated name. Otherwise set it to null. Parameter names "
+                "and formulas come in the next call.",
+                public,
+            )
         return (
             "Construct a new reduced model from the public task and training "
             "observations. "
@@ -404,31 +442,48 @@ def correction_feedback(diagnostic: dict) -> dict:
     }
 
 
-def _assess(data, group, raw, stage, topo=None, *, name=None, admitted=None):
-    try:
-        if stage in {"topology", "topology_correction"}:
-            topo = science.Topology.model_validate(raw)
-            science.check_topology(
-                topo,
-                ValidationContext.model_validate(data["evidence"]["context"]),
-                PublicScientificBrief.model_validate(data["brief"]),
-            )
-            return {
-                "status": "topology_ready",
-                "topology": topo.model_dump(mode="json"),
-            }
-        if stage == "complete_correction":
-            revision = science.FreshCorrection.model_validate(raw)
-            topo, raw = (
-                revision.topology.model_dump(mode="json"),
-                revision.laws.model_dump(mode="json"),
-            )
-        outcome = _problem_outcome(
-            data,
-            group,
-            raw,
-            science.Topology.model_validate(topo) if topo is not None else None,
+def _forms(data, named_targets):
+    if named_targets:
+        return science.named_topology_forms(
+            tuple(data["evidence"]["context"]["targets"])
         )
+    return science.Topology, science.FreshCorrection
+
+
+def _assess(
+    data, group, raw, stage, topo=None, *, name=None, admitted=None, named_targets=False
+):
+    try:
+        if stage in {"topology", "topology_correction", "complete_correction"}:
+            graph_form, correction_form = _forms(data, named_targets)
+            if named_targets:
+                graph = (
+                    raw.get("topology")
+                    if stage == "complete_correction" and isinstance(raw, dict)
+                    else raw
+                )
+                science.require_target_keys(
+                    graph, tuple(data["evidence"]["context"]["targets"])
+                )
+            if stage == "complete_correction":
+                corrected = correction_form.model_validate(raw)
+                graph, raw = corrected.topology, corrected.laws.model_dump(mode="json")
+            else:
+                graph = graph_form.model_validate(raw)
+            topo = graph.as_topology() if named_targets else graph
+            if stage != "complete_correction":
+                science.check_topology(
+                    topo,
+                    ValidationContext.model_validate(data["evidence"]["context"]),
+                    PublicScientificBrief.model_validate(data["brief"]),
+                )
+                return {
+                    "status": "topology_ready",
+                    "topology": topo.model_dump(mode="json"),
+                }
+        elif topo is not None:
+            topo = science.Topology.model_validate(topo)
+        outcome = _problem_outcome(data, group, raw, topo)
         if group in fitted.GROUPS and admitted is not None:
             fitted.claim_alternative(name, outcome, admitted[group])
         return outcome
@@ -480,7 +535,8 @@ def _ask(
             if file_hash(physical) != reply["physical_receipt_sha256"]:
                 raise ValueError(f"Changed physical call record for {slot}")
         return reply
-    old = history.prior_reply(root, prefix, slot, seed, request, SETTINGS)
+    settings = StagedModelSettings.model_validate(plan["settings"])
+    old = history.prior_reply(root, prefix, slot, seed, request, settings)
     if old is not None:
         return sealed_write(path, {"key": key, **old})
     # A cache reservation, including an interrupted call, already spent its slot.
@@ -496,7 +552,7 @@ def _ask(
                 f"Physical request ceiling {ceiling} reached before {slot}"
             )
     client = ConstructionClient(
-        settings=SETTINGS,
+        settings=settings,
         base_url=endpoint,
         directory=directory / "calls",
         namespace=identity,
@@ -547,8 +603,9 @@ def _batch_system(group, system):
 
 def _initial_branches(root, plan, data, ask, admitted):
     branches = []
+    named = plan["protocol"] == FRESH_20B
     for group in plan["groups"]:
-        system, packet = _packet(data, group)
+        system, packet = _packet(data, group, named_targets=named)
         if group != "fresh":
             schema = _batch_schema(group)
             reply, ordinal = ask(
@@ -559,13 +616,21 @@ def _initial_branches(root, plan, data, ask, admitted):
             if group == "fresh":
                 name, stage = f"fresh-{seed}", "topology"
                 reply, ordinal = ask(
-                    name + "-topology", seed, system, packet, science.Topology
+                    name + "-topology", seed, system, packet, _forms(data, named)[0]
                 )
                 raw = reply.get("value")
             else:
                 name, stage, raw = f"{group}-{i}", "patch", options[i]
             outcome = (
-                _assess(data, group, raw, stage, name=name, admitted=admitted)
+                _assess(
+                    data,
+                    group,
+                    raw,
+                    stage,
+                    name=name,
+                    admitted=admitted,
+                    named_targets=named,
+                )
                 if raw is not None
                 else {
                     "status": "unavailable",
@@ -635,10 +700,10 @@ def _event(stage, depth, ordinal, outcome, raw):
     }
 
 
-def _advance(data, branch, depth, attempted, ask, admitted):
+def _advance(data, branch, depth, attempted, ask, admitted, *, named_targets=False):
     """Spend one correction and supply laws when a new graph passes."""
     name, group, seed = (branch[k] for k in ("name", "group", "seed"))
-    system, packet = _packet(data, group)
+    system, packet = _packet(data, group, named_targets=named_targets)
     while not branch["duplicate_of"]:
         old, previous = branch["outcome"], branch["raw"]
         if old["status"] == "topology_ready":
@@ -646,8 +711,13 @@ def _advance(data, branch, depth, attempted, ask, admitted):
             stage, schema = "laws", science.Laws
             instruction, question = (
                 LAW_INSTRUCTION,
-                {**packet, "topology": branch["topology"]},
+                {
+                    **packet,
+                    "topology": previous if named_targets else branch["topology"],
+                },
             )
+            if named_targets:
+                branch["submitted_topology"] = previous
         elif (
             old["status"] == "rejected"
             or (old.get("diagnostic") or {}).get("code") == "MISSING_BATCH_OPTION"
@@ -684,13 +754,19 @@ def _advance(data, branch, depth, attempted, ask, admitted):
                     else science.InScopeRevisionReply
                 )
             elif branch["stage"] in {"topology", "topology_correction"}:
-                stage, schema = "topology_correction", science.Topology
+                stage, schema = "topology_correction", _forms(data, named_targets)[0]
+                if named_targets:
+                    question["instruction"] = "Return the complete corrected topology."
             else:
-                stage, schema = "complete_correction", science.FreshCorrection
-                question["previous_topology"] = branch["topology"]
+                stage, schema = "complete_correction", _forms(data, named_targets)[1]
+                question["previous_topology"] = branch.get(
+                    "submitted_topology", branch["topology"]
+                )
                 instruction = (
                     LAW_INSTRUCTION + " You may revise the topology and laws together."
                 )
+                if named_targets:
+                    instruction += " " + TARGET_CONTRACT
             if depth > 1:
                 question["correction_number"] = depth
                 question["earlier_failures"] = [
@@ -725,6 +801,7 @@ def _advance(data, branch, depth, attempted, ask, admitted):
                 branch.get("topology") if stage == "laws" else None,
                 name=name,
                 admitted=admitted,
+                named_targets=named_targets,
             )
             if reply["status"] == "visible"
             else {
@@ -738,7 +815,9 @@ def _advance(data, branch, depth, attempted, ask, admitted):
             and isinstance(raw.get("topology"), dict)
         ):
             # The next whole-model repair refers to the topology actually proposed.
-            branch["topology"] = raw["topology"]
+            branch["submitted_topology" if named_targets else "topology"] = raw[
+                "topology"
+            ]
         branch.update(stage=stage, raw=raw, outcome=outcome)
         branch["history"].append(
             _event(stage, branch["corrections"], ordinal, outcome, raw)
@@ -820,7 +899,15 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None):
             ceiling = shallow + (depth - 1) * branch_count
             dest = root / "depths" / str(depth)
             for branch in branches:
-                _advance(data, branch, depth, attempted, ask, admitted)
+                _advance(
+                    data,
+                    branch,
+                    depth,
+                    attempted,
+                    ask,
+                    admitted,
+                    named_targets=plan["protocol"] == FRESH_20B,
+                )
                 row = _result(branch, plan)
                 sealed_write(dest / (branch["name"] + ".json"), row)
             if depth == 1 and plan["protocol"] == PROTOCOL:
@@ -1021,6 +1108,38 @@ def report(root: Path) -> dict:
             ),
             target_improvement="pending matched refitting",
         )
+    if plan["protocol"] == FRESH_20B:
+        first = [
+            sealed_read(root / "first" / (name + ".json"))
+            for name in sorted(names)
+            if (root / "first" / (name + ".json")).is_file()
+        ]
+        targets = tuple(inputs["evidence"]["context"]["targets"])
+        declared = 0
+        for item in first:
+            raw = item["raw"]
+            slots = raw.get("targets") if isinstance(raw, dict) else None
+            if not isinstance(slots, dict) or set(slots) != set(targets):
+                continue
+            try:
+                for target in targets:
+                    science.TargetDeclaration.model_validate(slots[target])
+            except ValidationError:
+                continue
+            declared += 1
+        summary["fresh_topology"] = {
+            "public_targets": list(targets),
+            "initial_attempts_recorded": len(first),
+            "initial_replies_with_all_target_declarations": declared,
+            "initial_topology_passes": sum(
+                r["initial"]["status"] == "topology_ready" for r in first
+            ),
+            "branches_sent_to_functions": sum(
+                any((root / "steps" / (name + "-laws") / "calls").glob("*.json"))
+                for name in names
+            ),
+            "eligible_branches": sum(r["status"] == "eligible" for r in rows),
+        }
     if finished and plan["protocol"] == PROTOCOL:
         # An early shallow finish leaves room for deeper calls in the first 27.
         cutoff = min(27, len(receipts))
@@ -1114,7 +1233,8 @@ def preview(root: Path):
     plan, data = load(root)
     parts = _page("T2-easy proposer prompts")
     for group in plan["groups"]:
-        system, packet = _packet(data, group)
+        named = plan["protocol"] == FRESH_20B
+        system, packet = _packet(data, group, named_targets=named)
         if group != "fresh":
             system = _batch_system(group, system)
         parts.extend(
@@ -1123,13 +1243,17 @@ def preview(root: Path):
                 _details("Complete initial request", packet),
             ]
         )
-        if group in fitted.GROUPS:
+        if group in fitted.GROUPS or named:
             from autoformalism.llm.staged_topology import strict_provider_schema
 
             parts.append(
                 _details(
                     "Required response schema",
-                    strict_provider_schema(_batch_schema(group).model_json_schema()),
+                    strict_provider_schema(
+                        (
+                            _forms(data, True)[0] if named else _batch_schema(group)
+                        ).model_json_schema()
+                    ),
                 )
             )
     if plan["protocol"] == fitted.PROTOCOL:
@@ -1149,9 +1273,25 @@ def preview(root: Path):
                 "at a time. Each receives its previous reply and the "
                 "deterministic rejection. A fresh formula correction may also "
                 "change the topology.</p>",
-                _details("Example of a recorded rejection", data["last_failure"]),
             ]
         )
+        if named:
+            example = _assess(
+                data,
+                "fresh",
+                {"components": [{"name": "state_Gp"}, {"name": "target_Gp"}]},
+                "topology",
+                named_targets=True,
+            )
+            parts.append(
+                _details(
+                    "Example feedback for misplaced target names", example["diagnostic"]
+                )
+            )
+        else:
+            parts.append(
+                _details("Example of a recorded rejection", data["last_failure"])
+            )
     path = root / "PROMPTS.html"
     path.write_text("\n".join(parts))
     return {"preview": str(path)}
@@ -1253,14 +1393,24 @@ def main():
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--endpoint")
     p.add_argument("--runtime-record", type=Path)
-    p.add_argument("--model-size", choices=("120b",))
-    p.add_argument("--expected-protocol", choices=(PROTOCOL, fitted.PROTOCOL))
+    p.add_argument("--model-size", choices=("120b", "20b"))
+    p.add_argument(
+        "--expected-protocol", choices=(PROTOCOL, fitted.PROTOCOL, FRESH_20B)
+    )
     args = p.parse_args()
     if args.action == "prepare" and not args.source:
         p.error("prepare requires --source")
     if args.action == "run" and (not args.runtime_record or not args.endpoint):
         p.error("run requires --endpoint and --runtime-record from the ACES worker")
     root = args.root.resolve()
+    if args.model_size:
+        protocol = (
+            args.expected_protocol
+            if args.action == "prepare"
+            else sealed_read(root / "plan.json")["protocol"]
+        )
+        if args.model_size != ("20b" if protocol == FRESH_20B else "120b"):
+            p.error("The requested model size differs from this campaign.")
     if (
         args.action != "prepare"
         and args.expected_protocol

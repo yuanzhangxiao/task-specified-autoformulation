@@ -1,4 +1,4 @@
-"""Submit or safely resume the T2 breadth pilot on a single two-H100 allocation."""
+"""Submit or resume one ACES allocation for the selected T2 construction plan."""
 
 from __future__ import annotations
 
@@ -22,21 +22,29 @@ from scripts.submit_structural_revision_aces import (
 
 
 def execution(plan, image, snapshot):
+    fresh = plan["protocol"] == campaign.FRESH_20B
     values = aces.execution_identity(
-        plan, image, snapshot, entrypoints=tuple(plan["entrypoints"])
+        plan,
+        image,
+        snapshot,
+        entrypoints=tuple(plan["entrypoints"]),
+        model_size="20b" if fresh else "120b",
     )
+    protocols = {
+        campaign.PROTOCOL: "t2-three-origin-aces-2",
+        campaign.fitted.PROTOCOL: "t2-fitted-residual-aces-1",
+        campaign.FRESH_20B: "t2-fresh-public-targets-aces-1",
+    }
     return {
         **values,
-        "protocol": "t2-fitted-residual-aces-1"
-        if plan["protocol"] == campaign.fitted.PROTOCOL
-        else "t2-three-origin-aces-2",
+        "protocol": protocols[plan["protocol"]],
         "entrypoint_sha256": plan["entrypoints"],
         "generation_settings": plan["settings"],
         "maximum_output_tokens": plan["settings"]["max_output_tokens"],
         "maximum_generation_requests": plan["maximum_generation_requests"],
         "maximum_charged_tokens": plan["maximum_generation_requests"] * 32768,
-        "worker_seconds": 6600,
-        "scheduler_walltime_seconds": 7200,
+        "worker_seconds": 3300 if fresh else 6600,
+        "scheduler_walltime_seconds": 3600 if fresh else 7200,
     }
 
 
@@ -45,7 +53,7 @@ def verify(root, check_assets=False):
     record = _read(root / "execution.json")
     image, snapshot = record["image_sha256"], record["snapshot"]
     if check_assets:
-        asset, snapshot = aces._assets()
+        asset, snapshot = _assets(plan)
         image = file_hash(asset)
     value = execution(plan, image, snapshot)
     if record != {**value, "artifact_sha256": _digest(value)}:
@@ -56,6 +64,14 @@ def verify(root, check_assets=False):
 def bind(root, runtime, endpoint):
     record = aces.checked_server(verify(root), runtime, endpoint)
     return _seal(root / "runtime" / ("bound-" + runtime.name), record)
+
+
+def _assets(plan):
+    return (
+        aces._assets("20b")
+        if plan["protocol"] == campaign.FRESH_20B
+        else aces._assets()
+    )
 
 
 def _finished(job):
@@ -160,7 +176,7 @@ def submit(root, resume=False):
             if not (root / "legacy/index.json").exists()
             else None
         )
-        image, snapshot = aces._assets()
+        image, snapshot = _assets(plan)
         identity = _seal(
             root / "execution.json", execution(plan, file_hash(image), snapshot)
         )
@@ -171,6 +187,9 @@ def submit(root, resume=False):
         fitted_run = plan["protocol"] == campaign.fitted.PROTOCOL
         job_name = "phasec-t2-fitted" if fitted_run else "phasec-t2-breadth"
         tag = "t2-fitted" if fitted_run else "t2-depth3"
+        fresh = plan["protocol"] == campaign.FRESH_20B
+        if fresh:
+            job_name, tag = "phasec-t2-fresh-20b", "t2-fresh-20b"
         argv = [
             "sbatch",
             "--parsable",
@@ -179,12 +198,12 @@ def submit(root, resume=False):
             "--export=ALL",
             "--account=" + os.environ.get("AF_ACCOUNT", "156264627414"),
             "--partition=gpu",
-            "--gres=gpu:h100:2",
-            "--cpus-per-task=16",
-            "--mem=128G",
-            "--time=02:00:00",
+            f"--gres=gpu:h100:{identity['tensor_parallel_size']}",
+            f"--cpus-per-task={identity['cpus_per_task']}",
+            f"--mem={identity['memory_gib']}G",
+            f"--time={identity['scheduler_walltime_seconds'] // 3600:02d}:00:00",
             "--signal=B:TERM@300",
-            "--exclude=ac042",
+            "--exclude=ac042,ac096" if fresh else "--exclude=ac042",
             f"--job-name={job_name}",
             "--dependency=singleton",
             f"--comment={tag}-{identity['artifact_sha256'][:12]}-{wave.name}",

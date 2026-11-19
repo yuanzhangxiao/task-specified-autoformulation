@@ -1,5 +1,5 @@
 #!/bin/bash
-# One offline 120B call; no fitting or automatic follow-up allocation.
+# Offline proposer worker with the model size and call budget sealed at submission.
 set -euo pipefail
 : "${AF_REPO_ROOT:?}" "${AF_OUTPUT_ROOT:?}" "${AF_PYTHON:?}" "${AF_VLLM_IMAGE:?}" "${AF_HF_HOME:?}" "${SLURM_JOB_ID:?}"
 # Slurm executes a spooled script: the submitter supplies the verified checkout.
@@ -36,7 +36,7 @@ print(v['model'], v['model_revision'], v['tensor_parallel_size'], v['served_cont
 PY
 )
 AF_DEADLINE=$((SECONDS + AF_WORKER_SECONDS))
-export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 OMP_NUM_THREADS=16
+export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-16}
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}" no_proxy="127.0.0.1,localhost"
 AF_HARMONY_ASSETS=${AF_HARMONY_ASSETS:-$AF_REPO_ROOT/assets/harmony}
 AF_HARMONY_CLI="$AF_REPO_ROOT/scripts/harmony_vocab.py"

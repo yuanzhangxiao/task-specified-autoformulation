@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import ast
+from functools import lru_cache
 from graphlib import TopologicalSorter
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, create_model
 
 from autoformalism.expressions import (
     ModelValidationError,
@@ -80,6 +81,94 @@ class FreshCorrection(StrictSchema):
 
     topology: Topology
     laws: Laws
+
+
+class TargetDeclaration(StrictSchema):
+    """The public name is supplied by the task. The proposer chooses its equation."""
+
+    kind: Literal["dynamic", "algebraic"]
+    role: str = Field(min_length=1, max_length=500)
+    sources: tuple[Identifier, ...] = Field(max_length=32)
+
+
+class PublicTargetTopology(StrictSchema):
+    hypothesis: str = Field(min_length=1, max_length=1500)
+    targets: StrictSchema
+    additional_components: tuple[Component, ...] = Field(max_length=32)
+
+    def as_topology(self) -> Topology:
+        """Lower explicitly keyed target declarations to the existing graph."""
+        rows = self.targets.model_dump(by_alias=True)
+        seen = set(rows)
+        for component in self.additional_components:
+            if component.name in seen:
+                raise ValueError(
+                    f"{component.name} already has a declaration. Keep one definition "
+                    "per name. Put the definition of each public output in targets."
+                )
+            seen.add(component.name)
+        components = (
+            *(Component(name=name, **row) for name, row in rows.items()),
+            *self.additional_components,
+        )
+        if all(row.kind == "algebraic" for row in components):
+            raise ValueError(
+                "Every declared quantity is algebraic. Identify a differential "
+                "state that carries the model's dynamics and give its sources."
+            )
+        return Topology(hypothesis=self.hypothesis, components=components)
+
+
+@lru_cache(maxsize=32)
+def named_topology_forms(targets: tuple[str, ...]) -> tuple[type, type]:
+    """Make each public output a required JSON key, including on whole-model edits."""
+    fields = {
+        f"output_{i}": (TargetDeclaration, Field(alias=name))
+        for i, name in enumerate(targets)
+    }
+    target_rows = create_model("PublicOutputs", __base__=StrictSchema, **fields)
+    graph = create_model(
+        "NamedTargetTopology", __base__=PublicTargetTopology, targets=(target_rows, ...)
+    )
+    revision = create_model(
+        "NamedTargetCorrection",
+        __base__=StrictSchema,
+        topology=(graph, ...),
+        laws=(Laws, ...),
+    )
+    return graph, revision
+
+
+def require_target_keys(raw: object, names: tuple[str, ...]) -> None:
+    """Explain missing/wrong keys before validating the contents of each row."""
+    if not isinstance(raw, dict):
+        return
+    targets = raw.get("targets")
+    received = list(targets) if isinstance(targets, dict) else []
+    missing = [name for name in names if name not in received]
+    unexpected = [name for name in received if name not in names]
+    if missing or unexpected:
+        others = raw.get("additional_components", raw.get("components"))
+        declared = (
+            [
+                item["name"]
+                for item in others[:32]
+                if isinstance(item, dict) and isinstance(item.get("name"), str)
+            ]
+            if isinstance(others, list)
+            else []
+        )
+        raise RevisionValidationError(
+            "PUBLIC_TARGET_KEYS",
+            "Fill targets using the exact public output names. For each, choose its "
+            "kind, role and sources. Put other generated quantities in "
+            "additional_components and reference them by their declared names.",
+            required=list(names),
+            missing=missing,
+            unexpected=unexpected,
+            received_target_keys=received,
+            other_submitted_names=declared,
+        )
 
 
 class FiveGlucoseRepairs(StrictSchema):

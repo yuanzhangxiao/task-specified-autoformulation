@@ -122,7 +122,13 @@ def reconcile(root: Path, wave: Path) -> dict:
     argv = json.loads(intent.read_text())["argv"]
     name = _value(argv, "job-name")
     if (
-        name not in {"phasec-t2-breadth", "phasec-t2-depth3", "phasec-t2-fitted"}
+        name
+        not in {
+            "phasec-t2-breadth",
+            "phasec-t2-depth3",
+            "phasec-t2-fitted",
+            "phasec-t2-fresh-20b",
+        }
         or _value(argv, "output") != str(root / "logs/propose-%j.out")
         or _value(argv, "error") != str(root / "logs/propose-%j.err")
         or Path(argv[-2]).name != "run_meal_insulin_revision_aces.sh"

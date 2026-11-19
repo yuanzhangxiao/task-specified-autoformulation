@@ -177,7 +177,11 @@ def legacy(experiment, monkeypatch, tmp_path):
         {k: v for k, v in inputs.items() if k != "artifact_sha256"},
     )
     plan = sealed_write(
-        original / "plan.json", {"protocol": "synthetic pinned predecessor"}
+        original / "plan.json",
+        {
+            "protocol": "synthetic pinned predecessor",
+            "settings": pilot.SETTINGS.model_dump(mode="json"),
+        },
     )
     monkeypatch.setattr(history, "V1_PLAN", plan["artifact_sha256"])
     system, packet = pilot._packet(inputs, "c15")

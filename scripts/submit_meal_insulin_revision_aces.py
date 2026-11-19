@@ -89,7 +89,7 @@ def verify_inputs(root: Path) -> dict:
     return plan
 
 
-def _assets() -> tuple[Path, dict]:
+def _assets(model_size: str = "120b") -> tuple[Path, dict]:
     """Require the existing offline Python, serving image and pinned snapshot."""
     for name in ("AF_PYTHON", "AF_VLLM_IMAGE", "AF_HF_HOME"):
         if not os.environ.get(name):
@@ -97,21 +97,26 @@ def _assets() -> tuple[Path, dict]:
     image = Path(os.environ["AF_VLLM_IMAGE"])
     if not image.is_file() or not Path(os.environ["AF_PYTHON"]).is_file():
         raise ValueError("Python or serving image is missing")
-    return image, snapshot_identity(Path(os.environ["AF_HF_HOME"]), "120b")
+    return image, snapshot_identity(Path(os.environ["AF_HF_HOME"]), model_size)
 
 
 def execution_identity(
-    plan: dict, image_sha256: str, snapshot: dict, *, entrypoints=ENTRYPOINTS
+    plan: dict,
+    image_sha256: str,
+    snapshot: dict,
+    *,
+    entrypoints=ENTRYPOINTS,
+    model_size: str = "120b",
 ) -> dict:
     """Bind the request to pinned serving assets, launcher code and resources."""
-    model = MODELS["120b"]
+    model = MODELS[model_size]
     return {
         "protocol": EXECUTION_PROTOCOL,
         "plan_sha256": plan["artifact_sha256"],
-        "model_size": "120b",
+        "model_size": model_size,
         "model": model["model"],
         "model_revision": model["revision"],
-        "platform": "aces-h100x2",
+        "platform": f"aces-h100x{model['gpus']}",
         "image_sha256": image_sha256,
         "snapshot": snapshot,
         "harmony_vocabulary": harmony_vocab.verify(
@@ -120,7 +125,7 @@ def execution_identity(
         "entrypoint_sha256": {name: file_hash(REPO / name) for name in entrypoints},
         "served_context_tokens": 32768,
         "maximum_output_tokens": 4096,
-        "tensor_parallel_size": 2,
+        "tensor_parallel_size": model["gpus"],
         "maximum_sequences": 1,
         "gpu_memory_utilization": 0.90,
         "generation_settings": SETTINGS,
@@ -128,8 +133,8 @@ def execution_identity(
         "maximum_charged_tokens": 32768,
         "worker_seconds": 3000,
         "scheduler_walltime_seconds": 3600,
-        "cpus_per_task": 16,
-        "memory_gib": 128,
+        "cpus_per_task": model["cpus"],
+        "memory_gib": model["memory_gib"],
         "vllm_version": "0.27.1",
         "compiler_cache_policy": "node-local-job-temporary-1",
         "server_binding": "127.0.0.1",
@@ -162,7 +167,7 @@ def bind_server(root: Path, runtime_record: Path, endpoint: str) -> dict:
 
 
 def checked_server(execution: dict, runtime_record: Path, endpoint: str) -> dict:
-    """Validate the observed two-H100 runtime against a sealed execution."""
+    """Validate the allocated H100s and served model against the sealed execution."""
     parsed = urlsplit(endpoint)
     if (
         parsed.scheme != "http"
@@ -189,15 +194,16 @@ def checked_server(execution: dict, runtime_record: Path, endpoint: str) -> dict
     names = runtime.get("gpu_names", [])
     memory = runtime.get("gpu_memory_bytes", [])
     drivers = runtime.get("gpu_driver", [])
+    gpus = execution["tensor_parallel_size"]
     if (
         type(runtime.get("visible_gpus")) is not int
-        or runtime["visible_gpus"] != 2
+        or runtime["visible_gpus"] != gpus
         or runtime.get("cuda_kernel_passed") is not True
         or not isinstance(names, list)
-        or len(names) != 2
+        or len(names) != gpus
         or any(not isinstance(name, str) or "H100" not in name for name in names)
         or not isinstance(memory, list)
-        or len(memory) != 2
+        or len(memory) != gpus
         or any(type(size) is not int or size < 75 * 1024**3 for size in memory)
         or not isinstance(drivers, list)
         or not drivers
@@ -208,7 +214,9 @@ def checked_server(execution: dict, runtime_record: Path, endpoint: str) -> dict
         or not isinstance(runtime.get("cuda"), str)
         or not runtime["cuda"]
     ):
-        raise ValueError("runtime requires two working H100 80GB GPUs and pinned vLLM")
+        raise ValueError(
+            f"runtime requires {gpus} working H100 80GB GPU(s) and pinned vLLM"
+        )
     harmony = runtime.get("harmony", {})
     if (
         {key: harmony.get(key) for key in ("protocol", "filename", "sha256")}

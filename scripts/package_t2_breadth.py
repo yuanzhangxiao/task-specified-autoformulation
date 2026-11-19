@@ -16,13 +16,21 @@ from scripts import harmony_vocab, t2_breadth
 
 NAME = "phase-c-t2-breadth-v2"
 FITTED_NAME = "phase-c-t2-fitted-revisions-v1"
+FRESH_20B_NAME = "phase-c-t2-fresh-20b-v1"
 
 
-def package(destination: Path, intake: Path, harmony: Path) -> Path:
+def package(
+    destination: Path, intake: Path, harmony: Path, *, fresh_20b: bool = False
+) -> Path:
     """Include committed runtime files and exactly the two reviewed external inputs."""
     reviewed = sealed_read(intake)
     fitted_run = reviewed.get("protocol") == t2_breadth.fitted.INPUT_PROTOCOL
     name = FITTED_NAME if fitted_run else NAME
+    input_name = "inputs/fitted-targets.json" if fitted_run else "inputs/intake.json"
+    if fresh_20b:
+        if fitted_run:
+            raise ValueError("Use the public training intake for the fresh 20B retest")
+        name, input_name = FRESH_20B_NAME, "inputs/fresh-20b.json"
     expected = t2_breadth.fitted.INTAKE if fitted_run else t2_breadth.INTAKE
     if reviewed["artifact_sha256"] != expected:
         raise ValueError("Different T2 training intake")
@@ -37,6 +45,8 @@ def package(destination: Path, intake: Path, harmony: Path) -> Path:
     ]
     if fitted_run:
         tracked.append("scripts/hpc/start_t2_fitted_aces.sh")
+    if fresh_20b:
+        tracked.append("scripts/hpc/start_t2_fresh_20b_aces.sh")
     source = subprocess.check_output(
         ["git", "archive", "--format=tar", commit.strip(), *tracked], cwd=repo
     )
@@ -46,7 +56,7 @@ def package(destination: Path, intake: Path, harmony: Path) -> Path:
             if member.isfile():
                 files[member.name] = archive.extractfile(member).read(), member.mode
     for target, path in [
-        ("inputs/fitted-targets.json" if fitted_run else "inputs/intake.json", intake),
+        (input_name, intake),
         ("assets/harmony/o200k_base.tiktoken", harmony / "o200k_base.tiktoken"),
     ]:
         files[target] = path.read_bytes(), 0o644
@@ -77,8 +87,9 @@ if __name__ == "__main__":
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--intake", required=True, type=Path)
     parser.add_argument("--harmony", required=True, type=Path)
+    parser.add_argument("--fresh-20b", action="store_true")
     args = parser.parse_args()
-    result = package(args.out, args.intake, args.harmony)
+    result = package(args.out, args.intake, args.harmony, fresh_20b=args.fresh_20b)
     print(
         json.dumps(
             {

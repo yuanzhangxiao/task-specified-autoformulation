@@ -1,5 +1,19 @@
 # T2-easy breadth pilot
 
+## Fresh-start target declarations with GPT-OSS-20B
+
+The November 8 fresh-start arm used a compressed topology-then-functions interface. Its five 120B seeds each returned four topologies. All 20 omitted the literal names of all three public outputs in the component-name field. The two fitted-parent arms of that experiment supplied five distinct models for fitting. [Archived branch audit](../work/agent-comms/2026-11-08-t2-breadth-results-and-fitting-handoff.md)
+
+The 20B retest uses the same T2-easy training evidence and five seed labels (100–104). The structured response has one required entry per public output, generated from the task's target list. For each entry the proposer chooses the equation type, scientific role and sources. Additional states and processes have their own declarations. The runtime assembles those entries into the existing graph and checks the public pathways. Passing graphs proceed to functions, initialization and model admission. Each seed has up to three corrections shared across the two stages. The ceiling is 25 calls on one H100. Results include first-reply target coverage, first-pass topology acceptance, branches reaching functions, eligible branches and distinct fitting packets.
+
+Upload `phase-c-t2-fresh-20b-v1.tar.gz` to group scratch. On the ACES login node, run
+
+```bash
+cd /scratch/group/p.nairr260351.000/u.yx126462 && tar -xzf phase-c-t2-fresh-20b-v1.tar.gz && cd phase-c-t2-fresh-20b-v1 && sha256sum --quiet -c SHA256SUMS && bash scripts/hpc/start_t2_fresh_20b_aces.sh run
+```
+
+Use the same launcher with `status`, `resume` or `inspect`. The result directory is `phase-c-t2-fresh-20b-results-v1` under group scratch. Its `inspection.tar.gz` includes per-seed equations, diagnostics, original replies and fitting handoffs for distinct admitted models. Evaluation of those packets by the fitter is a separate step.
+
 ## Five revisions per fitted parent
 
 The `t2-fitted-timing-recovery-1` campaign gives GPT-OSS-120B one five-option request for each of two fitted T2-easy models. The starting coefficients are the signed, supplementary fits that produced the displayed residuals. Orion’s sign-correct parameter vectors are a separate numerical control. All four focal meal schedules have zero infused insulin.
