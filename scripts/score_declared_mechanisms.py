@@ -402,7 +402,10 @@ def attribute_stage(root: Path, out: Path) -> dict:
     """Seal the rule's assignment for every frozen model of the root."""
     plan = sealed_read(root / "plan.json")
     rule = json.loads(RULE.read_text())
-    if rule["status"] != "frozen_before_scoring" or rule["cell"] not in plan["cells"]:
+    # a perturbed cell has its base cell's channels and mechanisms, so its rule
+    if rule["status"] != "frozen_before_scoring" or rule["cell"] not in {
+        anchor.base_cell(c) for c in plan["cells"]
+    }:
         raise ValueError("the rule is not frozen for this root's cell")
     rows = []
     for row in subjects(root):
