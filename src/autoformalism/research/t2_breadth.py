@@ -34,6 +34,7 @@ from autoformalism.research.construction_structural_revision import (
     _initial_rule,
     _normalize_law,
 )
+from autoformalism.research.revision_spelling import declared_spellings
 from autoformalism.schemas import CandidateModel
 from autoformalism.schemas.base import Identifier, StrictSchema
 from autoformalism.schemas.prefix_initialization import PrefixFitProblem
@@ -244,7 +245,11 @@ def check_topology(
 
 
 def assemble(
-    topology: Topology, laws: Laws, context: ValidationContext
+    topology: Topology,
+    laws: Laws,
+    context: ValidationContext,
+    *,
+    normalizations: list[dict] | None = None,
 ) -> PrefixFitProblem:
     """Lower complete, newly proposed equations and causal initials for fitting."""
     nodes = {c.name: c for c in topology.components}
@@ -264,20 +269,35 @@ def assemble(
     states, dynamics, processes, initials = [], [], [], []
     used = set()
     latent = set()
+    changes = [] if normalizations is None else normalizations
     for name, node in nodes.items():
+        source, spellings = declared_spellings(eqs[name], parameters)
+        if spellings:
+            changes.append({"component": name, "identifier_spellings": spellings})
         expression, actual = _normalize_law(
-            eqs[name],
+            source,
             name,
             node.kind,
             node.sources,
             time_symbol=context.time_symbol,
             parameters=parameters,
             allowed_sources=allowed,
-            changes=[],
+            changes=changes,
         )
-        if set(actual) != set(node.sources):
-            raise ValueError(
-                f"{name} declares {sorted(node.sources)}. Formula sources: {actual}."
+        # An explicit clock or self term can be missing from a dependency list.
+        # Other edits would override an earlier scientific choice of graph.
+        implicit = {context.time_symbol}
+        if node.kind == "dynamic":
+            implicit.add(name)
+        declared = set(node.sources)
+        if declared - set(actual) or set(actual) - declared - implicit:
+            raise RevisionValidationError(
+                "GRAPH_FORMULA_DISAGREEMENT",
+                f"{name} declares {sorted(node.sources)}. Formula sources: {actual}. "
+                "Return the intended topology and matching law together.",
+                component=name,
+                graph_only=sorted(declared - set(actual)),
+                formula_only=sorted(set(actual) - declared),
             )
 
         used.update(_symbols(expression, name) & parameters)
@@ -311,7 +331,20 @@ def assemble(
         for row in laws.latent_initials
     }
     if rules.keys() != latent or len(rules) != len(laws.latent_initials):
-        raise ValueError(f"Supply one initializer per hidden state: {sorted(latent)}")
+        raise RevisionValidationError(
+            "LATENT_INITIALIZERS",
+            f"Supply one initializer per hidden state: {sorted(latent)}. "
+            "Measured differential targets start from their recorded initial values.",
+            missing=sorted(latent - rules.keys()),
+            extra=sorted(rules.keys() - latent),
+            repeated=sorted(
+                {
+                    s
+                    for s in rules
+                    if sum(r.state == s for r in laws.latent_initials) > 1
+                }
+            ),
+        )
     candidate = CandidateModel.model_validate(
         {
             "candidate_id": "fresh_"

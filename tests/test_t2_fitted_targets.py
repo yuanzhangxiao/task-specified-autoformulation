@@ -185,6 +185,112 @@ def test_five_distinct_each_and_immutable_resume(campaign):
         assert "REPORT.html" in archive.getnames()
 
 
+def test_independent_20b_breadth_costs_yields_and_resume(campaign):
+    root = campaign.parent / "separate"
+    plan = pilot.prepare(
+        root, campaign / "inputs.json", expected_protocol=pilot.FITTED_20B
+    )
+    assert plan["maximum_generation_requests"] == 160
+    assert plan["settings"]["temperature"] > 0
+    pilot.preview(root)
+    page = (root / "PROMPTS.html").read_text()
+    assert "FiveFittedAlternatives" not in page and "InScopeRevisionReply" in page
+    assert pilot.report(root)["independent_draws"]["c15-3"]["initial_recorded"] == 0
+    sent = []
+    seed_labels = {
+        int(content_hash([seed, pilot._patch_slot(f"{g}-{i}", d), 0])[:8], 16)
+        % (2**31): seed
+        for g in fitted.GROUPS
+        for i, seed in enumerate(plan["independent_initial_seeds"])
+        for d in range(4)
+    }
+    assert len(seed_labels) == 160
+
+    def transport(url, body, timeout):
+        question = json.loads(body["messages"][1]["content"])
+        group, seed = question["parent"], seed_labels[body["seed"]]
+        depth = question.get("correction_number", int("rejection" in question))
+        sent.append((group, seed, depth))
+        assert body["model"] == "openai/gpt-oss-20b"
+        assert body["response_format"]["json_schema"]["name"] == "InScopeRevisionReply"
+        assert "accepted_siblings" not in question
+        if seed == 103 and depth == 0:
+            return {
+                "choices": [{"finish_reason": "length", "message": {"content": "{"}}],
+                "usage": {"total_tokens": 6},
+            }
+        if seed == 102 or (seed == 100 and depth < 2):
+            return reply(edit(group, "unknown_signal"))
+        if seed == 103:
+            assert question["rejection"]["code"] == "INCOMPLETE_PATCH"
+        return reply(edit(group, f"dI/dt = {4 if depth else 2}*Gp-I+{INFUSION}"))
+
+    summary = pilot.run(root, LOCAL, transport=transport, token_transport=tokenizer)
+    assert len(sent) == summary["physical_requests"] == 52
+    assert len(set(sent[:40])) == 40 and all(d == 0 for _, _, d in sent[:40])
+    assert [s for g, s, _ in sent[:40] if g == "c15-3"] == list(range(100, 120))
+    for group in fitted.GROUPS:
+        stats = summary["independent_draws"][group]
+        assert (
+            stats["planned"]
+            == stats["initial_recorded"]
+            == stats["terminal_recorded"]
+            == 20
+        )
+        assert stats["initial_eligible"] == 17 and stats["initial_distinct"] == 1
+        assert (
+            stats["terminal_eligible"] == 19
+            and stats["terminal_distinct_for_fitting"] == 2
+        )
+        assert stats["eligible_only_after_repair"] == 2
+        assert stats["improvement_after_refitting"] is None
+        schedules = stats["same_call_budget_replay"]
+        assert schedules["breadth_first"][0]["seeds_visited"] == 5
+        assert schedules["finish_one_branch_first"][0]["seeds_visited"] < 5
+        assert (
+            schedules["breadth_first"][-1] == schedules["finish_one_branch_first"][-1]
+        )
+    assert len(list((root / "handoff").glob("*.json"))) == 4
+
+    def deny(*args):
+        pytest.fail("Unexpected provider call on resume")
+
+    assert pilot.run(root, LOCAL, transport=deny, token_transport=deny) == summary
+
+
+def test_independent_20b_scheduler(campaign, monkeypatch):
+    root = campaign.parent / "separate"
+    pilot.prepare(root, campaign / "inputs.json", expected_protocol=pilot.FITTED_20B)
+
+    def assets(size):
+        assert size == "20b"
+        return campaign / "inputs.json", {
+            "model_revision": pilot.MODELS[size]["revision"]
+        }
+
+    monkeypatch.setattr(submitter.aces, "_assets", assets)
+    monkeypatch.setattr(
+        submitter.aces.harmony_vocab, "verify", lambda _: {"sha256": "test"}
+    )
+    calls = []
+
+    def submit(wave, argv):
+        calls.append(argv)
+        assert "--gres=gpu:h100:1" in argv and "--time=02:00:00" in argv
+        assert "--job-name=phasec-t2-fitted-20b" in argv
+        return "12345"
+
+    monkeypatch.setattr(submitter, "_submit_job", submit)
+    assert submitter.submit(root)["job"] == submitter.submit(root)["job"] == "12345"
+    record = submitter.verify(root, check_assets=True)
+    assert len(calls) == 1 and record["maximum_generation_requests"] == 160
+    assert (
+        record["model"]
+        == record["generation_settings"]["model"]
+        == "openai/gpt-oss-20b"
+    )
+
+
 def test_genuine_differences_and_specific_repairs(campaign):
     root = campaign
 

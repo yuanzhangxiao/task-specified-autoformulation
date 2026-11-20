@@ -20,6 +20,11 @@ case "${2:-breadth}" in
     AF_PROTOCOL=t2-fresh-public-targets-20b-1
     AF_PREPARE=(--source "$AF_REPO_ROOT/inputs/fresh-20b.json")
     AF_MODEL_CACHE_PATH=hub/models--openai--gpt-oss-20b/snapshots/6cee5e81ee83917806bbde320786a8fb61efebee ;;
+  fitted-20b)
+    export AF_OUTPUT_ROOT=${AF_T2_FITTED_20B_ROOT:-$AF_GROUP/phase-c-t2-fitted-breadth-20b-results-v1}
+    AF_PROTOCOL=t2-fitted-independent-20b-1
+    AF_PREPARE=(--source "$AF_REPO_ROOT/inputs/fitted-targets.json")
+    AF_MODEL_CACHE_PATH=hub/models--openai--gpt-oss-20b/snapshots/6cee5e81ee83917806bbde320786a8fb61efebee ;;
   *) echo 'Unknown T2 campaign.' >&2; exit 2 ;;
 esac
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}

@@ -1,5 +1,21 @@
 # T2-easy breadth pilot
 
+## Independent 20B revisions of two fitted parents
+
+GPT-OSS-20B receives the signed fitted equations, parameter values and training residuals for `c15-3` (peak insulin timing) and `c15-2` (late insulin recovery). The first 20 calls for each parent share a prompt and use separate sampling seeds. Each call returns one complete parent-relative patch. The runtime evaluates all 40 first proposals before spending up to three corrections on each unresolved branch, one round at a time. Each branch sees its own history. The 160-call ceiling includes the initial 40 and interrupted generations. The temperature is 0.2. The run uses one H100 for up to two hours per allocation and resumes from logged generation slots.
+
+For each parent, `summary.json` reports the initial outcomes, eligible proposals recovered by repair, and distinct models exported for fitting. Repeated eligible equations count toward first-draw admission and share a fitting packet within their parent. The completed report also reorders the recorded independent branches to compare visiting new seeds with finishing one seed at a time at the same physical call counts. This comparison uses the same observed branch responses. Its generality is limited to these two parents and this sampling configuration.
+
+Orion receives every distinct admitted model with its fitted parent and training witnesses. For `c15-3`, compare mean absolute insulin peak-time error on the three shifted 90 g meals. For `c15-2`, compare absolute error in the change in insulin from minute 240 to 300 on the 150 g meal. Use the same fitting budget and initial-value policy for parent and child. Report qualified fits, primary improvements and the subset also maintaining or improving pooled training NMSE, together with insulin minima and pulse direction. These numerical outcomes stay pending until the fits can be replayed.
+
+Upload `phase-c-t2-fitted-breadth-20b-v1.tar.gz` to ACES group scratch. From the login node run
+
+```bash
+cd /scratch/group/p.nairr260351.000/u.yx126462 && tar -xzf phase-c-t2-fitted-breadth-20b-v1.tar.gz && cd phase-c-t2-fitted-breadth-20b-v1 && sha256sum --quiet -c SHA256SUMS && bash scripts/hpc/start_t2_fitted_20b_aces.sh run
+```
+
+Use the same launcher with `status`, `resume` or `inspect`. The archive is `phase-c-t2-fitted-breadth-20b-results-v1/inspection.tar.gz` under group scratch.
+
 ## Fresh-start target declarations with GPT-OSS-20B
 
 The November 8 fresh-start arm used a compressed topology-then-functions interface. Its five 120B seeds each returned four topologies. All 20 omitted the literal names of all three public outputs in the component-name field. The two fitted-parent arms of that experiment supplied five distinct models for fitting. [Archived branch audit](../work/agent-comms/2026-11-08-t2-breadth-results-and-fitting-handoff.md)

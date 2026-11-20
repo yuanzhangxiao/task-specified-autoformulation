@@ -28,12 +28,15 @@ def execution(plan, image, snapshot):
         image,
         snapshot,
         entrypoints=tuple(plan["entrypoints"]),
-        model_size="20b" if fresh else "120b",
+        model_size="20b"
+        if plan["protocol"] in (campaign.FRESH_20B, campaign.FITTED_20B)
+        else "120b",
     )
     protocols = {
         campaign.PROTOCOL: "t2-three-origin-aces-2",
         campaign.fitted.PROTOCOL: "t2-fitted-residual-aces-1",
         campaign.FRESH_20B: "t2-fresh-public-targets-aces-1",
+        campaign.FITTED_20B: "t2-fitted-independent-20b-aces-1",
     }
     return {
         **values,
@@ -69,7 +72,7 @@ def bind(root, runtime, endpoint):
 def _assets(plan):
     return (
         aces._assets("20b")
-        if plan["protocol"] == campaign.FRESH_20B
+        if plan["protocol"] in (campaign.FRESH_20B, campaign.FITTED_20B)
         else aces._assets()
     )
 
@@ -187,9 +190,10 @@ def submit(root, resume=False):
         fitted_run = plan["protocol"] == campaign.fitted.PROTOCOL
         job_name = "phasec-t2-fitted" if fitted_run else "phasec-t2-breadth"
         tag = "t2-fitted" if fitted_run else "t2-depth3"
-        fresh = plan["protocol"] == campaign.FRESH_20B
-        if fresh:
+        if plan["protocol"] == campaign.FRESH_20B:
             job_name, tag = "phasec-t2-fresh-20b", "t2-fresh-20b"
+        elif plan["protocol"] == campaign.FITTED_20B:
+            job_name, tag = "phasec-t2-fitted-20b", "t2-fitted-20b"
         argv = [
             "sbatch",
             "--parsable",
@@ -203,7 +207,9 @@ def submit(root, resume=False):
             f"--mem={identity['memory_gib']}G",
             f"--time={identity['scheduler_walltime_seconds'] // 3600:02d}:00:00",
             "--signal=B:TERM@300",
-            "--exclude=ac042,ac096" if fresh else "--exclude=ac042",
+            "--exclude=ac042,ac096"
+            if identity["model_size"] == "20b"
+            else "--exclude=ac042",
             f"--job-name={job_name}",
             "--dependency=singleton",
             f"--comment={tag}-{identity['artifact_sha256'][:12]}-{wave.name}",

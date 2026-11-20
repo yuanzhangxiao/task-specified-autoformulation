@@ -288,6 +288,31 @@ FIVE = (
     "mechanism or functional change for this parent's target. Write one complete "
     "parent-relative patch per option. Each option supplies its own definitions."
 )
+SINGLE = (
+    "Return one complete change to this fitted parent. Choose a scientific explanation "
+    "for the displayed residual and specify the equations that would test it."
+)
+SINGLE_CORRECTION = (
+    "Return the complete patch relative to the displayed fitted parent. Address the "
+    "specific rejection and keep the useful changes from your previous proposal."
+)
+INCOMPLETE_PATCH = {
+    "code": "INCOMPLETE_PATCH",
+    "message": "Return one complete patch against the fitted parent.",
+    "details": {},
+}
+REFIT_ENDPOINTS = {
+    "c15-3": {
+        "primary": "Mean absolute error in the minute of peak insulin.",
+        "trajectories": ["train_003", "train_006", "train_007"],
+        "measurement": "Use the full-trajectory shifted-90g peak metric. Report ties.",
+    },
+    "c15-2": {
+        "primary": "Absolute error in insulin change from 240 to 300 minutes (pmol/L).",
+        "trajectories": ["train_005"],
+        "measurement": "Compare predicted and recorded I(300) - I(240).",
+    },
+}
 EDITING = (
     "Start each alternative from the displayed equations. Choose the mechanism "
     "and functional form. Replace complete right-hand sides where needed. You may "

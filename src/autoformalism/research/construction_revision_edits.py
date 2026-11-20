@@ -126,7 +126,9 @@ def _rhs_guidance(component: str, kind: str, time_symbol: str) -> dict[str, Any]
     }
 
 
-def _canonical_rhs(expression: str, component: str, kind: str, time: str) -> str:
+def _canonical_rhs(
+    expression: str, component: str, kind: str, time: str, *, current_value: bool = True
+) -> str:
     """Strip only an exactly matching equation label, never infer its meaning."""
     source = expression.strip()
     if "=" not in source:
@@ -141,14 +143,21 @@ def _canonical_rhs(expression: str, component: str, kind: str, time: str) -> str
     lhs, rhs = (part.strip() for part in source.split("=", 1))
     name, clock = re.escape(component), re.escape(time)
     pattern = (
-        rf"(?:d\s*\(\s*{name}\s*\)\s*/\s*d\s*{clock}|{name}\s*['\u2032])"
+        rf"(?:d\s*(?:\(\s*{name}\s*\)|{name})\s*/\s*d\s*{clock}|{name}\s*['\u2032])"
         if kind == "dynamic"
-        else name
+        else (rf"{name}(?:\s*\(\s*{clock}\s*\))?" if current_value else name)
     )
     if not re.fullmatch(pattern, lhs) or not rhs:
+        message = "equation label must match the edited component and its existing kind"
+        if kind == "dynamic" and re.fullmatch(rf"{name}(?:\s*\(\s*{clock}\s*\))?", lhs):
+            message = (
+                f"{component} is declared dynamic, but {lhs} labels its value. "
+                "A dynamic edit supplies its derivative. A value equation requires "
+                "an algebraic declaration."
+            )
         raise RevisionValidationError(
             "RHS_LABEL",
-            "equation label must match the edited component and its existing kind",
+            message,
             supplied_lhs=lhs,
             **guidance,
         )

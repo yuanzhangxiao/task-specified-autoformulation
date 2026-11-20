@@ -5,7 +5,7 @@ from copy import deepcopy
 
 import pytest
 
-from autoformalism.expressions import ValidationContext
+from autoformalism.expressions import ModelValidationError, ValidationContext
 from autoformalism.llm.staged_topology import strict_provider_schema
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.research import t2_breadth as science
@@ -139,6 +139,79 @@ def test_undeclared_sources_topology_path_and_unbound_symbol():
             science.Laws.model_validate(laws),
             ctx,
         )
+
+
+def test_current_equation_notation_and_unambiguous_fresh_metadata():
+    ctx, _ = public()
+    topo, laws = proposal()
+    checks = []
+    topo["components"][1]["sources"].remove("I")
+    laws["parameters"][0]["name"] = "tau"
+    laws["formulas"][0]["expression"] = f"dGp/dt = {MEAL}+EGP-U"
+    laws["formulas"][1]["expression"] = f"dI/dt = τ*Gp(t)-τ*I(t)+{INFUSION}+t"
+    laws["formulas"][2]["expression"] = "U(t) = Uii(t)+X(t)"
+    laws["formulas"][3]["expression"] = "d(X)/dt = tau*(I-X)"
+    model = science.assemble(
+        science.Topology.model_validate(topo),
+        science.Laws.model_validate(laws),
+        ctx,
+        normalizations=checks,
+    )
+    rhs = next(
+        row.rhs for row in model.base_candidate.state_equations if row.state == "I"
+    )
+    assert science._symbols(rhs, "I") == {"tau", "Gp", "I", INFUSION, "t"}
+    assert {"component": "I", "identifier_spellings": {"τ": "tau"}} in checks
+    assert any(
+        r.get("sources_after") == sorted(["Gp", "I", INFUSION, "t"]) for r in checks
+    )
+    assert (
+        "τ" in laws["formulas"][1]["expression"]
+        and "I" not in topo["components"][1]["sources"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("row", "expression", "error"),
+    [
+        (0, "dGpx/dt = 1", "RHS_LABEL"),
+        (0, "dGp/ds = 1", "RHS_LABEL"),
+        (0, "Gp(t) = 1", "RHS_LABEL"),
+        (0, "dGp/dt = dI/dt = 1", "RHS_LABEL"),
+        (2, "dU/dt = Uii+X", "RHS_LABEL"),
+        (2, "U(t-1) = Uii+X", "RHS_LABEL"),
+        (2, "U(t) = Uii(t-1)+X", "UNSUPPORTED_FUNCTION"),
+        (1, f"dI/dt = a*Gp-I+{INFUSION}+τ_unknown", "UNKNOWN_FORMULA_SYMBOL"),
+        (0, f"dGp/dt = {MEAL}+EGP-X", "GRAPH_FORMULA_DISAGREEMENT"),
+        (1, f"dI/dt = Gp+{INFUSION}", "GRAPH_FORMULA_DISAGREEMENT"),
+    ],
+)
+def test_current_equation_reader_preserves_scientific_boundaries(
+    row, expression, error
+):
+    ctx, _ = public()
+    topo, laws = proposal()
+    laws["formulas"][row]["expression"] = expression
+    with pytest.raises((ValueError, ModelValidationError), match=error):
+        science.assemble(
+            science.Topology.model_validate(topo),
+            science.Laws.model_validate(laws),
+            ctx,
+        )
+
+
+def test_measured_initial_value_cannot_become_a_private_root():
+    ctx, _ = public()
+    topology, laws = proposal()
+    laws["latent_initials"].append({**laws["latent_initials"][0], "state": "I"})
+    with pytest.raises(science.RevisionValidationError) as error:
+        science.assemble(
+            science.Topology.model_validate(topology),
+            science.Laws.model_validate(laws),
+            ctx,
+        )
+    assert error.value.code == "LATENT_INITIALIZERS"
+    assert error.value.details["extra"] == ["I"]
 
 
 def test_auxiliary_can_be_supplied_or_explicitly_modeled():

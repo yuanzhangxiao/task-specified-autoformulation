@@ -17,10 +17,16 @@ from scripts import harmony_vocab, t2_breadth
 NAME = "phase-c-t2-breadth-v2"
 FITTED_NAME = "phase-c-t2-fitted-revisions-v1"
 FRESH_20B_NAME = "phase-c-t2-fresh-20b-v1"
+FITTED_20B_NAME = "phase-c-t2-fitted-breadth-20b-v1"
 
 
 def package(
-    destination: Path, intake: Path, harmony: Path, *, fresh_20b: bool = False
+    destination: Path,
+    intake: Path,
+    harmony: Path,
+    *,
+    fresh_20b: bool = False,
+    fitted_20b: bool = False,
 ) -> Path:
     """Include committed runtime files and exactly the two reviewed external inputs."""
     reviewed = sealed_read(intake)
@@ -31,6 +37,10 @@ def package(
         if fitted_run:
             raise ValueError("Use the public training intake for the fresh 20B retest")
         name, input_name = FRESH_20B_NAME, "inputs/fresh-20b.json"
+    if fitted_20b:
+        if not fitted_run or fresh_20b:
+            raise ValueError("Use the two fitted parents for independent 20B proposals")
+        name = FITTED_20B_NAME
     expected = t2_breadth.fitted.INTAKE if fitted_run else t2_breadth.INTAKE
     if reviewed["artifact_sha256"] != expected:
         raise ValueError("Different T2 training intake")
@@ -47,6 +57,8 @@ def package(
         tracked.append("scripts/hpc/start_t2_fitted_aces.sh")
     if fresh_20b:
         tracked.append("scripts/hpc/start_t2_fresh_20b_aces.sh")
+    if fitted_20b:
+        tracked.append("scripts/hpc/start_t2_fitted_20b_aces.sh")
     source = subprocess.check_output(
         ["git", "archive", "--format=tar", commit.strip(), *tracked], cwd=repo
     )
@@ -87,9 +99,17 @@ if __name__ == "__main__":
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--intake", required=True, type=Path)
     parser.add_argument("--harmony", required=True, type=Path)
-    parser.add_argument("--fresh-20b", action="store_true")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--fresh-20b", action="store_true")
+    modes.add_argument("--fitted-20b", action="store_true")
     args = parser.parse_args()
-    result = package(args.out, args.intake, args.harmony, fresh_20b=args.fresh_20b)
+    result = package(
+        args.out,
+        args.intake,
+        args.harmony,
+        fresh_20b=args.fresh_20b,
+        fitted_20b=args.fitted_20b,
+    )
     print(
         json.dumps(
             {

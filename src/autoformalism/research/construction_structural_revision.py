@@ -193,9 +193,11 @@ class StructuralRevisionReply(_StructuralRevisionFields):
         return self
 
 
-def _expression_key(expression: str, name: str, kind: str, time: str) -> str:
+def _expression_key(
+    expression: str, name: str, kind: str, time: str, *, current_value: bool = True
+) -> str:
     """Compare restricted syntax, allowing only labels, spacing and parentheses."""
-    rhs = _canonical_rhs(expression, name, kind, time)
+    rhs = _canonical_rhs(expression, name, kind, time, current_value=current_value)
     _bounded_ast(rhs, name)
     _symbols(rhs, name)
     return ast.dump(ast.parse(rhs, mode="eval"), include_attributes=False)
@@ -206,7 +208,7 @@ def _initial_key(initial: dict[str, Any], state: str) -> dict[str, Any]:
     result = deepcopy(initial)
     if result["mode"] == "map":
         result["expression"] = _expression_key(
-            result["expression"], state, "algebraic", "t"
+            result["expression"], state, "algebraic", "t", current_value=False
         )
         for field in ("parameters", "state_initials", "public_initials"):
             result[field] = sorted(result[field], key=content_hash)
@@ -562,7 +564,9 @@ def _initial_rule(
             )
         payload["guess"] = 0.1
     else:
-        expression = _canonical_rhs(choice.expression, state, "algebraic", "t")
+        expression = _canonical_rhs(
+            choice.expression, state, "algebraic", "t", current_value=False
+        )
         _bounded_ast(expression, f"initial:{state}")
         _symbols(expression, f"initial:{state}")
         payload["expression"] = expression

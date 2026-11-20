@@ -66,6 +66,23 @@ def _namespace(names: list[str]) -> set[str]:
     return set(spellings)
 
 
+def declared_spellings(source: str, scope: set[str]) -> tuple[str, dict[str, str]]:
+    """Translate entire Greek identifier tokens only to a declared ASCII identity."""
+    if source.isascii():
+        return source, {}
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError):
+        return source, {}
+    changes = {}
+    for index, token in enumerate(tokens):
+        new = token.string.translate(_GREEK)
+        if token.type == tokenize.NAME and token.string != new and new in scope:
+            changes[token.string] = new
+            tokens[index] = token._replace(string=new)
+    return (tokenize.untokenize(tokens) if changes else source), changes
+
+
 def normalize(parent: PrefixFitProblem, raw: dict, schema) -> tuple[dict, list[dict]]:
     """Canonicalize whole identifier tokens only against declarations in their scope."""
     audit = []
@@ -152,21 +169,9 @@ def normalize(parent: PrefixFitProblem, raw: dict, schema) -> tuple[dict, list[d
             )
 
     def formula(row, key, path, scope):
-        source = row[key]
-        if source.isascii():
-            return
-        try:
-            tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
-        except (tokenize.TokenError, IndentationError):
-            return  # The restricted expression parser reports malformed source.
-        changes = {}
-        for i, token in enumerate(tokens):
-            new = token.string.translate(_GREEK)
-            if token.type == tokenize.NAME and token.string != new and new in scope:
-                changes[token.string] = new
-                tokens[i] = token._replace(string=new)
+        source, changes = declared_spellings(row[key], scope)
         if changes:
-            row[key] = tokenize.untokenize(tokens)
+            row[key] = source
             audit.extend(
                 {"field": [*path, key], "from": old, "to": new}
                 for old, new in changes.items()

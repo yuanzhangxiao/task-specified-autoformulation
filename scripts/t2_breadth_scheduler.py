@@ -128,6 +128,7 @@ def reconcile(root: Path, wave: Path) -> dict:
             "phasec-t2-depth3",
             "phasec-t2-fitted",
             "phasec-t2-fresh-20b",
+            "phasec-t2-fitted-20b",
         }
         or _value(argv, "output") != str(root / "logs/propose-%j.out")
         or _value(argv, "error") != str(root / "logs/propose-%j.err")
