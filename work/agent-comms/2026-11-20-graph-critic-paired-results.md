@@ -46,6 +46,16 @@ of this trajectory `Uii` equals 1 at both endpoints and `U - Uii` rises from
 0.916 to 10.300 mg/kg/min. This contrast tests the output decomposition. It
 does not measure the latent action state directly.
 
+I checked that interpretation **after** the four paired reviews. Both models have
+the exact readout `U = B + X` and a constant fitted rate for `B`, the internally
+represented baseline. Their fitted change in the action contribution is therefore
+`ΔX = ΔU − 99 × dB/dt` in this window. On candidate 14 it was **−11.20 and
+−9.75** across the two fits. On c15-3 it was **+3.60** on both fits. Against the
+public component change of **+9.38**, 14 gets the direction wrong and c15-3
+gets the direction right with too small an increase. This calculation localizes
+the discrepancy in the additive readout. It leaves the upstream insulin drive,
+the action dynamics and the fitted initial action as competing explanations.
+
 ## What to pass to construction
 
 1. Expose the measured discrepancy, signed balances where available, and the effects
