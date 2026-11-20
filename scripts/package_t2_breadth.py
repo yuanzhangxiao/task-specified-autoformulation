@@ -44,9 +44,6 @@ def package(
     expected = t2_breadth.fitted.INTAKE if fitted_run else t2_breadth.INTAKE
     if reviewed["artifact_sha256"] != expected:
         raise ValueError("Different T2 training intake")
-    harmony_vocab.verify(harmony)
-    repo = t2_breadth.REPO
-    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True)
     tracked = [
         "src",
         "pyproject.toml",
@@ -59,6 +56,21 @@ def package(
         tracked.append("scripts/hpc/start_t2_fresh_20b_aces.sh")
     if fitted_20b:
         tracked.append("scripts/hpc/start_t2_fitted_20b_aces.sh")
+    return package_committed(destination, name, tracked, input_name, intake, harmony)
+
+
+def package_committed(
+    destination: Path,
+    name: str,
+    tracked: list[str],
+    input_name: str,
+    intake: Path,
+    harmony: Path,
+) -> Path:
+    """Build a checksummed delivery with the pinned offline vocabulary."""
+    harmony_vocab.verify(harmony)
+    repo = t2_breadth.REPO
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True)
     source = subprocess.check_output(
         ["git", "archive", "--format=tar", commit.strip(), *tracked], cwd=repo
     )

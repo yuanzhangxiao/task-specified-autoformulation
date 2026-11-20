@@ -121,19 +121,23 @@ def reconcile(root: Path, wave: Path) -> dict:
         return {"status": "no_submission_intent"}
     argv = json.loads(intent.read_text())["argv"]
     name = _value(argv, "job-name")
-    if (
-        name
-        not in {
+    workers = dict.fromkeys(
+        (
             "phasec-t2-breadth",
             "phasec-t2-depth3",
             "phasec-t2-fitted",
             "phasec-t2-fresh-20b",
             "phasec-t2-fitted-20b",
-        }
+        ),
+        "t2-breadth",
+    )
+    workers["phasec-topo-edit-20b"] = "topology-repair"
+    if (
+        name not in workers
         or _value(argv, "output") != str(root / "logs/propose-%j.out")
         or _value(argv, "error") != str(root / "logs/propose-%j.err")
         or Path(argv[-2]).name != "run_meal_insulin_revision_aces.sh"
-        or argv[-1] != "t2-breadth"
+        or argv[-1] != workers[name]
     ):
         raise ValueError("Original sbatch intent does not address this T2 result root")
     reply_path = wave / "propose.reply.json"

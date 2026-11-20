@@ -1,5 +1,7 @@
 # Autoformalism Phase 1 Implementation Context
 
+The [matched-trajectory topology repair experiment](PHASE_C_TOPOLOGY_REPAIR.md) replays fresh seed 102, enumerates direct and mediated dependency edits, and gives GPT-OSS-20B the same public witness for five independent draws.
+
 The two-parent T2-easy construction run asks the 120B proposer for five independent
 patches to each fitted model. The meal-memory branch targets early insulin peaks
 on shifted meals. The glucose-sigmoid branch targets excessive late insulin after

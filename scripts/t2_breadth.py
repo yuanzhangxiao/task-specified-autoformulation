@@ -50,6 +50,7 @@ FRESH_20B = "t2-fresh-public-targets-20b-1"
 FITTED_20B = "t2-fitted-independent-20b-1"
 FITTED_SEEDS = tuple(range(100, 120))
 INTAKE = "db0b5e78406147a8482c1b05f9d2463dacddbb2937f4f0f542ba9d74700a064c"
+TOPOLOGY_20B = "matched-topology-repair-20b-1"
 SEEDS = tuple(range(100, 105))
 GROUPS = ("c15", "c21", "fresh")
 MAX_CORRECTIONS = 3
@@ -535,7 +536,9 @@ def _ask(
     directory = root / "steps" / slot
     request = {
         "system": system,
-        "user": json.dumps(
+        "user": packet
+        if isinstance(packet, str)
+        else json.dumps(
             packet, sort_keys=True, ensure_ascii=False, separators=(",", ":")
         ),
         "response_model": schema,

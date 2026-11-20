@@ -21,18 +21,28 @@ from scripts.submit_structural_revision_aces import (
 )
 
 
+def _load(root):
+    if _read(root / "plan.json")["protocol"] == campaign.TOPOLOGY_20B:
+        from scripts import topology_repair_20b
+
+        return topology_repair_20b.load(root)
+    return campaign.load(root)
+
+
 def execution(plan, image, snapshot):
-    fresh = plan["protocol"] == campaign.FRESH_20B
+    fresh = plan["protocol"] in (campaign.FRESH_20B, campaign.TOPOLOGY_20B)
     values = aces.execution_identity(
         plan,
         image,
         snapshot,
         entrypoints=tuple(plan["entrypoints"]),
         model_size="20b"
-        if plan["protocol"] in (campaign.FRESH_20B, campaign.FITTED_20B)
+        if plan["protocol"]
+        in (campaign.FRESH_20B, campaign.FITTED_20B, campaign.TOPOLOGY_20B)
         else "120b",
     )
     protocols = {
+        campaign.TOPOLOGY_20B: "topology-repair-aces-1",
         campaign.PROTOCOL: "t2-three-origin-aces-2",
         campaign.fitted.PROTOCOL: "t2-fitted-residual-aces-1",
         campaign.FRESH_20B: "t2-fresh-public-targets-aces-1",
@@ -52,7 +62,7 @@ def execution(plan, image, snapshot):
 
 
 def verify(root, check_assets=False):
-    plan, _ = campaign.load(root)
+    plan, _ = _load(root)
     record = _read(root / "execution.json")
     image, snapshot = record["image_sha256"], record["snapshot"]
     if check_assets:
@@ -72,7 +82,8 @@ def bind(root, runtime, endpoint):
 def _assets(plan):
     return (
         aces._assets("20b")
-        if plan["protocol"] in (campaign.FRESH_20B, campaign.FITTED_20B)
+        if plan["protocol"]
+        in (campaign.FRESH_20B, campaign.FITTED_20B, campaign.TOPOLOGY_20B)
         else aces._assets()
     )
 
@@ -140,8 +151,15 @@ def scheduler_status(root: Path) -> dict:
 def submit(root, resume=False):
     root = root.resolve()
     with _lock(root / "submission-lock"):
-        plan, _ = campaign.load(root)
-        if len(campaign._rows(root, plan)) == len(campaign._names(plan)):
+        plan, _ = _load(root)
+        trial = plan["protocol"] == campaign.TOPOLOGY_20B
+        if trial:
+            from scripts import topology_repair_20b
+
+            complete = topology_repair_20b.status(root)["status"] == "complete"
+        else:
+            complete = len(campaign._rows(root, plan)) == len(campaign._names(plan))
+        if complete:
             return {"status": "already_complete", "results": str(root)}
         base = root / "submissions"
         waves = sorted(base.glob("wave-*"))
@@ -194,6 +212,8 @@ def submit(root, resume=False):
             job_name, tag = "phasec-t2-fresh-20b", "t2-fresh-20b"
         elif plan["protocol"] == campaign.FITTED_20B:
             job_name, tag = "phasec-t2-fitted-20b", "t2-fitted-20b"
+        if trial:
+            job_name, tag = "phasec-topo-edit-20b", "topology-edit"
         argv = [
             "sbatch",
             "--parsable",
@@ -216,7 +236,7 @@ def submit(root, resume=False):
             f"--output={root}/logs/propose-%j.out",
             f"--error={root}/logs/propose-%j.err",
             str(campaign.REPO / "scripts/hpc/run_meal_insulin_revision_aces.sh"),
-            "t2-breadth",
+            "topology-repair" if trial else "t2-breadth",
         ]
         if earlier:
             _seal(wave / "predecessor-check.json", earlier)

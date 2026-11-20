@@ -14,6 +14,9 @@ case "${1:-insulin}" in
   t2-breadth)
     AF_CLI="$AF_REPO_ROOT/scripts/t2_breadth.py"
     AF_SUBMIT="$AF_REPO_ROOT/scripts/submit_t2_breadth.py" ;;
+  topology-repair)
+    AF_CLI="$AF_REPO_ROOT/scripts/topology_repair_20b.py"
+    AF_SUBMIT="$AF_REPO_ROOT/scripts/submit_t2_breadth.py" ;;
   *) echo 'Unknown construction worker.' >&2; exit 2 ;;
 esac
 if ! "$AF_PYTHON" "$AF_CLI" --help >/dev/null 2>&1; then
