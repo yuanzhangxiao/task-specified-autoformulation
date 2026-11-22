@@ -2,6 +2,8 @@
 
 A differential target with a closed set of upstream states must evolve identically in two runs when those states receive equal initial information and equal forcing histories, the laws and parameters are shared, and solutions are unique. The repair generator tests whether a local dependency edit breaks that equality argument. All inputs to this check come from the public training split and the declared forecast contract.
 
+The [mathematical formulation for pre-proposal screening](PHASE_C_PREPROPOSAL_TOPOLOGY_FORMULATION.md) develops the finite search problem, its computational limits and its relation to earlier network inference methods.
+
 ## Reuse on another benchmark
 
 Supply a construction `Draft`, sealed `TrainingCompatibilityEvidence`, a differential target, two training trajectory IDs, one shared sample time, and an explicit list of sources allowed at prediction time. The core entry points are `generate_repairs` and `assess_edit` in `autoformalism.search.topology_repair_generator`. The selected observation intervals must be disjoint, and the unedited topology must imply equal target values for the pair. Missing or different hidden initial conditions can invalidate an equality argument.
