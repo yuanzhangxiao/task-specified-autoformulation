@@ -51,6 +51,7 @@ FITTED_20B = "t2-fitted-independent-20b-1"
 FITTED_SEEDS = tuple(range(100, 120))
 INTAKE = "db0b5e78406147a8482c1b05f9d2463dacddbb2937f4f0f542ba9d74700a064c"
 TOPOLOGY_20B = "matched-topology-repair-20b-1"
+PREPROPOSAL_20B = "preproposal-scientific-selection-20b-1"
 SEEDS = tuple(range(100, 105))
 GROUPS = ("c15", "c21", "fresh")
 MAX_CORRECTIONS = 3
@@ -530,6 +531,8 @@ def _ask(
     token_transport,
     prefix,
     ceiling,
+    *,
+    sampling_step: str | None = None,
 ):
     """One durable generation slot, including failures and interrupted requests."""
     identity = content_hash([plan["artifact_sha256"], slot])
@@ -542,12 +545,13 @@ def _ask(
             packet, sort_keys=True, ensure_ascii=False, separators=(",", ":")
         ),
         "response_model": schema,
-        "step": slot,
+        "step": sampling_step if sampling_step is not None else slot,
         "attempt": 0,
     }
-    key = content_hash(
-        [identity, seed, system, request["user"], schema.model_json_schema()]
-    )
+    key_parts = [identity, seed, system, request["user"], schema.model_json_schema()]
+    if sampling_step is not None:
+        key_parts.append(sampling_step)
+    key = content_hash(key_parts)
     path = directory / "reply.json"
     if path.exists():
         reply = sealed_read(path)

@@ -177,7 +177,11 @@ class FiveGlucoseRepairs(StrictSchema):
 
 
 def check_topology(
-    topology: Topology, context: ValidationContext, brief: PublicScientificBrief
+    topology: Topology,
+    context: ValidationContext,
+    brief: PublicScientificBrief,
+    *,
+    initial_state_dependencies: dict[str, list[str]] | None = None,
 ):
     """Check declared graph edges before spending a call on functions."""
     nodes = {x.name: x for x in topology.components}
@@ -217,8 +221,12 @@ def check_topology(
             }
         ).static_order()
     )
+    relevant = {src: set(receivers) for src, receivers in graph.items()}
+    for state, sources in (initial_state_dependencies or {}).items():
+        for source in sources:
+            relevant.setdefault(source, set()).add(state)
     for name in nodes:
-        if not any(_path(graph, name, t) for t in targets):
+        if not any(_path(relevant, name, t) for t in targets):
             raise ValueError(f"{name} has no path to an output.")
     for req in brief.requirements:
         for src in req.drivers:

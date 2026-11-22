@@ -131,6 +131,7 @@ def reconcile(root: Path, wave: Path) -> dict:
         ),
         "t2-breadth",
     )
+    workers["phasec-preselect-20b"] = "preproposal-selection"
     workers["phasec-topo-edit-20b"] = "topology-repair"
     if (
         name not in workers

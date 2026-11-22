@@ -14,6 +14,9 @@ case "${1:-insulin}" in
   t2-breadth)
     AF_CLI="$AF_REPO_ROOT/scripts/t2_breadth.py"
     AF_SUBMIT="$AF_REPO_ROOT/scripts/submit_t2_breadth.py" ;;
+  preproposal-selection)
+    AF_CLI="$AF_REPO_ROOT/scripts/preproposal_selection_20b.py"
+    AF_SUBMIT="$AF_REPO_ROOT/scripts/submit_t2_breadth.py" ;;
   topology-repair)
     AF_CLI="$AF_REPO_ROOT/scripts/topology_repair_20b.py"
     AF_SUBMIT="$AF_REPO_ROOT/scripts/submit_t2_breadth.py" ;;
