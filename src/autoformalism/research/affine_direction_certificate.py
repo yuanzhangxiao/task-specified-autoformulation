@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 from fractions import Fraction
-from math import isfinite
+from math import inf, isfinite, nextafter
 
 import numpy as np
 
@@ -21,7 +21,7 @@ def _unverified(reason: str) -> dict:
     return {"status": "unverified", "reason": reason}
 
 
-def _flux_and_threshold(node: ast.expr, target: str) -> tuple[ast.expr, float]:
+def _flux_and_threshold(node: ast.expr, target: str) -> tuple[ast.expr, float | None]:
     """Recognize the exact implemented depletion taper; otherwise keep the full RHS."""
     # Extract possible F and scale, then check every node against the complete
     # production template. Any other use of the target remains a state input.
@@ -47,7 +47,7 @@ def _flux_and_threshold(node: ast.expr, target: str) -> tuple[ast.expr, float]:
             ).body
             if ast.dump(expected) == identity:
                 return base, float(scale)
-    return node, 0.0
+    return node, None
 
 
 def _degree(node: ast.AST, driver: str) -> int:
@@ -90,8 +90,17 @@ def _values(row, name):
     return np.asarray(row.inputs[name])
 
 
+def _outward(value: Fraction, *, upper: bool) -> float:
+    """Round a witness endpoint to float in the conservative direction."""
+    result = float(value)
+    relative = Fraction(result) - value
+    if (upper and relative < 0) or (not upper and relative > 0):
+        return nextafter(result, inf if upper else -inf)
+    return result
+
+
 def _reference(row, target, channels, delta, initial_error, threshold):
-    """Bound F at constant forcing using observed endpoints and monotonicity."""
+    """Bound the constant raw rate, including a partially open depletion gate."""
     t, y = row.time, row.targets[target]
     if len(t) < 2:
         return None
@@ -101,20 +110,39 @@ def _reference(row, target, channels, delta, initial_error, threshold):
         if np.any(v != v[0]):
             return None
         ref[name] = float(v[0])
-    # Constant raw F has a constant sign even under the recognized taper.
-    # Hence the smaller of the two endpoint lower bounds is a valid bound
-    # throughout the interval; no unobserved constancy assumption is needed.
-    if y[0] - initial_error < threshold or y[-1] - delta < threshold:
-        return None
-    if min(y[0] - initial_error, y[-1] - delta) <= 0:
-        return None
-    # Retain the general bound for near-equilibrium references. Effective
-    # target errors include both measurement uncertainty and fitting tolerance.
-    t0, t1 = map(Fraction, (t[0], t[-1]))
     start, end = map(Fraction, (y[0], y[-1]))
-    err = Fraction(delta) + Fraction(initial_error)
-    lo = (end - start - err) / (t1 - t0)
-    hi = (end - start + err) / (t1 - t0)
+    dt = Fraction(t[-1]) - Fraction(t[0])
+    err = delta + Fraction(initial_error)
+    lower, upper = (end - start - err) / dt, (end - start + err) / dt
+    first, last = start - Fraction(initial_error), end - delta
+    m = Fraction(1)
+    if threshold is not None:
+        # At constant F the scalar trajectory is monotone, even under the taper.
+        # Its minimum is bounded below by the smaller permitted endpoint.
+        m = min(m, min(first, last) / Fraction(threshold))
+        if m <= 0:
+            return None
+    # If F>=0, mean rate = F. If F<0, F <= mean rate <= m*F.
+    lo = lower / m if lower < 0 else lower
+    hi = upper
+    try:
+        raw_display = [_outward(lo, upper=False), _outward(hi, upper=True)]
+        endpoint_display = [_outward(first, upper=False), _outward(last, upper=False)]
+        delta_display = _outward(delta, upper=True)
+        if not all(map(isfinite, raw_display + endpoint_display + [delta_display])):
+            return None
+    except OverflowError:
+        return None
+    assumptions = ["The raw RHS is constant over the complete reference interval."]
+    if threshold is None:
+        assumptions.append(
+            "The target has no depletion gate; its sign is unrestricted."
+        )
+    else:
+        assumptions.append(
+            "A nonnegative raw rate is unchanged. A negative raw rate is multiplied "
+            "by min(1,max(0,target/scale)). The target is monotone at constant forcing."
+        )
     return (
         {
             "event": row.trajectory_id,
@@ -123,10 +151,19 @@ def _reference(row, target, channels, delta, initial_error, threshold):
             "initial_target": y[0],
             "observed_final": y[-1],
             "initial_error": initial_error,
-            "target_error": delta,
+            "target_error": delta_display,
             "gate_threshold": threshold,
-            "minimum_permitted_endpoint": min(y[0] - initial_error, y[-1] - delta),
-            "derivative_bound": [float(lo), float(hi)],
+            "minimum_permitted_endpoint": min(endpoint_display),
+            "endpoint_lower_bounds": endpoint_display,
+            "minimum_gate_multiplier": _outward(m, upper=False),
+            "derivative_bound": raw_display,
+            "exact_bounds": {
+                "endpoint_lower": [str(first), str(last)],
+                "mean_derivative": [str(lower), str(upper)],
+                "minimum_gate_multiplier": str(m),
+                "raw_derivative": [str(lo), str(hi)],
+            },
+            "assumptions": assumptions,
         },
         lo,
         hi,
@@ -175,6 +212,10 @@ def _best_window(row, target, values, live, sign, rate, delta):
         "required_change": float(required),
         "maximum_permitted_change": float(permitted),
         "excess": float(required - permitted),
+        "exact_change": {
+            "required": str(required),
+            "maximum_permitted": str(permitted),
+        },
     }
 
 
@@ -268,7 +309,7 @@ def certify(
         for k in channels
     ):
         return _unverified("Requires complete piecewise-linear forcing knots.")
-    delta = tolerance + measurement
+    delta = Fraction(tolerance) + Fraction(measurement)
     drivers = [name for name in channels if _degree(base, name) == 1]
     if not drivers:
         return _unverified("No certified affine driver in the raw derivative.")
@@ -297,18 +338,25 @@ def certify(
                         "rise": rise,
                         "fall": fall,
                         "checks": [
-                            {
-                                "quantity": "reference initial lower bound",
-                                "value": ref["initial_target"] - ref["initial_error"],
-                                "relation": ">=",
-                                "bound": threshold,
-                            },
-                            {
-                                "quantity": "reference final lower bound",
-                                "value": ref["observed_final"] - delta,
-                                "relation": ">=",
-                                "bound": threshold,
-                            },
+                            *(
+                                [
+                                    {
+                                        "quantity": f"reference {position} lower bound",
+                                        "value": endpoint,
+                                        "relation": ">=",
+                                        "bound": min(
+                                            threshold, ref["minimum_permitted_endpoint"]
+                                        ),
+                                    }
+                                    for position, endpoint in zip(
+                                        ("initial", "final"),
+                                        ref["endpoint_lower_bounds"],
+                                        strict=True,
+                                    )
+                                ]
+                                if threshold is not None
+                                else []
+                            ),
                             {
                                 "quantity": "required rise for slope times side <= 0",
                                 "value": rise["required_change"],
