@@ -147,3 +147,16 @@ The paired experiment takes the three original T2 equations with a certified 1 p
 `scripts/pointwise_repair_fitting.py` compares each admitted revision with a matched refit of the original parent using training trajectories. Record separately whether the output parses, whether it changes the equation, whether a contradiction can still be proved, whether simulation succeeds, and the maximum observed insulin error at the fitted vector. Removing the proof only establishes that the earlier argument no longer excludes the candidate. The fitted predictions show whether that particular vector satisfies the requested tolerance.
 
 The standalone ACES entry point is `scripts/hpc/start_pointwise_repair.sh`. Its `preflight`, `run`, `status`, `resume` and `inspect` actions use the sealed three-parent training intake in the committed package. The fitting CLI also needs the original training campaign containing the three parent fit receipts. Both stages leave formal validation and test closed.
+
+### Checking whether a scalar repair can reproduce the order of training trajectories
+
+For a rate of the form `y' = a*y + b*x + q(w)`, consider two training events with equal observed initial `y` and identical supplied histories `w`. Their predicted difference at time `t` is the integral of `b*(x1(s)−x2(s))*exp(a*(t−s))` over the interval. If one history of `x` stays above the other, the sign of that difference is fixed by the shared coefficient `b`. One contrary pair rules out a nonnegative coefficient and a second contrary pair rules out a nonpositive coefficient. Half the smaller of the two observed separations gives a lower bound on the largest absolute error at the observed times.
+
+The research check uses exact forcing, observed initial values, and complete linear or previous-value interpolation on matching grids. It abstains when the required ordering or equation form cannot be verified. Its conclusion concerns a declared pointwise accuracy requirement. A pooled NMSE objective can still improve in the presence of such an error.
+
+To replay the original 18 replies, use the directory containing the archived generation plan, intake, candidate and call receipts:
+
+    python -m scripts.audit_ordered_insulin_repairs \
+        --generation path/to/generation --output path/to/ordered-training-audit.json
+
+The replay preserves each original decision and audits the admitted equations. For each newly certified conflict it also tries one new linear term per permitted supplied history and reruns the order check. An alternative that escapes this check is a candidate for fitting. No coefficients are estimated in the replay.
