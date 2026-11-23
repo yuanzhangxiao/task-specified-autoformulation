@@ -2,6 +2,8 @@
 
 **Design for discussion.** Phase C already passes training evidence to the function stage. Given an admitted topology, the proposer writes expressions for its processes and equations. I propose that the runtime first compare a few function families against measurements conditional on the sources of that particular equation. The proposer can use scientific knowledge to choose among them or offer another expression.
 
+The new topology export gives each variable’s type, RHS sources and initialization. It leaves open how to group the sources into terms. For example, the same edges from glucose and insulin can represent an additive production and loss law or a joint response. First assemble candidate balances under the public requirements. In the basin task one volumetric transfer contributes $-Q/A_{\rm up}$ upstream and $+Q/A_{\rm down}$ downstream. Then choose forms for the unknown processes.
+
 ## What a trajectory tells us
 
 | Equation | Evidence the runtime can use | What the evidence can distinguish |
@@ -10,7 +12,27 @@
 | Observed differential state, e.g. \(\dot I=F(x)\) | For each interval, compare \(I(b)-I(a)\) with \(\int_a^b F(x(t))\,dt\). Use several interval widths and respect input discontinuities. | The observations constrain the sum of all rates in the insulin balance. An insulin peak says that production and loss balance at that time. It does not identify either function individually. |
 | Equation with latent arguments or a shared process | Simulate the coupled equations with their declared initializations, using one parameter vector and the same process law in every equation that uses it. | Different hidden mechanisms can give the same observable trajectory. Preserve alternatives where the available observations cannot distinguish them. |
 
-## A worked T2-easy example
+## When the balance isolates one function
+
+The coupled-basin public specification gives the basin areas, the overflow crests, and the two measured inflows. In training event `train_003` the upstream water starts at its crest and upstream inflow is zero throughout. The upstream basin therefore supplies zero transfer. The downstream balance directly identifies the average outlet discharge on each interval.
+
+\[
+\overline Q_{\rm out}=\overline Q_{\rm in,down}-A_{\rm down}\frac{h(b)-h(a)}{b-a}.
+\]
+
+Compare three one-parameter laws, \(Q=k[\max(h-h_{\rm crest},0)]^p\), with \(p=1,1.5,2\). Fit \(k\) separately for each power by least squares over the 60 four-minute intervals of `train_003`. Average the inlet at the two endpoints using its public linear interpolation. Approximate the interval mean of the powered head by averaging its two endpoint values.
+
+A second training event supplies a check at lower water levels. In `train_000`, the upstream basin needs \(800(0.35-0.20)=120\) m³ of water to reach its crest. Integrated upstream inflow first reaches that volume at minute 16. The four complete intervals up to that minute also have zero upstream transfer.
+
+| Trial power | Outlet-flow RMSE on the four intervals of the second training event (m³/min) |
+|---:|---:|
+| 1 | 0.970 |
+| 1.5 | 0.083 |
+| 2 | 0.289 |
+
+This favors the three-halves law for the outlet among the three candidates. The four check intervals cover a narrow range of downstream depths. Whole-system rollout across other events remains the relevant validation. The reusable algorithmic operation is to isolate an unknown process when the public balance and measured inputs permit it. When several rates remain unknown, fit them together.
+
+## When two different histories give similar arguments
 
 Take the saved T2 inventory-0 graph `g_9885c80dc2db2b32`, which admits \(\dot I=F(G_p)\). On the public training trajectory `train_001`, the administered insulin is zero throughout. The two-minute average rate is \([I(t+1)-I(t-1)]/2\) on this one-minute grid.
 
