@@ -105,6 +105,13 @@ def test_deduplicate_admitted_selection_origins_and_keep_added_latents(
     with tarfile.open(archive) as bundle:
         assert json.load(bundle.extractfile("admitted-graphs.json")) == result
     assert "admitted-graphs.json" in {p.name for p in tmp_path.iterdir()}
+    # A later origin for an already exported graph also needs a matching digest.
+    mismatched = deepcopy(summary)
+    mismatched["cases"][0]["draws"][1]["graph_first"]["parent"]["sources"]["store"] = [
+        "x"
+    ]
+    with pytest.raises(ValueError, match="identity"):
+        admitted_graphs(tmp_path, mismatched, intake)
     first["graph"]["sources"]["store"].append("invented")
     with pytest.raises(ValueError, match="identity"):
         admitted_graphs(tmp_path, summary, intake)

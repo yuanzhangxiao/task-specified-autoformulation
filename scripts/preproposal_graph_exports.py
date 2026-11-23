@@ -120,11 +120,12 @@ def admitted_graphs(root: Path, summary: dict, intake: dict) -> dict:
 
         for digest, graph, origin in _selected(root, key, group):
             identity = (key, digest)
+            canonical = _canonical(case, frozen, schema, graph, digest)
             if identity not in rows:
                 rows[identity] = {
                     "case_id": key,
                     "structure_sha256": digest,
-                    "graph": _canonical(case, frozen, schema, graph, digest),
+                    "graph": canonical,
                     "origins": [],
                 }
             rows[identity]["origins"].append(origin)
