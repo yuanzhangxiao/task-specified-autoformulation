@@ -22,7 +22,11 @@ from scripts.submit_structural_revision_aces import (
 
 
 def _trial(protocol):
-    if protocol in (campaign.PREPROPOSAL_20B, campaign.PREPROPOSAL_MATCHED_20B):
+    if protocol in (
+        campaign.PREPROPOSAL_20B,
+        campaign.PREPROPOSAL_MATCHED_20B,
+        campaign.COMPLETE_GRAPHS_20B,
+    ):
         from scripts import preproposal_selection_20b
 
         return preproposal_selection_20b
@@ -58,10 +62,12 @@ def execution(plan, image, snapshot):
             campaign.TOPOLOGY_20B,
             campaign.PREPROPOSAL_20B,
             campaign.PREPROPOSAL_MATCHED_20B,
+            campaign.COMPLETE_GRAPHS_20B,
         )
         else "120b",
     )
     protocols = {
+        campaign.COMPLETE_GRAPHS_20B: "complete-graphs-20b-aces-1",
         campaign.PREPROPOSAL_20B: "preproposal-selection-aces-1",
         campaign.PREPROPOSAL_MATCHED_20B: "preproposal-matched-selection-aces-2",
         campaign.TOPOLOGY_20B: "topology-repair-aces-1",
@@ -111,6 +117,7 @@ def _assets(plan):
             campaign.TOPOLOGY_20B,
             campaign.PREPROPOSAL_20B,
             campaign.PREPROPOSAL_MATCHED_20B,
+            campaign.COMPLETE_GRAPHS_20B,
         )
         else aces._assets()
     )
@@ -255,6 +262,12 @@ def submit(root, resume=False):
             job_name, tag, worker = (
                 "phasec-matched-20b",
                 "matched-select",
+                "preproposal-selection",
+            )
+        elif plan["protocol"] == campaign.COMPLETE_GRAPHS_20B:
+            job_name, tag, worker = (
+                "phasec-graphs-20b",
+                "graph-portfolio",
                 "preproposal-selection",
             )
         argv = [

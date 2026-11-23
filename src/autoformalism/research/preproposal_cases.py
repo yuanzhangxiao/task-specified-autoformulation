@@ -334,8 +334,23 @@ def source_checklist(case: dict) -> dict:
     }
     histories = tuple(case["histories"])
     by_variable = {}
+    measured_auxiliaries = (
+        set(evidence.context.auxiliaries) if case.get("check_all_measured") else set()
+    )
     for item in case["inventory"]:
         name = item["name"]
+        if (
+            case.get("check_all_measured")
+            and name in set(evidence.context.targets) | measured_auxiliaries
+            and (item["kind"] == "algebraic" or name in measured_auxiliaries)
+        ):
+            by_variable[name] = {
+                "status": "checked_on_complete_graph",
+                "check": "Equal instantaneous arguments imply equal values."
+                if item["kind"] == "algebraic"
+                else "Compare initial values and upstream histories.",
+            }
+            continue
         if item["kind"] == "algebraic":
             by_variable[name] = {"status": "algebraic"}
             continue

@@ -52,6 +52,7 @@ FITTED_SEEDS = tuple(range(100, 120))
 INTAKE = "db0b5e78406147a8482c1b05f9d2463dacddbb2937f4f0f542ba9d74700a064c"
 TOPOLOGY_20B = "matched-topology-repair-20b-1"
 PREPROPOSAL_20B = "preproposal-scientific-selection-20b-1"
+COMPLETE_GRAPHS_20B = "complete-graphs-20b-1"
 PREPROPOSAL_MATCHED_20B = "preproposal-matched-selection-20b-2"
 SEEDS = tuple(range(100, 105))
 GROUPS = ("c15", "c21", "fresh")

@@ -7,7 +7,11 @@ from typing import Annotated, Literal
 
 from pydantic import Field, create_model
 
-from autoformalism.research.preproposal_selection import SelectionCase
+from autoformalism.research.preproposal_observed_gate import (
+    ObservedGraphGate,
+    check_bound_memories,
+)
+from autoformalism.research.preproposal_selection import DeclaredVariable, SelectionCase
 from autoformalism.research.t2_breadth import Component, Topology, check_topology
 from autoformalism.schemas.base import Identifier, StrictSchema
 from autoformalism.schemas.staged_topology import PublicScientificBrief
@@ -48,10 +52,19 @@ class CommonLatentInitial(LatentInitial):
     rule: SharedInitial
 
 
+class NewLatent(DeclaredVariable):
+    """Declare a model-owned variable together with the sources of its equation."""
+
+    sources: Sources
+
+
 def topology_schema(
-    case: SelectionCase, *, shared_hidden_initials: bool = False
+    case: SelectionCase,
+    *,
+    shared_hidden_initials: bool = False,
+    allow_topology_latents: bool = False,
 ) -> type[StrictSchema]:
-    """Pin each receiver and its type to the completed variable stage."""
+    """Require an equation for each existing variable; optionally extend the graph."""
     # Aliases allow legal scientific identifiers that shadow Pydantic attributes.
     equations = create_model(
         "InventorySources",
@@ -68,7 +81,28 @@ def topology_schema(
         hypothesis=(str, Field(min_length=1, max_length=1500)),
         sources=(equations, ...),
         latent_initializers=(tuple[initial, ...], Field(max_length=64)),
+        **(
+            {"new_latents": (tuple[NewLatent, ...], Field(default=(), max_length=64))}
+            if allow_topology_latents
+            else {}
+        ),
     )
+
+
+def reply_schema(case: SelectionCase, frozen: dict) -> type[StrictSchema]:
+    """Return the proposer schema for the experiment settings."""
+    return topology_schema(
+        case,
+        shared_hidden_initials=frozen.get("shared_hidden_initials", False),
+        allow_topology_latents=frozen.get("allow_topology_latents", False),
+    )
+
+
+def graph_sources(reply: dict) -> dict:
+    """View fixed and newly declared equations together, preserving source lists."""
+    return reply["sources"] | {
+        entry["name"]: entry["sources"] for entry in reply.get("new_latents", ())
+    }
 
 
 def _choice(case, choice):
@@ -151,6 +185,26 @@ def topology_messages(case, choice, frozen_case, *, source_checklist=None):
         if row is not None
         else ""
     )
+    extension_instruction = ""
+    if frozen_case.get("allow_topology_latents"):
+        packet["inventory_roles"] = frozen_case.get("inventory_roles", {})
+        packet["assigned_memory_states"] = frozen_case.get("mechanism_bindings", [])
+        packet["available_rhs_names"] = sorted(
+            {v.name for v in case.inventory}
+            | set(frozen_case["histories"])
+            | set(packet["fixed_covariates"])
+            | {evidence.context.time_symbol}
+        )
+        packet["initializer_owners"] = sorted(_state_names(case) - observed.keys())
+        extension_instruction = (
+            "Choose RHS names from available_rhs_names or a variable you explicitly "
+            "declare in new_latents with its name, kind, and sources. Use [] when no "
+            "new variable is needed. A history or initial-value label is not an RHS "
+            "name. A source can reach the target through another variable. Route "
+            "each assigned memory state along its public requirement's pathway. Give "
+            "latent_initializers only for initializer_owners and new differential "
+            "states. "
+        )
     latent_instruction = (
         "give a shared constant (mode value, scope shared_training). Every run "
         "starts with the same hidden initial values. "
@@ -162,6 +216,7 @@ def topology_messages(case, choice, frozen_case, *, source_checklist=None):
         "Propose a complete topology for the declared variables. List sources for each "
         "derivative or algebraic value. Use the generated values of modeled variables. "
         + selected_instruction
+        + extension_instruction
         + "Include the other public pathways. For each latent differential state "
         + latent_instruction
         + "The runtime supplies "
@@ -189,12 +244,36 @@ def _actual_assessment(target, actual, evidence, minimum_target_gap=0.0):
     }
 
 
+def make_topology_assessor(case, frozen_case):
+    """Prepare one sealed training packet for many whole-graph evaluations."""
+    prepared = _inputs(case, frozen_case)
+    gate = (
+        ObservedGraphGate(prepared[0])
+        if frozen_case.get("check_all_measured")
+        else None
+    )
+
+    def assess(choice, value):
+        return assess_topology(
+            case, choice, value, frozen_case, _prepared=prepared, _gate=gate
+        )
+
+    return assess
+
+
 def assess_topology(
-    case, choice, value, frozen_case, *, root_assessor=_actual_assessment
+    case,
+    choice,
+    value,
+    frozen_case,
+    *,
+    root_assessor=_actual_assessment,
+    _prepared=None,
+    _gate=None,
 ):
     """Check public paths and the information upstream of each measured state."""
     row = _choice(case, choice)[0] if choice is not None else None
-    evidence, brief = _inputs(case, frozen_case)
+    evidence, brief = _prepared or _inputs(case, frozen_case)
     context = evidence.context
     states = _state_names(case)
     generated = {v.name for v in case.inventory}
@@ -204,8 +283,41 @@ def assess_topology(
         "scientific_correctness_assessed": False,
     }
     try:
-        reply = topology_schema(case).model_validate(value).model_dump(by_alias=True)
-        graph = reply["sources"]
+        reply = (
+            topology_schema(
+                case,
+                allow_topology_latents=frozen_case.get("allow_topology_latents", False),
+            )
+            .model_validate(value)
+            .model_dump(by_alias=True)
+        )
+        additions = reply.get("new_latents", ())
+        new_names = [entry["name"] for entry in additions]
+        reserved = (
+            generated
+            | context.forcing_channels
+            | set(context.targets)
+            | set(context.unavailable_observed_channels)
+            | {context.time_symbol}
+            | {variable.name for variable in brief.public_variables}
+        )
+        if len(new_names) != len(set(new_names)) or reserved.intersection(new_names):
+            raise ValueError(
+                "Each new latent needs a unique name distinct from existing "
+                "variables and channels"
+            )
+        known = reserved | set(new_names)
+        for name in new_names:
+            prefix, _, suffix = name.partition("_")
+            if prefix in {"initial", "history"} and suffix in known:
+                raise ValueError(
+                    f"{name} is an information label. Give the new latent its own name."
+                )
+        generated.update(new_names)
+        states.update(
+            entry["name"] for entry in additions if entry["kind"] == "differential"
+        )
+        graph = graph_sources(reply)
         if any(len(src) != len(set(src)) for src in graph.values()):
             raise ValueError("Repeated source in a receiver's list")
         if len(graph) > brief.limits.generated_variables:
@@ -216,12 +328,12 @@ def assess_topology(
             hypothesis=reply["hypothesis"],
             components=tuple(
                 Component(
-                    name=v.name,
-                    kind="dynamic" if v.name in states else "algebraic",
-                    role=v.name,
-                    sources=graph[v.name],
+                    name=name,
+                    kind="dynamic" if name in states else "algebraic",
+                    role=name,
+                    sources=sources,
                 )
-                for v in case.inventory
+                for name, sources in graph.items()
             ),
         )
         handoff = GraphDependencyHandoff.model_validate(
@@ -275,6 +387,9 @@ def assess_topology(
                 for state, sources in initialization.items()
             },
         )
+        check_bound_memories(
+            graph, states, brief, frozen_case.get("mechanism_bindings", ())
+        )
     except ValueError as exc:
         return {
             **result,
@@ -285,8 +400,11 @@ def assess_topology(
 
     checks = {}
     exact_target = None
-    for target in context.targets:
-        if target not in states:
+    use_full_gate = frozen_case.get("check_all_measured", False)
+    gate = (_gate or ObservedGraphGate(evidence)) if use_full_gate else None
+    measured = sorted(generated & gate.measured) if gate else context.targets
+    for target in measured:
+        if gate is None and target not in states:
             continue
         upstream = _closure(target, graph)
         histories = (
@@ -298,12 +416,18 @@ def assess_topology(
         actual = {f"history:{v}" for v in histories} | {
             f"initial:{v}" for v in initials
         }
-        if target in observed:
-            gap = (
-                frozen_case.get("minimum_target_gap", 0.0)
-                if target == case.target
-                else 0.0
-            )
+        gap = (
+            frozen_case.get("minimum_target_gap", 0.0) if target == case.target else 0.0
+        )
+        if gate:
+            checks[target] = gate.assess(target, graph, states, initialization, gap) | {
+                "actual_options": sorted(actual)
+            }
+            if gap:
+                exact_target = gate.assess(
+                    target, graph, states, initialization, 0.0
+                ) | {"actual_options": sorted(actual)}
+        elif target in observed:
             checks[target] = root_assessor(target, actual, evidence, gap)
             if gap:
                 exact_target = root_assessor(target, actual, evidence, 0.0)
@@ -339,6 +463,17 @@ def assess_topology(
         "status": status,
         "public_graph_check": "passed",
         "missing_selected_or_required": missing,
+        **(
+            {
+                "training_check_scope": "Necessary conditions for joint reproduction "
+                "on training trajectories under the stated observation bounds. "
+                "Conditioning on an exact measured model variable tests its observed "
+                "value only; it supplies no rollout input. A selected target gap is "
+                "a contrast threshold and does not widen any conditioning bound."
+            }
+            if gate
+            else {}
+        ),
         "training_checks": checks,
         "exact_selected_target_check": exact_target or checks[case.target],
         "sources": graph,

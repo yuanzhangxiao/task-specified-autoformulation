@@ -16,6 +16,7 @@ from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.research import preproposal_selection as selection
 from autoformalism.staged_topology import content_hash
+from scripts import preproposal_graph_portfolio as portfolio
 from scripts import t2_breadth as pilot
 from scripts.construction_functions import file_hash
 from scripts.topology_repair_20b import SEEDS, SETTINGS
@@ -25,6 +26,7 @@ ENTRYPOINTS = (
     *pilot.ENTRYPOINTS,
     "scripts/topology_repair_20b.py",
     "scripts/preproposal_selection_20b.py",
+    "scripts/preproposal_graph_portfolio.py",
     "scripts/hpc/start_topology_repair_20b_aces.sh",
     "scripts/hpc/start_preproposal_selection_aces.sh",
 )
@@ -63,24 +65,36 @@ def _plan(payload: dict) -> dict:
     intake = selection.SelectionIntake.model_validate(payload["selection"])
     active = [c for c in intake.cases if selection.needs_selection(c)]
     matched = "source_checklists" in payload
+    entrypoints = ENTRYPOINTS
+    if matched:
+        entrypoints += ("scripts/hpc/start_preproposal_matched_aces.sh",)
+    if "graph_pools" in payload:
+        entrypoints += (portfolio.LAUNCHER, "scripts/preproposal_graph_exports.py")
+    base = {
+        "intake_sha256": content_hash(payload),
+        "settings": SETTINGS.model_dump(mode="json"),
+        "cases": [c.case_id for c in intake.cases],
+        "runtime_source": runtime_source_hash(),
+        "entrypoints": {p: file_hash(pilot.REPO / p) for p in entrypoints},
+        "test_data_opened": False,
+        "optimizer_calls": 0,
+        "automatic_followup": False,
+    }
+    if "graph_pools" in payload:
+        return {**base, **portfolio.design(intake.cases, payload)}
     branches = sum(min(selection.MAX_CHOICES, len(c.candidates)) for c in active)
     if matched:
         branches = sum(
             min(2 * selection.matched_count(c), len(c.candidates)) for c in active
         ) + len(active)
-    entrypoints = ENTRYPOINTS
-    if matched:
-        entrypoints += ("scripts/hpc/start_preproposal_matched_aces.sh",)
     plan = {
+        **base,
         "protocol": pilot.PREPROPOSAL_MATCHED_20B if matched else PROTOCOL,
-        "intake_sha256": content_hash(payload),
         "maximum_generation_requests": len(SEEDS) * (len(active) + branches),
         "maximum_selection_requests": len(SEEDS) * len(active),
         "maximum_topology_requests": len(SEEDS) * branches,
-        "settings": SETTINGS.model_dump(mode="json"),
         "seeds": list(SEEDS),
         "sampling_design": "common_provider_seed_by_base_seed_stage_and_rank",
-        "cases": [c.case_id for c in intake.cases],
         "request_sha256": {
             c.case_id: content_hash(
                 [
@@ -102,11 +116,6 @@ def _plan(payload: dict) -> dict:
             )
             for c in active
         },
-        "runtime_source": runtime_source_hash(),
-        "entrypoints": {p: file_hash(pilot.REPO / p) for p in entrypoints},
-        "test_data_opened": False,
-        "optimizer_calls": 0,
-        "automatic_followup": False,
     }
     if matched:
         plan.update(
@@ -122,8 +131,27 @@ def _plan(payload: dict) -> dict:
     return plan
 
 
-def prepare(root: Path, source: Path, *, matched: bool = False) -> dict:
+def prepare(
+    root: Path, source: Path, *, matched: bool = False, complete_graphs: bool = False
+) -> dict:
     """Rebuild public menus from frozen train-only evidence before submission."""
+    if complete_graphs:
+        with _lock(root / "prepare-lock"):
+            digest = file_hash(source)
+            if (root / "plan.json").exists():
+                plan, saved = load(root)
+                if saved.get("source_file_sha256") != digest:
+                    raise ValueError(
+                        "Graph portfolio inputs differ from this prepared run"
+                    )
+                return plan
+            verified = input_payload(source)
+            events = json.loads(source.read_text())["variable_exits"]
+            frozen = portfolio.portfolio_cases(verified["frozen_cases"], events)
+            payload = portfolio.prepare_payload(frozen)
+            payload["source_file_sha256"] = digest
+            sealed_write(root / "intake.json", payload)
+            return sealed_write(root / "plan.json", _plan(payload))
     payload = input_payload(source)
     if matched:
         from autoformalism.research.preproposal_cases import source_checklist
@@ -228,14 +256,19 @@ def _candidate_step(candidate_id: str) -> str:
     return "source-" + content_hash(candidate_id)
 
 
+def _vacuous_selection(case):
+    return {
+        "status": "selected" if case.candidates else "no_certified_cover",
+        "selected": [{"candidate_id": v.candidate_id} for v in case.candidates],
+    }
+
+
 def _matched_draw(case, frozen, checklist, plan, seed, prefix, ask):
     """Generate a blind graph per unique choice, including failed selections."""
     from autoformalism.research import preproposal_graph_repair as repair
     from autoformalism.research import preproposal_topology as topology
 
-    graph_schema = topology.topology_schema(
-        case, shared_hidden_initials=frozen.get("shared_hidden_initials", False)
-    )
+    graph_schema = topology.reply_schema(case, frozen)
     ask(
         prefix + "--graph-first",
         "graph-first",
@@ -243,13 +276,22 @@ def _matched_draw(case, frozen, checklist, plan, seed, prefix, ask):
         graph_schema,
         lambda value: repair.assess_and_repair(case, value, frozen),
     )
-    chosen = ask(
-        prefix + "--select",
-        "select",
-        selection.messages(case, source_checklist=checklist),
-        selection.selection_schema(case, matched=True),
-        lambda v: selection.assess(case, selection.SelectionReply.model_validate(v)),
-    )
+    if frozen.get("check_all_measured") and selection.needs_selection(case):
+        chosen = ask(
+            prefix + "--select", "select", *portfolio.source_ballot(case, checklist)
+        )
+    elif selection.needs_selection(case):
+        chosen = ask(
+            prefix + "--select",
+            "select",
+            selection.messages(case, source_checklist=checklist),
+            selection.selection_schema(case, matched=True),
+            lambda v: selection.assess(
+                case, selection.SelectionReply.model_validate(v)
+            ),
+        )
+    else:
+        chosen = _vacuous_selection(case)
     selected_ids = {c["candidate_id"] for c in chosen.get("selected", [])}
     selected_ids.update(plan["uniform_selections"][case.case_id][str(seed)])
     for option in case.candidates:
@@ -278,7 +320,7 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None) -> d
         plan, payload = load(root)
         intake = selection.SelectionIntake.model_validate(payload["selection"])
         for case in intake.cases:
-            if not selection.needs_selection(case):
+            if not selection.needs_selection(case) and "graph_pools" not in payload:
                 continue
             for seed in plan["seeds"]:
                 prefix = _prefix(case, seed)
@@ -299,6 +341,13 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None) -> d
                             endpoint,
                         )
 
+                    pool = payload.get("graph_pools", {}).get(case.case_id)
+                    if pool and pool["candidates"]:
+                        ask(
+                            prefix + "--graph-rank",
+                            "graph-rank",
+                            *portfolio.graph_ballot(case, pool),
+                        )
                     _matched_draw(
                         case,
                         payload["frozen_cases"][case.case_id],
@@ -345,17 +394,26 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None) -> d
         return status(root)
 
 
-def _matched_status(root, plan, case, group):
+def _matched_status(root, plan, case, group, pool=None):
     """Compare paired seed outcomes and track checker/selection failures separately."""
     portfolios = {"scientific": [], "uniform": []}
     paired = Counter()
     finished = 0
+    if pool is not None:
+        group["complete_graphs"] = portfolio.pool_status(
+            case,
+            pool,
+            plan["seeds"],
+            lambda seed: _read_stage(root, plan, _prefix(case, seed) + "--graph-rank"),
+        )
     for seed in plan["seeds"]:
         prefix = _prefix(case, seed)
         first = _read_stage(root, plan, prefix + "--graph-first") or {
             "status": "pending"
         }
         picked = _read_stage(root, plan, prefix + "--select") or {"status": "pending"}
+        if pool is not None and not selection.needs_selection(case):
+            picked = _vacuous_selection(case)
         ids = {
             "scientific": [item["candidate_id"] for item in picked.get("selected", [])],
             "uniform": plan["uniform_selections"][case.case_id][str(seed)],
@@ -378,7 +436,12 @@ def _matched_status(root, plan, case, group):
                 b["topology"]["status"] == "topology_screen_passed" for b in branches
             )
         if complete:
-            finished += 1
+            rank_done = (
+                pool is None
+                or not pool["candidates"]
+                or _read_stage(root, plan, prefix + "--graph-rank") is not None
+            )
+            finished += int(rank_done)
             if picked["status"] != "selected":
                 paired["scientific_selection_failed"] += 1
             elif passed["scientific"] and passed["uniform"]:
@@ -411,7 +474,7 @@ def _matched_status(root, plan, case, group):
         }
     group.update(
         seed_count=len(plan["seeds"]),
-        selections_per_arm=selection.matched_count(case),
+        selections_per_arm=min(len(case.candidates), selection.matched_count(case)),
         scientific_selection_status_counts=dict(
             Counter(d["scientific_selection"]["status"] for d in group["draws"])
         ),
@@ -450,9 +513,10 @@ def status(root: Path) -> dict:
             "draws": [],
         }
         if "source_checklists" in payload:
-            if active:
+            pool = payload.get("graph_pools", {}).get(case.case_id)
+            if active or pool is not None:
                 expected += len(plan["seeds"])
-                finished += _matched_status(root, plan, case, group)
+                finished += _matched_status(root, plan, case, group, pool)
             groups.append(group)
             continue
         choices = Counter()
@@ -504,10 +568,22 @@ def status(root: Path) -> dict:
             topology_status_counts=dict(topologies),
         )
         groups.append(group)
-    records = [
-        json.loads(p.read_text()) for p in sorted(root.glob("steps/*/calls/*.json"))
-    ]
+    receipts = sorted(root.glob("steps/*/calls/*.json"))
+    records = [json.loads(path.read_text()) for path in receipts]
+    costs = {}
+    if "graph_pools" in payload:
+        for path, receipt in zip(receipts, records, strict=True):
+            step = path.parents[1].name.rsplit("--", 1)[-1]
+            stage = "graph_from_source" if step.startswith("source-") else step
+            total = costs.setdefault(
+                stage, {"requests": 0, "observed_tokens": 0, "unknown_usage": 0}
+            )
+            total["requests"] += 1
+            usage = receipt.get("observed_total_tokens")
+            total["observed_tokens"] += usage or 0
+            total["unknown_usage"] += int(usage is None)
     return {
+        **({"provider_cost_by_stage": costs} if "graph_pools" in payload else {}),
         "status": "complete" if expected == finished else "incomplete",
         "expected_active_draws": expected,
         "completed_active_draws": finished,
@@ -527,6 +603,15 @@ def inspect(root: Path) -> dict:
     with _lock(root / "worker-lock"), _lock(root / "inspection-lock"):
         summary = status(root)
         atomic_json(root / "summary.json", summary)
+        exports = []
+        if any("complete_graphs" in c for c in summary["cases"]):
+            from scripts.preproposal_graph_exports import admitted_graphs
+
+            intake = sealed_read(root / "intake.json")
+            atomic_json(
+                root / "admitted-graphs.json", admitted_graphs(root, summary, intake)
+            )
+            exports.append("admitted-graphs.json")
         archive = root / "inspection.tar.gz"
         temporary = archive.with_suffix(".tmp")
         with tarfile.open(temporary, "w:gz") as tar:
@@ -534,6 +619,7 @@ def inspect(root: Path) -> dict:
                 "plan.json",
                 "intake.json",
                 "summary.json",
+                *exports,
                 "steps",
                 "results",
                 "execution.json",
@@ -551,10 +637,52 @@ def inspect(root: Path) -> dict:
     }
 
 
+def _portfolio_preview(case, payload):
+    from autoformalism.research import preproposal_graph_repair as repair
+    from autoformalism.research import preproposal_topology as topology
+
+    frozen = payload["frozen_cases"][case.case_id]
+    checklist = payload["source_checklists"][case.case_id]
+    pool = payload["graph_pools"][case.case_id]
+    entry = {"case_id": case.case_id, "pool_size": len(pool["candidates"])}
+
+    def show(key, messages, schema):
+        system, user = messages
+        entry[key] = {
+            "system": system,
+            "user": json.loads(user),
+            "schema": schema.model_json_schema(),
+        }
+
+    if pool["candidates"]:
+        messages, schema, _ = portfolio.graph_ballot(case, pool)
+        show("rank_graphs", messages, schema)
+    if selection.needs_selection(case):
+        messages, schema, _ = portfolio.source_ballot(case, checklist)
+        show("rank_sources", messages, schema)
+    schema = topology.reply_schema(case, frozen)
+    show("graph_first", repair.graph_first_messages(case, frozen), schema)
+    if case.candidates:
+        choice = selection.SelectionChoice(
+            **case.candidates[0].model_dump(), rationale="Selected source set."
+        )
+        show(
+            "graph_from_sources",
+            topology.topology_messages(
+                case, choice, frozen, source_checklist=checklist
+            ),
+            schema,
+        )
+    return entry
+
+
 def preview(root: Path) -> list[dict]:
     _, payload = load(root)
+    cases = selection.SelectionIntake.model_validate(payload["selection"]).cases
+    if "graph_pools" in payload:
+        return [_portfolio_preview(case, payload) for case in cases]
     values = []
-    for case in selection.SelectionIntake.model_validate(payload["selection"]).cases:
+    for case in cases:
         if not selection.needs_selection(case):
             values.append({"case_id": case.case_id, **selection.skipped_outcome(case)})
             continue
@@ -612,6 +740,17 @@ def preflight(root: Path) -> dict:
                 "active": active,
             }
         )
+        if "graph_pools" in payload:
+            example = _portfolio_preview(case, payload)
+            for item in example.values():
+                if isinstance(item, dict):
+                    strict_provider_schema(item["schema"])
+            arms[-1].update(
+                active=True,
+                source_ranking_required=active,
+                eligible_graphs=example["pool_size"],
+            )
+            continue
         if not active:
             continue
         checklist = payload.get("source_checklists", {}).get(case.case_id)
@@ -665,6 +804,7 @@ def preflight(root: Path) -> dict:
             for k in (
                 "choices_per_arm",
                 "maximum_graph_first_requests",
+                "maximum_graph_selection_requests",
                 "maximum_selected_topology_requests",
             )
             if k in plan
@@ -685,13 +825,23 @@ def main() -> None:
         action="store_true",
         help="Prepare the paired selector and graph-first experiment.",
     )
+    p.add_argument(
+        "--complete-graphs",
+        action="store_true",
+        help="Prepare the multi-inventory graph selection experiment.",
+    )
     p.add_argument("--endpoint")
     p.add_argument("--runtime-record", type=Path)
     args = p.parse_args()
     if args.action == "prepare":
         if not args.source:
             p.error("prepare needs --source")
-        result = prepare(args.root, args.source, matched=args.matched)
+        result = prepare(
+            args.root,
+            args.source,
+            matched=args.matched,
+            complete_graphs=args.complete_graphs,
+        )
     elif args.action == "run":
         if not args.endpoint or not args.runtime_record:
             p.error("run needs a bound ACES runtime and endpoint")

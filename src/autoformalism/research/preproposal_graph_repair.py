@@ -6,7 +6,7 @@ import json
 from collections import Counter
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from functools import lru_cache
+from functools import lru_cache, partial
 from itertools import combinations
 from typing import Literal
 
@@ -66,15 +66,16 @@ def graph_first_messages(case: SelectionCase, frozen: dict) -> tuple[str, str]:
 
 
 def _catalogue(case: SelectionCase, frozen: dict, graph: dict) -> list[Edit]:
-    """Enumerate additions inside the fixed inventory and positive permissions."""
+    """Enumerate additions among explicitly declared variables and permitted sources."""
     context = frozen["evidence"]["context"]
-    names = {v.name for v in case.inventory}
+    equations = topology.graph_sources(graph)
+    names = set(equations)
     initial_names = set(frozen["initials"]) | {case.target}
     fixed = set(context.get("fixed_covariates", ())) & initial_names
     ongoing = names | set(frozen["histories"]) | fixed
     edits = [
         Edit("add_source", target, source)
-        for target, deps in graph["sources"].items()
+        for target, deps in equations.items()
         for source in sorted(ongoing - set(deps) - {target})
     ]
     if not frozen.get("shared_hidden_initials", False):
@@ -90,9 +91,10 @@ def _catalogue(case: SelectionCase, frozen: dict, graph: dict) -> list[Edit]:
 def _apply(graph: dict, patch: tuple[Edit, ...]) -> dict:
     child = deepcopy(graph)
     records = {r["state"]: r for r in child["latent_initializers"]}
+    equations = topology.graph_sources(child)
     for edit in patch:
         if edit.kind == "add_source":
-            child["sources"][edit.receiver].append(edit.source)
+            equations[edit.receiver].append(edit.source)
             continue
         record = records[edit.receiver]
         rule = record["rule"]
@@ -119,17 +121,25 @@ def assess_and_repair(
     """
     if max_checks < 1:
         raise ValueError("max_checks must be positive")
-    evidence, _ = topology._inputs(case, frozen)
+    if frozen.get("check_all_measured"):
+        check = partial(topology.make_topology_assessor(case, frozen), None)
+    else:
+        evidence, _ = topology._inputs(case, frozen)
 
-    @lru_cache(maxsize=512)
-    def roots(target: str, actual: tuple[str, ...], gap: float) -> dict:
-        return topology._actual_assessment(target, set(actual), evidence, gap)
+        @lru_cache(maxsize=512)
+        def roots(target: str, actual: tuple[str, ...], gap: float) -> dict:
+            return topology._actual_assessment(target, set(actual), evidence, gap)
 
-    def cached(target, actual, packet, gap):
-        return roots(target, tuple(sorted(actual)), gap)
+        def cached(target, actual, packet, gap):
+            return roots(target, tuple(sorted(actual)), gap)
 
-    def check(reply):
-        return topology.assess_topology(case, None, reply, frozen, root_assessor=cached)
+        check = partial(
+            topology.assess_topology,
+            case,
+            None,
+            frozen_case=frozen,
+            root_assessor=cached,
+        )
 
     parent = check(value)
     result = {
@@ -146,9 +156,7 @@ def assess_and_repair(
     if parent["status"] == PASS:
         return result
     try:
-        schema = topology.topology_schema(
-            case, shared_hidden_initials=frozen.get("shared_hidden_initials", False)
-        )
+        schema = topology.reply_schema(case, frozen)
         graph = schema.model_validate(value).model_dump(mode="json", by_alias=True)
     except ValidationError:
         result["repair_status"] = "invalid_parent_schema"

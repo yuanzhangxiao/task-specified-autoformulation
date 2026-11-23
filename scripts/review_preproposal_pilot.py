@@ -382,18 +382,70 @@ def render_matched(root: Path, out: Path) -> Path:
     return target
 
 
+def render_portfolio(root: Path, out: Path) -> Path:
+    """Render the algorithm's offline yield and actual proposer requests."""
+    plan, payload = campaign.load(root)
+    pools = payload["graph_pools"]
+    sections = [
+        "<p>Scientific and uniform selectors draw complete graphs from the same "
+        "verified pool. In the other approaches the proposer can declare additional "
+        "latent variables and supply their equations and initializers.</p>",
+        table(
+            ["Inventory", "Graphs checked", "Graphs available", "Search stopped"],
+            [
+                [key, v["checked"], len(v["candidates"]), v["stop_reason"]]
+                for key, v in pools.items()
+            ],
+        ),
+        f"<p>The live run allows {plan['maximum_generation_requests']} requests. "
+        "The following requests include the public training information. "
+        "Scientific rankings and fitting results are pending.</p>",
+    ]
+    titles = {
+        "rank_graphs": "Choose complete graphs",
+        "rank_sources": "Choose upstream sources",
+        "graph_from_sources": "Write a graph for a source choice",
+        "graph_first": "Write a graph before algorithmic repair",
+    }
+    for item in campaign.preview(root):
+        sections.append("<h2>" + escape(item["case_id"]) + "</h2>")
+        for key, title in titles.items():
+            if key not in item:
+                continue
+            request = item[key]
+            sections.append(
+                "<details><summary>"
+                + title
+                + "</summary>"
+                + pre(request["system"])
+                + pre(request["user"])
+                + "<details><summary>Reply schema</summary>"
+                + pre(request["schema"])
+                + "</details></details>"
+            )
+    out.mkdir(parents=True, exist_ok=True)
+    target = out / "PROMPTS.html"
+    target.write_text(
+        page("Complete graph selection and proposer-written topologies", sections)
+    )
+    return target
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--project", type=Path, default=Path(__file__).resolve().parents[1]
     )
     runs = parser.add_mutually_exclusive_group(required=True)
+    runs.add_argument("--portfolio-root", type=Path)
     runs.add_argument("--matched-root", type=Path)
     runs.add_argument("--cases", type=Path)
     parser.add_argument("--transfer", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
-    if args.matched_root:
+    if args.portfolio_root:
+        print(render_portfolio(args.portfolio_root, args.out))
+    elif args.matched_root:
         print(render_matched(args.matched_root, args.out))
     else:
         if not args.transfer:

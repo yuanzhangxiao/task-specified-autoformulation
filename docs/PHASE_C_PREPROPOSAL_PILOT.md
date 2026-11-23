@@ -97,3 +97,42 @@ af_review=output/preproposal-matched-review-20261122
 .venv/bin/python -m scripts.preproposal_selection_20b prepare --matched --source "$af_case" --root "$af_review/plan"
 .venv/bin/python -m scripts.review_preproposal_pilot --matched-root "$af_review/plan" --out "$af_review"
 ```
+
+## Selecting complete graphs
+
+The new `--complete-graphs` experiment uses four T2-easy variable inventories with the same 16 public training trajectories, time-zero initialization contract and 1 pmol/L insulin screening margin. Three inventories come from completed 20B variable-stage declarations (seeds 0, 1 and 3). The fourth comes from the previous seed-102 joint declaration. A fifth case uses the coupled-basin inventory and its own public units and initialization contract.
+
+The runtime builds and checks a pool once per inventory. It tries direct and mediated pathways, additional RHS terms, and shared constants or initial-value maps for latent states. The frozen limits are 64 distinct graph checks, up to 256 draws, six sources per equation, two observed arguments per generated initial map and eight admitted graphs per inventory. Sampling can stop before all feasible graphs have been found.
+
+| Approach | What the proposer does | What the algorithm does |
+|---|---|---|
+| Scientific source selection | Selects source IDs, then writes the complete graph | Screens source sets and checks the resulting graph |
+| Uniform source selection | Writes the graph for each drawn source set | Draws from the same source menu and checks the resulting graph |
+| Graph first | Proposes a complete graph | Checks the graph and searches bounded one- and two-edit repairs |
+| Complete graph selection | Ranks three whole graphs by ID when at least three are available | Generates and admits the pool first, then also samples the same number of graphs uniformly from the identical pool |
+
+The two source selectors share a graph response when they select the same option on the same seed. A singleton empty source set requires no ranking call. Proposer-written graphs can include a new latent with an explicit name, type and RHS. Each new latent differential state also needs an allowed initial value. The runtime retains the equations associated with a selected graph ID. Each graph must pass the same implemented public-path and observed-variable checks. The recorded differential memory assignments from the variable stage constrain their public pathways.
+
+The observations can rule out a graph when it forces equal values where the training data differ. The gate compares measured generated differential and algebraic variables, including model-owned measured auxiliaries when present. For algebraic equations it uses repeated complete arguments at time zero and later samples. For differential equations it considers the initialization and upstream forcing. Physical sign, function form, fitted accuracy, unobserved state recovery and mechanisms beyond those formalized in the public graph checks require additional evidence. The 1 pmol/L cutoff applies only to insulin. The report also retains the exact insulin check.
+
+Three paired proposer seeds (100–102) run on one H100 with a two-hour wall limit. The report records the CPU graph checks, reasons for rejection, distinct admitted structures, selections and physical requests. Compare admission before fitting, then compare the fitted scientific and uniform selections under equal fitting budgets. The source-written and graph-first arms can introduce additional variables, so differences in yield include differences in their search spaces.
+
+From the Mac checkout:
+
+```bash
+af_out=output/complete-graphs-delivery-20261122
+.venv/bin/python -m scripts.package_preproposal_selection_20b --complete-graphs --case output/preproposal-public-cases-gap-20261122/selection-intake.json --out "$af_out" --harmony output/initialization-provider-recovery-delivery/assets/harmony
+scp "$af_out/phase-c-complete-graphs-20b-v1.tar.gz" aces:/scratch/group/p.nairr260351.000/u.yx126462/
+```
+
+On ACES:
+
+```bash
+cd /scratch/group/p.nairr260351.000/u.yx126462
+tar -xzf phase-c-complete-graphs-20b-v1.tar.gz && cd phase-c-complete-graphs-20b-v1
+sha256sum --quiet -c SHA256SUMS && bash scripts/hpc/start_complete_graphs_aces.sh preflight && bash scripts/hpc/start_complete_graphs_aces.sh run
+```
+
+Use `status` on the same launcher to check progress, `run` to reconcile an ambiguous submission, `resume` after interruption and `inspect` to package the results. The results directory is `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-complete-graphs-20b-results-v1`. To view the exact messages for a prepared experiment locally, run `.venv/bin/python -m scripts.review_preproposal_pilot --portfolio-root <prepared-root> --out <review-directory>`.
+
+The inspection archive includes `admitted-graphs.json`. Each exported graph has its variable types, complete RHS source lists, initial-value rules and the recorded selection or repair origins. The pool in `intake.json` retains all admitted alternatives, including those the selectors did not choose. An inspection made before completion records its partial status. The export precedes interaction functions, signs and fitting.

@@ -10,10 +10,13 @@ case "${2:-repair}" in
     AF_CLI="$AF_REPO_ROOT/scripts/topology_repair_20b.py"
     AF_SOURCE="$AF_REPO_ROOT/inputs/case.json"
     AF_JOB_NAME=phasec-topo-edit-20b ;;
-  selection|matched-selection)
+  selection|matched-selection|complete-graphs)
     AF_CLI="$AF_REPO_ROOT/scripts/preproposal_selection_20b.py"
     AF_SOURCE="$AF_REPO_ROOT/inputs/preproposal.json"
-    if [[ "$2" == matched-selection ]]; then
+    if [[ "$2" == complete-graphs ]]; then
+      export AF_OUTPUT_ROOT=${AF_COMPLETE_GRAPHS_ROOT:-$AF_GROUP/phase-c-complete-graphs-20b-results-v1}
+      AF_JOB_NAME=phasec-graphs-20b
+    elif [[ "$2" == matched-selection ]]; then
       export AF_OUTPUT_ROOT=${AF_PREPROPOSAL_MATCHED_ROOT:-$AF_GROUP/phase-c-preproposal-matched-20b-results-v2}
       AF_JOB_NAME=phasec-matched-20b
     else
@@ -33,6 +36,7 @@ case "${1:-}" in
     if [[ "$1" == preflight && "${2:-repair}" == repair ]]; then echo "The preflight action is for screened selection." >&2; exit 2; fi
     AF_PREPARE=(prepare --root "$AF_OUTPUT_ROOT" --source "$AF_SOURCE")
     [[ "${2:-repair}" != matched-selection ]] || AF_PREPARE+=(--matched)
+    [[ "${2:-repair}" != complete-graphs ]] || AF_PREPARE+=(--complete-graphs)
     "$AF_PYTHON" "$AF_CLI" "${AF_PREPARE[@]}" >/dev/null
     if [[ "$1" == preview || "$1" == preflight ]]; then exec "$AF_PYTHON" "$AF_CLI" "$1" --root "$AF_OUTPUT_ROOT"; fi
     export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
