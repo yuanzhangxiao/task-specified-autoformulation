@@ -9,6 +9,8 @@ from autoformalism.research import preproposal_cases as cases
 from autoformalism.research import preproposal_selection as selection
 from autoformalism.research import preproposal_topology as topology
 from autoformalism.search.preproposal_screen import assess_options
+from autoformalism.search.topology_compatibility import TrainingCompatibilityEvidence
+from scripts.audit_preproposal_transfer import all_time_conflicts
 
 
 def pre(value):
@@ -58,15 +60,20 @@ def replay(frozen, case, project):
         ("Direct Gt route", "history:Gt", ["Gt"], [], []),
     ]
     if frozen.get("minimum_target_gap", 0):
-        examples.append(
-            (
-                "Meal, administered insulin and baseline glucose",
-                "initial:Gp",
-                ["meal_rate_g_per_min", "Uid"],
-                ["Gp"],
-                [],
-            )
-        )
+        for row in case.candidates:
+            bases = [s[8:] for s in row.sources if s.startswith("initial:")]
+            if bases:
+                initial = bases[0]
+                examples.append(
+                    (
+                        f"Meal, administered insulin and baseline {initial}",
+                        f"initial:{initial}",
+                        ["meal_rate_g_per_min", "Uid"],
+                        bases,
+                        [],
+                    )
+                )
+    packet = TrainingCompatibilityEvidence.model_validate(frozen["evidence"])
     rows = []
     for label, option, insulin, baseline, glucose in examples:
         candidate = next(x for x in case.candidates if option in x.sources)
@@ -97,9 +104,59 @@ def replay(frozen, case, project):
                 "chosen_options": list(candidate.sources),
                 "reply": reply,
                 "assessment": result,
+                "equal_prefix_audit": all_time_conflicts(
+                    packet,
+                    case.target,
+                    result["training_checks"][case.target]["actual_options"],
+                ),
             }
         )
     return rows
+
+
+def witness_figure(frozen, controls, out):
+    """Show observed differences up to the strongest matched-prefix witness."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    original = controls[0]
+    mixed = next(r for r in controls if r["label"].endswith("baseline Gp"))
+    trajectories = {r["trajectory_id"]: r for r in frozen["evidence"]["trajectories"]}
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), layout="constrained")
+    for ax, control, title in zip(
+        axes,
+        [original, mixed],
+        ["Original insulin sources", "Both inputs and baseline glucose"],
+        strict=True,
+    ):
+        witness = control["equal_prefix_audit"]["witness"]
+        left, right = (trajectories[n] for n in witness["trajectories"])
+        end = left["time"].index(witness["time"]) + 1
+        delta = [
+            abs(a - b)
+            for a, b in zip(
+                left["targets"]["I"][:end], right["targets"]["I"][:end], strict=True
+            )
+        ]
+        ax.plot(left["time"][:end], delta, color="#19576a", linewidth=2)
+        ax.scatter(witness["time"], delta[-1], color="#ab4923", zorder=3)
+        ax.set_title(title)
+        ax.set_xlabel("Minutes since start")
+        ax.set_ylabel("Absolute insulin difference (pmol/L)")
+        ax.set_ylim(bottom=0)
+        ax.grid(alpha=0.23)
+        ax.text(
+            0.03,
+            0.96,
+            " and ".join(witness["trajectories"]),
+            transform=ax.transAxes,
+            va="top",
+            fontsize=9,
+        )
+    fig.savefig(out / "insulin-witnesses.png", dpi=170)
+    plt.close(fig)
 
 
 def render(project, folder, transfer, out):
@@ -155,6 +212,8 @@ def render(project, folder, transfer, out):
             + "</details>",
         ]
         records[identifier] = replay(raw, case, project)
+        if raw["minimum_target_gap"] > 0:
+            witness_figure(raw, records[identifier], out)
         for r in records[identifier]:
             assessment = r["assessment"]
             control_rows.append(
@@ -164,6 +223,7 @@ def render(project, folder, transfer, out):
                     assessment["status"],
                     assessment["training_checks"]["I"]["conflicting_pairs"],
                     assessment["exact_selected_target_check"]["conflicting_pairs"],
+                    f"{r['equal_prefix_audit']['max_equal_prefix_gap']:.3g}",
                 )
             )
     transfer_rows = []
@@ -229,6 +289,7 @@ def render(project, folder, transfer, out):
                 "Outcome",
                 "Conflicting insulin pairs",
                 "Conflicting at zero gap",
+                "Largest matched-prefix gap (pmol/L)",
             ),
             control_rows,
         ),
@@ -238,6 +299,11 @@ def render(project, folder, transfer, out):
         "Reaching a source "
         "establishes an information path. A fitted law may still ignore "
         "that source.</p>",
+        '<figure><img style="max-width:100%" src="insulin-witnesses.png" '
+        'alt="Largest insulin difference between matched training trajectories, '
+        'by source set"><figcaption>Each panel follows the pair with the largest '
+        "observed difference while the realized information still matches. "
+        "The vertical axes have different scales.</figcaption></figure>",
         "<h2>Transfer and sensitivity</h2><p>Thresholds are additional "
         "absolute gaps in "
         "target units. The input-equality assumptions stay fixed. In "
