@@ -22,9 +22,14 @@ from scripts.submit_structural_revision_aces import (
 
 TRAJECTORY_FUNCTIONS = "trajectory-function-comparison-1"
 BASIN_PROCESSES = "basin-process-proposals-1"
+POINTWISE_REPAIR = "pointwise-repair-witness-1"
 
 
 def _trial(protocol):
+    if protocol == POINTWISE_REPAIR:
+        from scripts import pointwise_repair_trial
+
+        return pointwise_repair_trial
     if protocol == BASIN_PROCESSES:
         from scripts import basin_process_proposals
 
@@ -78,6 +83,7 @@ def execution(plan, image, snapshot):
         in (
             TRAJECTORY_FUNCTIONS,
             BASIN_PROCESSES,
+            POINTWISE_REPAIR,
             campaign.FRESH_20B,
             campaign.FITTED_20B,
             campaign.TOPOLOGY_20B,
@@ -89,6 +95,7 @@ def execution(plan, image, snapshot):
     )
     protocols = {
         BASIN_PROCESSES: "basin-process-proposals-aces-1",
+        POINTWISE_REPAIR: "pointwise-repair-witness-aces-1",
         TRAJECTORY_FUNCTIONS: "trajectory-function-generation-aces-1",
         campaign.COMPLETE_GRAPHS_20B: "complete-graphs-20b-aces-1",
         campaign.PREPROPOSAL_20B: "preproposal-selection-aces-1",
@@ -102,6 +109,10 @@ def execution(plan, image, snapshot):
     worker_seconds, wall_seconds = (3300, 3600) if fresh else (6600, 7200)
     if plan["protocol"] == BASIN_PROCESSES:
         worker_seconds, wall_seconds = 900, 1200
+    elif plan["protocol"] == POINTWISE_REPAIR:
+        if plan["maximum_generation_requests"] != 18:
+            raise ValueError("Matched pointwise repair requires the frozen 18-call cap")
+        worker_seconds, wall_seconds = 2400, 2700
     return {
         **values,
         "protocol": protocols[plan["protocol"]],
@@ -140,6 +151,7 @@ def _assets(plan):
         in (
             TRAJECTORY_FUNCTIONS,
             BASIN_PROCESSES,
+            POINTWISE_REPAIR,
             campaign.FRESH_20B,
             campaign.FITTED_20B,
             campaign.TOPOLOGY_20B,
@@ -308,6 +320,8 @@ def submit(root, resume=False):
             )
         elif plan["protocol"] == BASIN_PROCESSES:
             job_name, tag, worker = "phasec-basin-laws", "basin-laws", "basin-processes"
+        elif plan["protocol"] == POINTWISE_REPAIR:
+            job_name, tag, worker = "phasec-witness-20b", "witness", "pointwise-repair"
         argv = [
             "sbatch",
             "--parsable",

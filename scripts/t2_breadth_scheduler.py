@@ -136,6 +136,7 @@ def reconcile(root: Path, wave: Path) -> dict:
     workers["phasec-functions-20b"] = "trajectory-functions"
     workers["phasec-matched-20b"] = "preproposal-selection"
     workers["phasec-topo-edit-20b"] = "topology-repair"
+    workers["phasec-witness-20b"] = "pointwise-repair"
     if (
         name not in workers
         or _value(argv, "output") != str(root / "logs/propose-%j.out")

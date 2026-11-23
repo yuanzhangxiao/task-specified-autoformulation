@@ -139,3 +139,11 @@ To exercise this path with the 36 saved replies, use the frozen training archive
         --archive output/trajectory-functions-20261123/returned \
         --root output/trajectory-pointwise-replay \
         --pointwise-tolerances insulin-error.json
+
+### Testing whether measured evidence helps 20B propose a repair
+
+The paired experiment takes the three original T2 equations with a certified 1 pmol/L conflict. Each parent receives three new seeds, 211–213. For every parent and seed, the control prompt reports the failed requirement. The paired prompt adds the measured constant-forcing reference and the two opposing changes. Both prompts expose the same scientific task, parent equations, allowed sources, and edit schema. They give no revised formula or later fitting results. One H100 serves all 18 calls. Each call can replace only the insulin RHS and introduce coefficients used in that expression. The runtime retains the rest of the model and checks the dependencies of the edited equations.
+
+`scripts/pointwise_repair_fitting.py` compares each admitted revision with a matched refit of the original parent using training trajectories. Record separately whether the output parses, whether it changes the equation, whether a contradiction can still be proved, whether simulation succeeds, and the maximum observed insulin error at the fitted vector. Removing the proof only establishes that the earlier argument no longer excludes the candidate. The fitted predictions show whether that particular vector satisfies the requested tolerance.
+
+The standalone ACES entry point is `scripts/hpc/start_pointwise_repair.sh`. Its `preflight`, `run`, `status`, `resume` and `inspect` actions use the sealed three-parent training intake in the committed package. The fitting CLI also needs the original training campaign containing the three parent fit receipts. Both stages leave formal validation and test closed.
