@@ -20,8 +20,14 @@ from scripts.submit_structural_revision_aces import (
     file_hash,
 )
 
+TRAJECTORY_FUNCTIONS = "trajectory-function-comparison-1"
+
 
 def _trial(protocol):
+    if protocol == TRAJECTORY_FUNCTIONS:
+        from scripts import trajectory_functions
+
+        return trajectory_functions
     if protocol in (
         campaign.PREPROPOSAL_20B,
         campaign.PREPROPOSAL_MATCHED_20B,
@@ -44,6 +50,7 @@ def _load(root):
 
 def execution(plan, image, snapshot):
     fresh = plan["protocol"] in (
+        TRAJECTORY_FUNCTIONS,
         campaign.FRESH_20B,
         campaign.TOPOLOGY_20B,
         campaign.PREPROPOSAL_20B,
@@ -57,6 +64,7 @@ def execution(plan, image, snapshot):
         model_size="20b"
         if plan["protocol"]
         in (
+            TRAJECTORY_FUNCTIONS,
             campaign.FRESH_20B,
             campaign.FITTED_20B,
             campaign.TOPOLOGY_20B,
@@ -67,6 +75,7 @@ def execution(plan, image, snapshot):
         else "120b",
     )
     protocols = {
+        TRAJECTORY_FUNCTIONS: "trajectory-function-generation-aces-1",
         campaign.COMPLETE_GRAPHS_20B: "complete-graphs-20b-aces-1",
         campaign.PREPROPOSAL_20B: "preproposal-selection-aces-1",
         campaign.PREPROPOSAL_MATCHED_20B: "preproposal-matched-selection-aces-2",
@@ -112,6 +121,7 @@ def _assets(plan):
         aces._assets("20b")
         if plan["protocol"]
         in (
+            TRAJECTORY_FUNCTIONS,
             campaign.FRESH_20B,
             campaign.FITTED_20B,
             campaign.TOPOLOGY_20B,
@@ -188,7 +198,9 @@ def submit(root, resume=False):
     with _lock(root / "submission-lock"):
         plan, _ = _load(root)
         trial = _trial(plan["protocol"])
-        if trial:
+        if plan["protocol"] == TRAJECTORY_FUNCTIONS:
+            complete = trial.status(root)["generation_complete"]
+        elif trial:
             complete = trial.status(root)["status"] == "complete"
         else:
             complete = len(campaign._rows(root, plan)) == len(campaign._names(plan))
@@ -269,6 +281,12 @@ def submit(root, resume=False):
                 "phasec-graphs-20b",
                 "graph-portfolio",
                 "preproposal-selection",
+            )
+        elif plan["protocol"] == TRAJECTORY_FUNCTIONS:
+            job_name, tag, worker = (
+                "phasec-functions-20b",
+                "trajectory-functions",
+                "trajectory-functions",
             )
         argv = [
             "sbatch",

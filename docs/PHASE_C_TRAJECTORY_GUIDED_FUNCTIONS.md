@@ -53,3 +53,26 @@ First test a simple glucose-dependent production law on its own terms. On graphs
 4. **Evaluate the decision.** During construction, use only training trajectories. Hold out entire trajectories *within training* to compare families where the number of trajectories permits it. Freeze each arm's candidates before applying the independent validation trajectories. Compare the fraction of graphs that yield a stable rollout, paired validation NMSE by target, public mechanism checks and compute used. Track whether the hybrid's winning expression came from its own proposal or the supplied short list. Reserve test trajectories for final evaluation.
 
 Kacprzyk, Piskorz and van der Schaar model trajectory shapes directly. Their formulation motivates recording shape as evidence. Inferring a governing function under a fixed graph is a separate inverse problem. Messenger and Bortz give a weak-form approach to learning dynamics without pointwise numerical differentiation, relevant to the interval comparison above. [Skip the Equations](https://proceedings.mlr.press/v267/kacprzyk25a.html) · [Weak SINDy](https://doi.org/10.1137/20M1343166)
+
+## Implemented pilot on the ACES graph replay
+
+The frozen cohort contains six of the 143 admitted graph alternatives from job 2403807. It includes two algorithm-generated T2-easy graphs, two algorithm-repaired T2-easy graphs originally proposed by 20B, and both admitted coupled-basin graphs. Within each group we choose the sparsest graph, then prioritize a different variable inventory and maximize differences in edges, variable types and initialization rules. All three arms use the same six graphs.
+
+| Arm | How it obtains its two complete models for each graph |
+|---|---|
+| Proposer | Two independent whole-model requests to GPT-OSS-20B. Each sees the public task, fixed graph, and summaries of every training trajectory. |
+| Algorithm | Two combinations of equation families. For eligible equations, two-fold cross-validation splits by whole training trajectory. It compares predictions of algebraic values or integrated differential-state changes. Candidates involving hidden quantities need full-model fitting. |
+| Hybrid | Two independent 20B requests with the same task and summaries, plus the algorithm’s two complete models and the evidence for them. The proposer can select one or write its own. |
+
+The proposer control uses a single request per model. Historical staged requests used a different interface. The algorithmic library includes affine, saturating and interacting terms. In both basin graphs the downstream derivative omits downstream depth and downstream inflow, precluding the direct downstream outlet balance in the worked example.
+
+The comparison reserves 24 physical generation requests and 36 training fit slots. Each eligible formula receives up to 1,000 residual evaluations total over two starts, with a 180-second optimization wall budget, using the same fixed-step integration and least-squares fitter. Rank 1 and rank 2 use seeds 100 and 101 respectively in every arm. The fitter replays the result with two and four integration substeps per sample interval and checks the predictions for numerical agreement. A failed or invalid candidate consumes its slot.
+
+For each of the 18 graph/arm combinations, the lowest verified training NMSE selects a winner. The selection freezes before validation runs. Each winner runs open-loop on the separate validation trajectories with fixed parameters. The report shows paired errors, fitted equations, fitted dependency paths, nonnegativity and basin volume diagnostics, rollout curves and compute counts. The pilot never uses test trajectories. Its selected graphs and two draws per graph support a paired exploratory comparison.
+
+On ACES, run the launcher from the extracted phase-c-trajectory-functions-20b-v1 directory. The first command exercises a training rollout with the installed solver. The second schedules generation, the CPU fits, and validation. The remaining commands show progress and package the report.
+
+    bash scripts/hpc/start_trajectory_functions_aces.sh preflight
+    bash scripts/hpc/start_trajectory_functions_aces.sh run
+    bash scripts/hpc/start_trajectory_functions_aces.sh status
+    bash scripts/hpc/start_trajectory_functions_aces.sh inspect

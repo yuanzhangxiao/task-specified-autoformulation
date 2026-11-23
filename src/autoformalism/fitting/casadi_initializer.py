@@ -552,6 +552,8 @@ def _guard_denominator(ca: Any, value: Any) -> Any:
 
 def _call(ca: Any, name: str, arguments: list[Any]) -> Any:
     argument = arguments[0]
+    if name == "sin":
+        return ca.sin(argument)
     if name == "exp":
         return ca.exp(argument)
     if name == "log":

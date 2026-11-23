@@ -133,6 +133,7 @@ def reconcile(root: Path, wave: Path) -> dict:
     )
     workers["phasec-preselect-20b"] = "preproposal-selection"
     workers["phasec-graphs-20b"] = "preproposal-selection"
+    workers["phasec-functions-20b"] = "trajectory-functions"
     workers["phasec-matched-20b"] = "preproposal-selection"
     workers["phasec-topo-edit-20b"] = "topology-repair"
     if (

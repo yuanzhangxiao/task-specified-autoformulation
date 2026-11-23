@@ -66,6 +66,8 @@ def package_committed(
     input_name: str,
     intake: Path,
     harmony: Path,
+    *,
+    extra_inputs: tuple[tuple[str, Path], ...] = (),
 ) -> Path:
     """Build a checksummed delivery with the pinned offline vocabulary."""
     harmony_vocab.verify(harmony)
@@ -82,6 +84,7 @@ def package_committed(
     for target, path in [
         (input_name, intake),
         ("assets/harmony/o200k_base.tiktoken", harmony / "o200k_base.tiktoken"),
+        *extra_inputs,
     ]:
         files[target] = path.read_bytes(), 0o644
     files["SOURCE_COMMIT"] = commit.encode(), 0o644
