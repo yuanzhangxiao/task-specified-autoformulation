@@ -173,3 +173,10 @@ Run these commands from the checkout with the archived paired generation and col
     python -m scripts.transfer_positive_insulin_law verify --evidence-root "$AF_EVIDENCE" --root "$AF_EVIDENCE/positive-transfer"
 
 The coupled comparisons replace the insulin rate in each saved model and keep the other fold-specific fitted equations and initializers. The outputs report glucose, insulin, disposal, and pooled NMSE on the same events. EGP is a supplied endogenous glucose production trajectory in this easy task. Its value as a predictor and its causal role are separate questions. The model bundles contain fitting-fold coefficients and do not incorporate held-trajectory initial estimates or held-trajectory parameter fits.
+
+For a separate check on the original four development-validation events, prepare the two restoring parents and their two revised models from full-training fits. Preparation accepts only the experiment evidence directory. The second command verifies that freeze before opening the registered validation intake.
+
+    python -m scripts.validate_positive_insulin_transfer prepare --evidence "$AF_EVIDENCE" --root "$AF_EVIDENCE/positive-validation"
+    python -m scripts.validate_positive_insulin_transfer validate --root "$AF_EVIDENCE/positive-validation" --archive "$AF_EVIDENCE/aces-equilibrium/results" --validation output/trajectory-functions-20261123/inputs/validation.json
+
+The revised insulin equation and all other model coefficients remain fixed throughout this comparison. The evaluator reproduces the archived parent forecasts, independently integrates the revised insulin equation and scores all three targets. The development results identify changes in predictive accuracy on these four previously studied events.
