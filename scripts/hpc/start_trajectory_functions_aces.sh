@@ -4,7 +4,14 @@ set -euo pipefail
 AF_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 export AF_REPO_ROOT
 AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
-export AF_OUTPUT_ROOT=${AF_TRAJECTORY_FUNCTION_ROOT:-$AF_GROUP/phase-c-trajectory-functions-results-v1}
+AF_PROFILE=${2:-fixed}
+case "$AF_PROFILE" in
+  fixed) AF_FOLDER=phase-c-trajectory-functions-results-v1 ;;
+  source-review) AF_FOLDER=phase-c-function-source-review-results-v1 ;;
+  basin-review) AF_FOLDER=phase-c-basin-function-review-results-v1 ;;
+  *) echo "Choose fixed, source-review or basin-review." >&2; exit 2 ;;
+esac
+export AF_OUTPUT_ROOT=${AF_TRAJECTORY_FUNCTION_ROOT:-$AF_GROUP/$AF_FOLDER}
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
 export PYTHONPATH="$AF_REPO_ROOT:$AF_REPO_ROOT/src" PYTHONDONTWRITEBYTECODE=1
 AF_CLI="$AF_REPO_ROOT/scripts/trajectory_functions.py"
@@ -15,7 +22,7 @@ if ! "$AF_PYTHON" "$AF_CLI" --help >/dev/null 2>&1; then
 fi
 case "${1:-}" in
   run|resume|preflight)
-    "$AF_PYTHON" "$AF_CLI" prepare --root "$AF_OUTPUT_ROOT" --source "$AF_REPO_ROOT/inputs/train.json" >/dev/null
+    "$AF_PYTHON" "$AF_CLI" prepare --profile "$AF_PROFILE" --root "$AF_OUTPUT_ROOT" --source "$AF_REPO_ROOT/inputs/train.json" >/dev/null
     if [[ "$1" == preflight ]]; then exec "$AF_PYTHON" "$AF_CLI" preflight --root "$AF_OUTPUT_ROOT"; fi
     export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
     if [[ -z "${AF_HF_HOME:-}" ]]; then

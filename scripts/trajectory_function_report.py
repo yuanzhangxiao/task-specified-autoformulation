@@ -41,6 +41,17 @@ def prompt_review(root, p, request):
         "<p>Each graph has two proposer seeds in each proposer arm. The hybrid can "
         "select a suggested model by ID or write its own equations.</p>"
     ]
+    if p.get("profile") in ("source-review", "basin-review", "basin-replay"):
+        body.append(
+            "<p>The new request adds a choice to change equation sources. "
+            "The runtime infers the patch, checks the graph on training data "
+            "and tests the internal transfer when the equations permit it.</p>"
+        )
+    if p.get("profile") == "basin-replay":
+        body.append(
+            "<p>This is a preview for future calls. The original proposer "
+            "received the fixed-graph prompt.</p>"
+        )
     for g, row in enumerate(p["graphs"]):
         body.append(f"<h2>{_graph_label(row)}</h2>")
         for arm in ("proposer", "hybrid"):
@@ -218,7 +229,7 @@ def _comparison_table(comparison, arms):
 
 
 def inspect(root: Path, progress: dict):
-    from scripts.trajectory_functions import load, slots
+    from scripts.trajectory_functions import fitting_graph, load, slots
 
     plan, p = load(root)
     rows = []
@@ -242,10 +253,15 @@ def inspect(root: Path, progress: dict):
             cand = sealed_read(root / "candidates" / f"{i:03}.json")
             detail.update(
                 origin=cand["origin"],
+                route=cand.get("route", "fixed_graph"),
+                admitted_graph=fitting_graph(cand, row),
+                source_changes=cand.get("patch", {}),
+                scientific_reason=cand.get("scientific_reason"),
+                balance_check=cand.get("balance_check"),
                 formula=cand["formula"],
                 fit=fit,
                 public_path_checks=path_checks(
-                    row["graph"], p["cases"][row["case"]], fit
+                    fitting_graph(cand, row), p["cases"][row["case"]], fit
                 ),
             )
         rows.append(detail)
@@ -266,9 +282,31 @@ def inspect(root: Path, progress: dict):
         fit_seconds=sum(r.get("seconds", 0) for r in fits.values()),
     )
     admissions = {arm: Counter() for arm in plan["arms"]}
+    reviews = []
     for path in sorted((root / "candidates").glob("*.json")):
         r = sealed_read(path)
         admissions[r["arm"]][r["status"]] += 1
+        if r.get("route") == "request_topology_change":
+            reviews.append(
+                {
+                    k: r[k]
+                    for k in (
+                        "index",
+                        "archived_index",
+                        "archived_status",
+                        "status",
+                        "route",
+                        "reason_source",
+                        "scientific_reason",
+                        "patch",
+                        "balance_check",
+                        "reason",
+                        "assessment",
+                        "child_graph_sha256",
+                    )
+                    if k in r
+                }
+            )
     comparison = _comparison(p["graphs"], plan["arms"], slots(p), fits, rows)
     body = [
         "<p>Two expression slots per graph per arm. The lowest verified training "
@@ -280,6 +318,22 @@ def inspect(root: Path, progress: dict):
         "<h2>Formula admission</h2>",
         _code(admissions),
     ]
+    if p.get("profile") == "basin-replay":
+        body.insert(
+            0,
+            "<p>This retrospective audit reused the original formula "
+            "text and coefficient starts. The audit supplied the route and "
+            "review reason for each original rejection. There were zero new "
+            "proposer calls.</p>",
+        )
+    if reviews:
+        body.append("<h2>Source changes reviewed</h2>")
+        for r in reviews:
+            slot = r.get("archived_index", r["index"])
+            body.append(
+                f"<details><summary>Slot {slot:03} · {escape(r['status'])}"
+                "</summary>" + _code(r) + "</details>"
+            )
     images = dict(_plot(root, rows))
     for g, row in enumerate(p["graphs"]):
         body.append(f'<h2 id="graph-{g}">{_graph_label(row)}</h2>')
@@ -290,7 +344,7 @@ def inspect(root: Path, progress: dict):
             )
         if row["case"].startswith("basin"):
             body.append(
-                "<p>Both basin graphs omit downstream depth and downstream inflow from "
+                "<p>The original basin graphs omit downstream depth and inflow from "
                 "the downstream rate. The prompt review includes an outlet-law check "
                 "using training data.</p>"
             )
@@ -316,12 +370,13 @@ def inspect(root: Path, progress: dict):
         "plan": plan["artifact_sha256"],
         "costs": costs,
         "admission_by_arm": admissions,
+        "source_reviews": reviews,
         "comparison_by_graph": comparison,
         "comparisons": [{k: v for k, v in r.items() if k != "curves"} for r in rows],
     }
     atomic_json(root / "summary.json", summary)
     (root / "REPORT.html").write_text(
-        _page("Fixed-graph function comparison", "".join(body))
+        _page("Function construction on the selected graphs", "".join(body))
     )
     include = (
         "plan.json",

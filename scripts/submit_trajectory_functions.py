@@ -25,11 +25,11 @@ ENTRYPOINTS = (
     "scripts/trajectory_function_intake.py",
     "scripts/trajectory_function_prompts.py",
     "scripts/trajectory_function_report.py",
+    "scripts/trajectory_function_revision_prompts.py",
     "scripts/submit_trajectory_functions.py",
     "scripts/hpc/start_trajectory_functions_aces.sh",
     "scripts/hpc/run_trajectory_functions_cpu.sh",
 )
-FIT_SLOTS = 36
 STAGES = ("fit", "validate")
 JOB_NAMES = {"fit": "phasec-traj-fit", "validate": "phasec-traj-val"}
 
@@ -90,6 +90,7 @@ def _stage(
     plan_hash: str,
     *,
     resume: bool,
+    fit_slots: int,
 ) -> str:
     """Reuse an accepted stage and recover ambiguous submissions before retrying."""
     if predecessor is not None and not predecessor.isdecimal():
@@ -140,7 +141,7 @@ def _stage(
         "--time=00:20:00" if stage == "fit" else "--time=01:00:00",
     ]
     if stage == "fit":
-        argv.append(f"--array=0-{FIT_SLOTS - 1}%8")
+        argv.append(f"--array=0-{fit_slots - 1}%8")
     if predecessor is not None:
         argv.append(f"--dependency={dependency}:{predecessor}")
     argv.extend([str(REPO / "scripts/hpc/run_trajectory_functions_cpu.sh"), stage])
@@ -159,12 +160,16 @@ def submit(root: Path, *, resume: bool = False) -> dict:
 
     root = root.resolve()
     plan, _ = campaign.load(root)
+    expected = {
+        "fixed": (36, 24),
+        "source-review": (36, 24),
+        "basin-review": (12, 8),
+    }.get(plan.get("profile", "fixed"))
     if (
         plan["protocol"] != gpu.TRAJECTORY_FUNCTIONS
-        or plan["maximum_fit_slots"] != FIT_SLOTS
-        or plan["maximum_generation_requests"] != 24
+        or (plan["maximum_fit_slots"], plan["maximum_generation_requests"]) != expected
     ):
-        raise ValueError("Expected the fixed 36-fit, 24-request trajectory pilot")
+        raise ValueError("Unregistered function-generation profile or budget")
     with _lock(root / "chain-lock"):
         status = campaign.status(root)
         if status["status"] == "complete":
@@ -204,7 +209,13 @@ def submit(root: Path, *, resume: bool = False) -> dict:
         predecessor = generation
         for stage in STAGES:
             job = _stage(
-                wave, stage, predecessor, root, plan["artifact_sha256"], resume=resume
+                wave,
+                stage,
+                predecessor,
+                root,
+                plan["artifact_sha256"],
+                resume=resume,
+                fit_slots=plan["maximum_fit_slots"],
             )
             jobs[stage] = predecessor = job
         return _seal(

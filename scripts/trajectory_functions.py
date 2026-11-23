@@ -19,11 +19,16 @@ from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
 from autoformalism.staged_topology import content_hash
 from scripts import t2_breadth as pilot
 from scripts import trajectory_function_prompts as prompts
+from scripts import trajectory_function_revision_prompts as revision_prompts
 from scripts.construction_functions import file_hash
 
 PROTOCOL = "trajectory-function-comparison-1"
 TRAIN = "7e4bb4712fdf778b0174a4945f89f9f30a8d9c9fcc648591096db03c60fa4ecd"
 VALIDATION = "bfd00cc19e3194056166119c634576a3278382b50d13636e6687a8321a53801d"
+FIXED = "fixed"
+SOURCE_REVIEW = "source-review"
+BASIN_REVIEW = "basin-review"
+BASIN_REPLAY = "basin-replay"
 ARMS = ("proposer", "algorithm", "hybrid")
 SEEDS = (100, 101)
 BUDGET = {"max_evaluations": 1000, "wall_seconds": 180.0, "starts": 2}
@@ -42,13 +47,16 @@ def _plan(payload):
     count = len(payload["graphs"]) * len(SEEDS)
     return {
         "protocol": PROTOCOL,
+        "profile": payload["profile"],
         "intake_sha256": payload["artifact_sha256"],
         "settings": SETTINGS.model_dump(mode="json"),
         "seeds": list(SEEDS),
         "arms": list(ARMS),
         "fit_budget": BUDGET,
         "maximum_fit_slots": len(ARMS) * count,
-        "maximum_generation_requests": 2 * count,
+        "maximum_generation_requests": 0
+        if payload["profile"] == BASIN_REPLAY
+        else 2 * count,
         "runtime_source": runtime_source_hash(),
         "entrypoints": {p: file_hash(pilot.REPO / p) for p in ENTRYPOINTS},
         "validation_identity": VALIDATION,
@@ -64,27 +72,39 @@ def load(root: Path) -> tuple[dict, dict]:
     return plan, payload
 
 
-def prepare(root: Path, source: Path):
+def training_case(data: dict, row: dict) -> dict:
+    """Restore only the public training trajectories belonging to this graph."""
+    case = data["cases"][row["case"]]
+    return {
+        **case,
+        "evidence": {**case["evidence"], "trajectories": data["train"][row["dataset"]]},
+    }
+
+
+def prepare(root: Path, source: Path, profile: str = FIXED):
+    from autoformalism.research.preproposal_cases import BASIN
     from autoformalism.research.trajectory_function_families import build_shortlist
     from autoformalism.research.trajectory_function_fitting import validate_formula
 
     src = sealed_read(source)
     if src["artifact_sha256"] != TRAIN:
         raise ValueError("Expected the registered six-graph training-only cohort")
+    if profile not in (FIXED, SOURCE_REVIEW, BASIN_REVIEW):
+        raise ValueError("Unknown function-construction profile")
+    graphs = [
+        r for r in src["graphs"] if profile != BASIN_REVIEW or r["dataset"] == BASIN
+    ]
+    if not graphs:
+        raise ValueError("No matching graphs in the registered intake")
     with _lock(root / "prepare-lock"):
         if (root / "plan.json").exists():
-            return load(root)[0]
+            plan, _ = load(root)
+            if plan["profile"] != profile:
+                raise ValueError("This output root belongs to a different profile")
+            return plan
         menus = []
-        for row in src["graphs"]:
-            case = src["cases"][row["case"]]
-            frozen = {
-                **case,
-                "evidence": {
-                    **case["evidence"],
-                    "trajectories": src["train"][row["dataset"]],
-                },
-            }
-            menu = build_shortlist(row["graph"], frozen)
+        for row in graphs:
+            menu = build_shortlist(row["graph"], training_case(src, row))
             if len(menu["candidates"]) != 2:
                 raise ValueError("Expected exactly two complete algorithm candidates")
             for form in menu["candidates"]:
@@ -94,12 +114,14 @@ def prepare(root: Path, source: Path):
             root / "intake.json",
             {
                 "source": TRAIN,
-                "graphs": src["graphs"],
-                "cases": src["cases"],
-                "train": src["train"],
+                "profile": profile,
+                "graphs": graphs,
+                "cases": {r["case"]: src["cases"][r["case"]] for r in graphs},
+                "train": {r["dataset"]: src["train"][r["dataset"]] for r in graphs},
                 "menus": menus,
                 "observations": {
-                    k: prompts.observations(v) for k, v in src["train"].items()
+                    k: prompts.observations(src["train"][k])
+                    for k in sorted({r["dataset"] for r in graphs})
                 },
             },
         )
@@ -118,7 +140,8 @@ def slots(payload):
 
 def _request(payload, g, arm):
     r = payload["graphs"][g]
-    return prompts.request(
+    interface = prompts if payload["profile"] == FIXED else revision_prompts
+    return interface.request(
         r["graph"],
         payload["cases"][r["case"]],
         payload["observations"][r["dataset"]],
@@ -144,11 +167,85 @@ def _read_candidate(root, plan, i):
     return result
 
 
-def run(root, endpoint, *, runtime_record=None, transport=None, token_transport=None):
+def assess_reply(payload, g, arm, raw):
+    """Keep fixed replies on their parent and bind approved edits to a child graph."""
+    from autoformalism.research.trajectory_function_revision import assess_revision
+
+    row = payload["graphs"][g]
+    menu = payload["menus"][g]["candidates"]
+    route, reason = "fixed_graph", None
+    if payload["profile"] == FIXED:
+        formula, origin = prompts.to_formula(raw, menu)
+    else:
+        route, formula, origin, reason = revision_prompts.decode_reply(
+            row["graph"], raw, menu, hybrid=arm == "hybrid"
+        )
+    if route == "request_topology_change":
+        review = assess_revision(
+            row["graph"], training_case(payload, row), formula, reason
+        )
+        # The parent hash stays on the slot. Only an admitted child is executable.
+        fields = {k: v for k, v in review.items() if k not in {"formula", "graph"}}
+        record = {
+            "route": route,
+            "scientific_reason": reason,
+            "origin": origin,
+            **fields,
+        }
+        if review["status"] == "eligible":
+            record.update(
+                formula=review["formula"],
+                revised_graph=review["graph"],
+                revised_graph_sha256=content_hash(review["graph"]),
+            )
+        return record
+    return fixed_candidate(payload, row, formula, origin)
+
+
+def fixed_candidate(payload, row, formula, origin):
+    """Record a fixed formula, keeping the parent identifier owned by the slot."""
     from autoformalism.research.trajectory_function_fitting import validate_formula
+    from autoformalism.research.trajectory_function_revision import assess_fixed
+
+    route = "fixed_graph"
+    if payload["profile"] != FIXED:
+        review = assess_fixed(row["graph"], training_case(payload, row), formula)
+        return {
+            "route": route,
+            "origin": origin,
+            **{k: v for k, v in review.items() if k != "graph"},
+        }
+    try:
+        validate_formula(row["graph"], formula)
+    except (ValueError, ModelValidationError) as exc:
+        return {"status": "invalid_formula", "route": route, "reason": str(exc)}
+    return {"status": "eligible", "route": route, "formula": formula, "origin": origin}
+
+
+def algorithm_candidate(data, g, rank):
+    """Apply the same formula checks to the two algorithmic reference models."""
+    form = data["menus"][g]["candidates"][rank]
+    return fixed_candidate(data, data["graphs"][g], form, "ranked_family")
+
+
+def fitting_graph(candidate, row):
+    """Resolve the graph attached to this candidate before fitting or scoring."""
+    if candidate["graph"] != row["structure_sha256"]:
+        raise ValueError("Candidate parent graph differs from its slot")
+    if candidate.get("route") == "request_topology_change":
+        graph = candidate["revised_graph"]
+        if content_hash(graph) != candidate["revised_graph_sha256"]:
+            raise ValueError("Revised graph differs from its admission")
+        return graph
+    return row["graph"]
+
+
+def run(root, endpoint, *, runtime_record=None, transport=None, token_transport=None):
     from scripts import submit_t2_breadth
 
     plan, p = load(root)
+    if p["profile"] == BASIN_REPLAY:
+        raise ValueError("Saved reply replay has no generation allowance")
     if transport is None:
         if runtime_record is None:
             raise ValueError("Live generation requires the sealed 20B runtime record")
@@ -168,11 +265,8 @@ def run(root, endpoint, *, runtime_record=None, transport=None, token_transport=
                 "plan": plan["artifact_sha256"],
                 "seed": SEEDS[rank],
             }
-            menu = p["menus"][g]["candidates"]
             if arm == "algorithm":
-                record.update(
-                    status="eligible", formula=menu[rank], origin="ranked_family"
-                )
+                record.update(algorithm_candidate(p, g, rank))
             else:
                 system, user, schema = _request(p, g, arm)
                 reply = pilot._ask(
@@ -196,12 +290,9 @@ def run(root, endpoint, *, runtime_record=None, transport=None, token_transport=
                 if reply["status"] == "visible":
                     try:
                         raw = schema.model_validate(reply["value"]).model_dump()
-                        form, origin = prompts.to_formula(raw, menu)
-                        validate_formula(row["graph"], form)
+                        record.update(assess_reply(p, g, arm, raw))
                     except (ValueError, ModelValidationError) as exc:
                         record.update(status="invalid_formula", reason=str(exc))
-                    else:
-                        record.update(status="eligible", formula=form, origin=origin)
                 elif reply.get("error"):
                     record["reason"] = reply["error"]
             sealed_write(path, record)
@@ -268,7 +359,7 @@ def fit(root, index):
         else:
             sealed_write(directory / "reservation.json", identity)
             result = fit_formula(
-                row["graph"],
+                fitting_graph(candidate, row),
                 candidate["formula"],
                 p["train"][row["dataset"]],
                 seed=SEEDS[rank],
@@ -340,7 +431,7 @@ def validate(root, validation: Path):
                     if candidate["artifact_sha256"] != fits[i]["candidate"]:
                         raise ValueError("Selected formula differs")
                     score = score_formula(
-                        row["graph"],
+                        fitting_graph(candidate, row),
                         candidate["formula"],
                         fits[i]["result"],
                         saved["rows"][row["dataset"]],
@@ -478,6 +569,9 @@ def main():
         c.add_argument("--root", type=Path, required=True)
         if name == "prepare":
             c.add_argument("--source", type=Path, required=True)
+            c.add_argument(
+                "--profile", choices=(FIXED, SOURCE_REVIEW, BASIN_REVIEW), default=FIXED
+            )
         if name == "run":
             c.add_argument("--endpoint", required=True)
             c.add_argument("--runtime-record", type=Path, required=True)
@@ -488,7 +582,7 @@ def main():
     args = parser.parse_args()
     root = args.root.resolve()
     if args.action == "prepare":
-        plan = prepare(root, args.source)
+        plan = prepare(root, args.source, args.profile)
         result = {
             "plan": plan["artifact_sha256"],
             "fit_slots": plan["maximum_fit_slots"],

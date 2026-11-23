@@ -76,3 +76,35 @@ On ACES, run the launcher from the extracted phase-c-trajectory-functions-20b-v1
     bash scripts/hpc/start_trajectory_functions_aces.sh run
     bash scripts/hpc/start_trajectory_functions_aces.sh status
     bash scripts/hpc/start_trajectory_functions_aces.sh inspect
+
+## Source changes proposed during function construction
+
+The proposer now chooses a route. On `fixed_graph` it writes equations with the existing sources or, in the hybrid arm, selects a complete shortlisted model. On `request_topology_change` it gives the scientific reason and the complete equations and parameter starts. The runtime derives added and removed sources from the expressions. Receivers, variable types, and permitted initializer dependencies stay fixed during this experiment. A malformed fixed-graph reply receives an error in its selected route.
+
+For a requested change the runtime screens the actual child graph against the public requirements, assigned memory and all observed generated variables in training. The fitter, validation scorer and report use that same child graph. Both routes in the new experiment check for reserved names and, where applicable, an algebraically identifiable defect in the internal basin transfer. For named basin depths, multiply each derivative by its surveyed area before checking whether upstream-dependent transfer terms cancel. Some forms remain undecidable. A passing transfer check establishes only this identity on the expression domain; the rollout report also measures downstream depth, water gain and predictive error.
+
+### What the archived basin replies contained
+
+Eight 20B replies and four algorithm controls from ACES job 2404388 were replayed. Seven original replies had failed the fixed-source check. In the replay the auditor submitted each of those seven unchanged formula bundles as a hypothetical source change. No earlier answer contained this route choice or its scientific reason.
+
+- Slots 024 and 025 proposed the same equations from different coefficient starts. With $[x]_+=\max(x,0)$ the proposed transfer was $Q=k_u[h_u-c_u]_+$ and the outlet was $D=k_d[h_d-c_d]_+$. The volume balances were $A_u\dot h_u=q_u-Q$ and $A_d\dot h_d=q_d+Q-D$. Both starts converged to training NMSE 0.06050. The training-selected fit obtained validation NMSE 0.07528 on three events, versus 4.81232 for the selected fixed model on the same parent. The minimum predicted validation depth rose from −1.421 m to 0.128 m.
+- Slot 031 passed the graph screen. Its upstream balance lost one copy of $Q$ while downstream received $A_u Q$. In a public training event with $A_u=800$ and upstream depth above crest, total storage gained an extra $799Q$. Setting the common coefficient to zero would remove the required transfer. The runtime rejected this formula before fitting.
+- Three replies used undeclared flows; one omitted the runoff sources and declared unused coefficients. The one previously eligible hybrid reply remained eligible. Fitting used the original budget and training split, then froze the winners before validating. The comparison uses a previously inspected validation set.
+
+Run the offline replay from the project root. Each command verifies saved records before resuming.
+
+    study=output/basin-function-revision-20261123/replay
+    .venv/bin/python -m scripts.replay_trajectory_function_revisions --archive output/trajectory-functions-20261123/returned --root "$study"
+    .venv/bin/python -m scripts.trajectory_functions validate --root "$study" --validation output/trajectory-functions-20261123/inputs/validation.json
+    .venv/bin/python -m scripts.trajectory_functions inspect --root "$study"
+
+### Prospective ACES test
+
+The `basin-review` profile uses the same two basin parents, two seeds and three arms, with a ceiling of eight new 20B requests and twelve CPU fit slots. Each reply records its actual route and reason. The `source-review` profile enables the same interface on all six registered graphs. The published fixed-graph run remains reproducible with its original bundle at commit `55f1731`.
+
+On ACES, from the new extracted directory:
+
+    bash scripts/hpc/start_trajectory_functions_aces.sh preflight basin-review
+    bash scripts/hpc/start_trajectory_functions_aces.sh run basin-review
+    bash scripts/hpc/start_trajectory_functions_aces.sh status basin-review
+    bash scripts/hpc/start_trajectory_functions_aces.sh inspect basin-review
