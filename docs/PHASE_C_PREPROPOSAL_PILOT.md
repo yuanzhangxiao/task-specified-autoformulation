@@ -120,19 +120,31 @@ Three paired proposer seeds (100–102) run on one H100 with a two-hour wall lim
 From the Mac checkout:
 
 ```bash
-af_out=output/complete-graphs-delivery-20261122
+af_out=output/topology-admission-replay-20261123
 .venv/bin/python -m scripts.package_preproposal_selection_20b --complete-graphs --case output/preproposal-public-cases-gap-20261122/selection-intake.json --out "$af_out" --harmony output/initialization-provider-recovery-delivery/assets/harmony
-scp "$af_out/phase-c-complete-graphs-20b-v1.tar.gz" aces:/scratch/group/p.nairr260351.000/u.yx126462/
+scp "$af_out/phase-c-complete-graphs-20b-v2.tar.gz" aces:/scratch/group/p.nairr260351.000/u.yx126462/
 ```
 
 On ACES:
 
 ```bash
 cd /scratch/group/p.nairr260351.000/u.yx126462
-tar -xzf phase-c-complete-graphs-20b-v1.tar.gz && cd phase-c-complete-graphs-20b-v1
+tar -xzf phase-c-complete-graphs-20b-v2.tar.gz && cd phase-c-complete-graphs-20b-v2
 sha256sum --quiet -c SHA256SUMS && bash scripts/hpc/start_complete_graphs_aces.sh preflight && bash scripts/hpc/start_complete_graphs_aces.sh run
 ```
 
-Use `status` on the same launcher to check progress, `run` to reconcile an ambiguous submission, `resume` after interruption and `inspect` to package the results. The results directory is `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-complete-graphs-20b-results-v1`. To view the exact messages for a prepared experiment locally, run `.venv/bin/python -m scripts.review_preproposal_pilot --portfolio-root <prepared-root> --out <review-directory>`.
+Use `status` on the same launcher to check progress, `run` to reconcile an ambiguous submission, `resume` after interruption and `inspect` to package the results. The results directory is `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-complete-graphs-20b-results-v2`. To view the exact messages for a prepared experiment locally, run `.venv/bin/python -m scripts.review_preproposal_pilot --portfolio-root <prepared-root> --out <review-directory>`.
 
 The inspection archive includes `admitted-graphs.json`. Each exported graph has its variable types, complete RHS source lists, initial-value rules and the recorded selection or repair origins. The pool in `intake.json` retains all admitted alternatives, including those the selectors did not choose. An inspection made before completion records its partial status. The export precedes interaction functions, signs and fitting.
+
+### Replaying the first complete-graph run
+
+Job 2403807 used the v1 bundle. The following local command rechecks that run's saved replies, selected graphs and CPU pools using the corrected code. It reads only the archived training evidence and needs no GPU.
+
+```bash
+.venv/bin/python -m scripts.replay_topology_admission
+```
+
+The checker merges a second declaration of an inventory variable when its type and source set agree. It shows both definitions when they conflict. Additive repair tries missing dependencies and pathways on an otherwise usable graph. The generator connects a driver through the assigned memory to the target on a single path. Surveyed covariates can enter the RHS. In the reviewed basin inventory the physical upstream-depth state starts at its measured event depth, which the runtime includes in the exported graph.
+
+Of 40 graphs in the original CPU pools, 36 still pass. Of the 34 originally selected, 30 still pass. The four exclusions all used a shared constant for the measured upstream depth. Replaying graph-first proposals and their allowed repairs yields 113 distinct T2 graphs from eight parents. These results concern structural admission. The next design question is [how training trajectories should inform function construction](PHASE_C_TRAJECTORY_GUIDED_FUNCTIONS.md).

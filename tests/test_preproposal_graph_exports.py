@@ -8,10 +8,32 @@ import pytest
 
 from autoformalism.rebuttal.prefit_replay import sealed_write
 from autoformalism.research.preproposal_complete_graphs import generate_pool
-from autoformalism.research.preproposal_topology import assess_topology
+from autoformalism.research.preproposal_topology import assess_topology, reply_schema
 from scripts import preproposal_selection_20b as cli
-from scripts.preproposal_graph_exports import admitted_graphs
+from scripts.preproposal_graph_exports import _canonical, admitted_graphs
 from tests.test_preproposal_complete_graphs import inputs
+
+
+def test_export_normalizes_raw_reply_without_shadowing_a_conflicting_definition():
+    case, frozen = inputs()
+    frozen["allow_topology_latents"] = True
+    row = generate_pool(case, frozen, max_candidates=1)["candidates"][0]
+    graph, digest = row["graph"], row["structure_sha256"]
+    schema = reply_schema(case, frozen)
+    canonical = _canonical(case, frozen, schema, graph, digest)
+    duplicate = deepcopy(graph)
+    duplicate["new_latents"] = [
+        {
+            "name": "level",
+            "kind": "differential",
+            "sources": graph["sources"]["level"][::-1],
+        }
+    ]
+    assert _canonical(case, frozen, schema, duplicate, digest) == canonical
+    # The latent copy alone would still produce the recorded structural digest.
+    duplicate["sources"]["level"].append("forged_source")
+    with pytest.raises(ValueError, match=r"Conflicting declarations.*forged_source"):
+        _canonical(case, frozen, schema, duplicate, digest)
 
 
 def test_deduplicate_admitted_selection_origins_and_keep_added_latents(

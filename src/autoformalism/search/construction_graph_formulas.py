@@ -177,7 +177,7 @@ def runtime_observed_initial_rules(
     contract: GraphConstructionContract,
     state_aliases: Mapping[str, str] | None,
 ) -> tuple[dict[str, dict], list[dict]]:
-    """Lower attested generated auxiliary t0 identities without supervision.
+    """Lower attested auxiliary or fixed-covariate t0 identities without fitting.
 
     The historical topology compiler aliases generated auxiliary states and
     deliberately omits auxiliary observation mappings. A reviewed same-channel
@@ -199,10 +199,13 @@ def runtime_observed_initial_rules(
         state = aliases.get(scientific_state, scientific_state)
         if state in direct:
             continue
+        generated_auxiliary = (
+            scientific_state == channel
+            and state != scientific_state
+            and channel in context.auxiliaries
+        )
         if (
-            scientific_state != channel
-            or state == scientific_state
-            or channel not in context.auxiliaries
+            not (generated_auxiliary or channel in context.fixed_covariates)
             or channel not in contract.permitted_public_initials
             or state not in states
             or states[state].kind.value != "latent"

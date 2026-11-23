@@ -11,17 +11,13 @@ from autoformalism.staged_topology import content_hash
 def _canonical(case, frozen, schema, graph, digest):
     """Recover all generated types and initial rules; verify the admission identity."""
     reply = schema.model_validate(graph).model_dump(mode="json", by_alias=True)
+    reply = topology.normalize_declarations(case, reply)
     kinds = {row.name: row.kind for row in case.inventory}
     kinds.update({r["name"]: r["kind"] for r in reply.get("new_latents", ())})
     states = sorted(name for name, kind in kinds.items() if kind == "differential")
     sources = {k: sorted(v) for k, v in topology.graph_sources(reply).items()}
-    initials = {}
-    for record in reply["latent_initializers"]:
-        rule = record["rule"].copy()
-        if rule["mode"] == "map":
-            for key in ("public_initials", "state_initials"):
-                rule[key] = sorted(rule[key])
-        initials[record["state"]] = rule
+    handoff = topology.initial_handoff(reply["latent_initializers"], frozen)
+    initials = topology.structural_initializers(handoff, frozen)
     if (
         content_hash({"states": states, "sources": sources, "initializers": initials})
         != digest

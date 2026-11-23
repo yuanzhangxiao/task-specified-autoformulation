@@ -14,7 +14,7 @@ case "${2:-repair}" in
     AF_CLI="$AF_REPO_ROOT/scripts/preproposal_selection_20b.py"
     AF_SOURCE="$AF_REPO_ROOT/inputs/preproposal.json"
     if [[ "$2" == complete-graphs ]]; then
-      export AF_OUTPUT_ROOT=${AF_COMPLETE_GRAPHS_ROOT:-$AF_GROUP/phase-c-complete-graphs-20b-results-v1}
+      export AF_OUTPUT_ROOT=${AF_COMPLETE_GRAPHS_ROOT:-$AF_GROUP/phase-c-complete-graphs-20b-results-v2}
       AF_JOB_NAME=phasec-graphs-20b
     elif [[ "$2" == matched-selection ]]; then
       export AF_OUTPUT_ROOT=${AF_PREPROPOSAL_MATCHED_ROOT:-$AF_GROUP/phase-c-preproposal-matched-20b-results-v2}

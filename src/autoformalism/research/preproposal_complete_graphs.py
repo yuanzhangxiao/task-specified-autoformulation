@@ -35,21 +35,24 @@ def _graph_proposal(
     latent = sorted(states - observed.keys())
     maps = {name: set() for name in latent}
     histories = sorted(set(frozen["histories"]) - set(nodes))
-    fixed = sorted(set(context.get("fixed_covariates", ())) & set(permitted))
+    fixed = sorted(context.get("fixed_covariates", ()))
     graph = {name: set() for name in nodes}
     available_sources = set(nodes) | set(histories) | set(fixed)
     common = frozen.get("shared_hidden_initials", False)
 
-    def route(source, target, *, memory=False):
+    def route(source, target, *, memory=False, exclude=()):
         if source == target or target not in graph or source not in available_sources:
             return
-        possible = sorted((states if memory else set(nodes)) - {source, target})
+        possible = sorted(
+            (states if memory else set(nodes)) - {source, target} - set(exclude)
+        )
         # A differential receiver already supplies memory for its own trajectory.
         direct = not memory or (target in states and source != target)
         if possible and (not direct or rng.randrange(3) == 0):
             middle = rng.choice(possible)
             graph[middle].add(source)
             graph[target].add(middle)
+            return middle
         else:
             graph[target].add(source)
 
@@ -62,8 +65,12 @@ def _graph_proposal(
             for source in requirement.drivers:
                 if assigned := assignments.get(requirement.id):
                     for state in assigned:
-                        route(source, state)
-                        route(state, target)
+                        # Keep both legs on one path through the assigned state.
+                        prefix_node = route(source, state, exclude=(target,))
+                        excluded = set(requirement.drivers)
+                        if prefix_node is not None:
+                            excluded.add(prefix_node)
+                        route(state, target, exclude=excluded)
                 else:
                     route(source, target, memory=requirement.requires_dynamic_memory)
     for dependency in brief.target_dependencies:
@@ -227,6 +234,10 @@ def generate_pool(
         "seed": seed,
         "inventory_roles": frozen.get("inventory_roles", {}),
         "mechanism_bindings": frozen.get("mechanism_bindings", []),
+        **(
+            {"measured_initial_bindings": frozen["measured_initial_bindings"]}
+            if frozen.get("measured_initial_bindings") else {}
+        ),
         "limits": {
             "max_checks": max_checks,
             "max_draws": max_draws,
@@ -313,6 +324,10 @@ def graph_selection_messages(
                 "inventory": [v.model_dump() for v in case.inventory],
                 "inventory_roles": pool["inventory_roles"],
                 "mechanism_bindings": pool["mechanism_bindings"],
+                **(
+                    {"measured_initial_bindings": pool["measured_initial_bindings"]}
+                    if pool.get("measured_initial_bindings") else {}
+                ),
                 "graphs": [
                     {
                         "graph_id": row["candidate_id"],

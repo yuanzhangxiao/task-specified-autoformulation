@@ -61,3 +61,30 @@ def test_already_good_and_unparsable_graphs():
         "invalid_parent_schema",
         0,
     )
+
+
+def test_apply_repairs_to_canonical_graph_while_preserving_original_parent():
+    case, _, frozen, graph = case_and_choice()
+    frozen["allow_topology_latents"] = True
+    graph["sources"]["level"] = ["rain"]  # store has no path to a target
+    original_run = repair.assess_and_repair(case, graph, frozen)
+    graph["new_latents"] = [
+        {"name": "level", "kind": "differential", "sources": ["rain"]}
+    ]
+    saved = deepcopy(graph)
+    repeated = repair.assess_and_repair(case, graph, frozen)
+    assert repeated["parent"] == graph == saved
+    assert repeated["merged_inventory_redeclarations"] == ["level"]
+    assert repeated["repair_status"] == "repaired"
+    assert repeated["repairs"] == original_run["repairs"]
+    assert all(c["graph"]["new_latents"] == [] for c in repeated["repairs"])
+    assert any("store" in c["graph"]["sources"]["level"] for c in repeated["repairs"])
+
+
+def test_permanently_undeclared_source_skips_additive_search():
+    case, _, frozen, graph = case_and_choice()
+    graph["sources"]["level"].append("missing_channel")
+    result = repair.assess_and_repair(case, graph, frozen)
+    assert "missing_channel" in result["reason"]
+    assert result["repair_status"] == "outside_additive_repair_scope"
+    assert result["checked"] == 0 and result["repairs"] == []

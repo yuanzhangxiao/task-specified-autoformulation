@@ -12,7 +12,12 @@ from autoformalism.research.preproposal_observed_gate import (
     check_bound_memories,
 )
 from autoformalism.research.preproposal_selection import DeclaredVariable, SelectionCase
-from autoformalism.research.t2_breadth import Component, Topology, check_topology
+from autoformalism.research.t2_breadth import (
+    Component,
+    MissingTopologyPath,
+    Topology,
+    check_topology,
+)
 from autoformalism.schemas.base import Identifier, StrictSchema
 from autoformalism.schemas.staged_topology import PublicScientificBrief
 from autoformalism.search.construction_initialization_graph import (
@@ -105,6 +110,44 @@ def graph_sources(reply: dict) -> dict:
     }
 
 
+def normalize_declarations(case: SelectionCase, reply: dict) -> dict:
+    """Remove inventory copies whose type and unordered, unique RHS sources agree."""
+    if not reply.get("new_latents"):
+        return reply
+    inventory = {v.name: v.kind for v in case.inventory}
+    additions, conflicts = {}, []
+    for entry in reply["new_latents"]:
+        name = entry["name"]
+        if name not in inventory:
+            if name in additions:
+                raise ValueError(
+                    f"Multiple new_latents entries for {name}: {additions[name]} "
+                    f"and {entry}. Return one intended definition for this name."
+                )
+            additions[name] = entry
+            continue
+        existing, repeated = reply["sources"][name], entry["sources"]
+        if (
+            inventory[name] == entry["kind"]
+            and len(existing) == len(set(existing))
+            and len(repeated) == len(set(repeated))
+            and set(existing) == set(repeated)
+        ):
+            continue
+        conflicts.append(
+            f"{name}: inventory {inventory[name]} with sources {list(existing)}, "
+            f"new_latents {entry['kind']} with sources {list(repeated)}"
+        )
+    if conflicts:
+        raise ValueError(
+            "Conflicting declarations. "
+            + "; ".join(conflicts)
+            + ". Put the intended unique RHS sources in the inventory variable's "
+            "sources entry. Reserve new_latents for newly named variables."
+        )
+    return {**reply, "new_latents": list(additions.values())}
+
+
 def _choice(case, choice):
     candidate_id = (
         choice["candidate_id"] if isinstance(choice, dict) else choice.candidate_id
@@ -140,7 +183,60 @@ def _initial_channels(states, evidence, frozen):
         and s in evidence.contract.initial_rules
         and evidence.contract.initial_rules[s].mode == "observed_initial"
     }
+    for state, channel in frozen.get("measured_initial_bindings", {}).items():
+        if (
+            state not in states
+            or channel not in permitted
+            or channel not in evidence.context.fixed_covariates
+            or (state in observed and observed[state] != channel)
+        ):
+            raise ValueError(f"Invalid measured initial binding for {state}: {channel}")
+        observed[state] = channel
     return observed, sorted(permitted)
+
+
+def initial_handoff(records, frozen):
+    """Resolve older dependency-only maps against exact public initial measurements."""
+    handoff = GraphDependencyHandoff.model_validate({"records": records})
+    bindings = frozen.get("measured_initial_bindings", {})
+    if not bindings:
+        return handoff
+    remaining = []
+    permitted = set(frozen["initials"]) | {frozen["target"]}
+    for record in handoff.records:
+        channel = bindings.get(record.state)
+        if channel is None:
+            remaining.append(record)
+            continue
+        rule = record.rule
+        if not (
+            isinstance(rule, GraphMapDependency)
+            and channel in rule.public_initials
+            and set(rule.public_initials) <= permitted
+            and not rule.state_initials
+        ):
+            raise ValueError(
+                f"The public measurement fixes {record.state}(0) = {channel}. "
+                f"Omit the initializer for {record.state}; the runtime supplies it."
+            )
+        # No formula exists yet. The identity satisfies this map's allowed public
+        # arguments, even if additional permitted measurements were available.
+    return handoff.model_copy(update={"records": tuple(remaining)})
+
+
+def structural_initializers(handoff, frozen):
+    """Include exact measured-coordinate bindings in the canonical graph identity."""
+    rules = {
+        state: {"mode": "observed_initial", "channel": channel}
+        for state, channel in frozen.get("measured_initial_bindings", {}).items()
+    }
+    for record in handoff.records:
+        rule = record.rule.model_dump(mode="json")
+        for key in ("state_initials", "public_initials"):
+            if key in rule:
+                rule[key] = sorted(rule[key])
+        rules[record.state] = rule
+    return rules
 
 
 def topology_messages(case, choice, frozen_case, *, source_checklist=None):
@@ -160,9 +256,7 @@ def topology_messages(case, choice, frozen_case, *, source_checklist=None):
         "training_evidence": case.evidence_summary,
         "inventory": [v.model_dump() for v in case.inventory],
         "supplied_histories": frozen_case["histories"],
-        "fixed_covariates": sorted(
-            set(evidence.context.fixed_covariates).intersection(permitted)
-        ),
+        "fixed_covariates": sorted(evidence.context.fixed_covariates),
         "time": evidence.context.time_symbol,
         "observed_initials": observed,
         "permitted_baseline_readings": permitted,
@@ -198,8 +292,9 @@ def topology_messages(case, choice, frozen_case, *, source_checklist=None):
         packet["initializer_owners"] = sorted(_state_names(case) - observed.keys())
         extension_instruction = (
             "Choose RHS names from available_rhs_names or a variable you explicitly "
-            "declare in new_latents with its name, kind, and sources. Use [] when no "
-            "new variable is needed. A history or initial-value label is not an RHS "
+            "declare in new_latents with its name, kind, and sources. Put existing "
+            "variables' equations in sources only. Use new_latents: [] when the "
+            "inventory suffices. A history or initial-value label is not an RHS "
             "name. A source can reach the target through another variable. Route "
             "each assigned memory state along its public requirement's pathway. Give "
             "latent_initializers only for initializer_owners and new differential "
@@ -219,6 +314,12 @@ def topology_messages(case, choice, frozen_case, *, source_checklist=None):
         + extension_instruction
         + "Include the other public pathways. For each latent differential state "
         + latent_instruction
+        + (
+            "For each state listed in observed_initials, the exact initial value comes "
+            "from its listed channel. Omit its latent_initializers record. "
+            if frozen_case.get("measured_initial_bindings")
+            else ""
+        )
         + "The runtime supplies "
         "the observed initials. Give the topology and its scientific hypothesis.",
         json.dumps(packet, ensure_ascii=False, sort_keys=source_checklist is not None),
@@ -291,6 +392,11 @@ def assess_topology(
             .model_validate(value)
             .model_dump(by_alias=True)
         )
+        submitted_additions = reply.get("new_latents", ())
+        reply = normalize_declarations(case, reply)
+        merged = {entry["name"] for entry in submitted_additions} & generated
+        if merged:
+            result["merged_inventory_redeclarations"] = sorted(merged)
         additions = reply.get("new_latents", ())
         new_names = [entry["name"] for entry in additions]
         reserved = (
@@ -301,10 +407,11 @@ def assess_topology(
             | {context.time_symbol}
             | {variable.name for variable in brief.public_variables}
         )
-        if len(new_names) != len(set(new_names)) or reserved.intersection(new_names):
+        if collisions := reserved.intersection(new_names):
             raise ValueError(
-                "Each new latent needs a unique name distinct from existing "
-                "variables and channels"
+                f"Names already reserved by the public task: {sorted(collisions)}. "
+                "Use supplied channels by name in RHS sources, or choose a distinct "
+                "name for a new latent variable."
             )
         known = reserved | set(new_names)
         for name in new_names:
@@ -336,9 +443,7 @@ def assess_topology(
                 for name, sources in graph.items()
             ),
         )
-        handoff = GraphDependencyHandoff.model_validate(
-            {"records": reply["latent_initializers"]}
-        )
+        handoff = initial_handoff(reply["latent_initializers"], frozen_case)
         if frozen_case.get("shared_hidden_initials") and any(
             record.rule.mode != "value" for record in handoff.records
         ):
@@ -358,7 +463,7 @@ def assess_topology(
         allowed_rhs = (
             generated
             | set(frozen_case["histories"])
-            | (set(context.fixed_covariates) & set(permitted))
+            | set(context.fixed_covariates)
             | {context.time_symbol}
         )
         unknown = set().union(*graph.values()) - allowed_rhs
@@ -396,6 +501,7 @@ def assess_topology(
             "status": "invalid_topology",
             "reason": str(exc),
             "public_graph_check": "failed",
+            "repairable_by_additions": isinstance(exc, MissingTopologyPath),
         }
 
     checks = {}
@@ -451,13 +557,7 @@ def assess_topology(
         status = "unresolved"
     else:
         status = "topology_screen_passed"
-    initials_by_state = {}
-    for record in handoff.records:
-        rule = record.rule.model_dump(mode="json")
-        for key in ("state_initials", "public_initials"):
-            if key in rule:
-                rule[key] = sorted(rule[key])
-        initials_by_state[record.state] = rule
+    initials_by_state = structural_initializers(handoff, frozen_case)
     return {
         **result,
         "status": status,
@@ -484,6 +584,10 @@ def assess_topology(
                 "initializers": initials_by_state,
             }
         ),
-        "initializers": reply["latent_initializers"],
+        "initializers": [record.model_dump(mode="json") for record in handoff.records],
+        **(
+            {"measured_initial_bindings": frozen_case["measured_initial_bindings"]}
+            if frozen_case.get("measured_initial_bindings") else {}
+        ),
         "hypothesis": reply["hypothesis"],
     }

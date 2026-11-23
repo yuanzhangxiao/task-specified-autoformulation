@@ -176,6 +176,10 @@ class FiveGlucoseRepairs(StrictSchema):
     alternatives: tuple[InScopeRevisionReply, ...] = Field(min_length=5, max_length=5)
 
 
+class MissingTopologyPath(ValueError):
+    """A missing causal connection that adding an edge could address."""
+
+
 def check_topology(
     topology: Topology,
     context: ValidationContext,
@@ -227,7 +231,7 @@ def check_topology(
             relevant.setdefault(source, set()).add(state)
     for name in nodes:
         if not any(_path(relevant, name, t) for t in targets):
-            raise ValueError(f"{name} has no path to an output.")
+            raise MissingTopologyPath(f"{name} has no path to an output.")
     for req in brief.requirements:
         for src in req.drivers:
             for dst in req.targets:
@@ -238,7 +242,7 @@ def check_topology(
                         for state in states - {src}
                     )
                 ):
-                    raise ValueError(
+                    raise MissingTopologyPath(
                         f"Missing required path {src} -> {dst}. "
                         f"Requires memory: {req.requires_dynamic_memory}."
                     )
@@ -247,7 +251,7 @@ def check_topology(
             _path(graph, aliases.get(src, src), dep.target)
             for src in dep.acceptable_sources
         ):
-            raise ValueError(
+            raise MissingTopologyPath(
                 f"{dep.target} needs a path from one of {list(dep.acceptable_sources)}."
             )
 

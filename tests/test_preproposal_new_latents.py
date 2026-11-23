@@ -1,6 +1,7 @@
 """At topology time a proposer can introduce a fully specified latent variable."""
 
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -145,4 +146,46 @@ def test_new_graph_instruction_names_observed_and_owned_fields():
     assert (
         "new_latents"
         in topology.reply_schema(case, frozen).model_json_schema()["properties"]
+    )
+
+
+def test_merge_only_equivalent_inventory_rows_and_keep_genuine_new_state():
+    case, choice, frozen, graph = extended_graph("algebraic")
+    expected = topology.assess_topology(case, choice, graph, frozen)
+    graph["new_latents"].append(
+        {"name": "level", "kind": "differential", "sources": ["capture", "store"]}
+    )
+    original = deepcopy(graph)
+    checked = topology.assess_topology(case, choice, graph, frozen)
+    assert checked["status"] == repair.PASS
+    assert checked["merged_inventory_redeclarations"] == ["level"]
+    assert checked["structure_sha256"] == expected["structure_sha256"]
+    assert "capture" in checked["sources"]
+    assert graph == original
+
+
+@pytest.mark.parametrize(
+    ("kind", "rhs"),
+    [
+        ("algebraic", ["store", "capture"]),
+        ("differential", ["rain"]),
+        ("differential", ["store", "store", "capture"]),
+    ],
+)
+def test_conflicting_inventory_row_reports_both_definitions_without_patch_search(
+    kind, rhs
+):
+    case, choice, frozen, graph = extended_graph("algebraic")
+    graph["new_latents"].append({"name": "level", "kind": kind, "sources": rhs})
+    checked = topology.assess_topology(case, choice, graph, frozen)
+    assert checked["status"] == "invalid_topology"
+    assert (
+        "level: inventory differential with sources ['store', 'capture']"
+        in checked["reason"]
+    )
+    assert f"new_latents {kind} with sources {rhs}" in checked["reason"]
+    result = repair.assess_and_repair(case, graph, frozen)
+    assert (result["repair_status"], result["checked"]) == (
+        "outside_additive_repair_scope",
+        0,
     )

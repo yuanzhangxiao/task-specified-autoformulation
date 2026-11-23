@@ -13,11 +13,30 @@ EXIT_RECEIPTS = {
     1: ("001", "5430f7cc595c579f9209fa233ea837653ca9a7cc10d791d56ff42d8fb309ffb6"),
     3: ("000", "c0dd84e656d432825c3ba48e28208e859e5a51c5716b55f539c9b17b529fa0a4"),
 }
-NAME = "phase-c-complete-graphs-20b-v1"
+NAME = "phase-c-complete-graphs-20b-v2"
 LAUNCHER = "scripts/hpc/start_complete_graphs_aces.sh"
 SEEDS = (100, 101, 102)
 MAX_CHECKS = 64
 MAX_GRAPHS = 8
+
+
+def with_reviewed_initial_bindings(frozen: dict) -> dict:
+    """Bind the measured upstream depth only for the reviewed physical inventory."""
+    receipt = frozen.get("provenance", {}).get("receipt_sha256")
+    if (
+        frozen["case_id"] != cases.BASIN_CASE
+        or receipt != cases.STAGED[cases.BASIN_CASE][3]
+    ):
+        return frozen
+    expected_state = {"name": "h_up", "kind": "differential"}
+    role = frozen.get("inventory_roles", {}).get("h_up")
+    if (
+        frozen["evidence"]["sha256"] != cases.STAGED[cases.BASIN_CASE][4]
+        or role != "state of upstream basin depth"
+        or expected_state not in frozen["inventory"]
+    ):
+        raise ValueError("Reviewed upstream depth declaration or measurement differs")
+    return {**frozen, "measured_initial_bindings": {"h_up": "initial_up"}}
 
 
 def read_variable_exits(project: Path, frozen: dict) -> dict:
@@ -93,7 +112,7 @@ def portfolio_cases(verified: dict, exits: dict) -> dict:
             }
     for item in frozen.values():
         item.update(check_all_measured=True, allow_topology_latents=True)
-    return frozen
+    return {key: with_reviewed_initial_bindings(item) for key, item in frozen.items()}
 
 
 def prepare_payload(frozen: dict) -> dict:

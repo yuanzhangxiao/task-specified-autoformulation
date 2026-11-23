@@ -71,7 +71,7 @@ def _catalogue(case: SelectionCase, frozen: dict, graph: dict) -> list[Edit]:
     equations = topology.graph_sources(graph)
     names = set(equations)
     initial_names = set(frozen["initials"]) | {case.target}
-    fixed = set(context.get("fixed_covariates", ())) & initial_names
+    fixed = set(context.get("fixed_covariates", ()))
     ongoing = names | set(frozen["histories"]) | fixed
     edits = [
         Edit("add_source", target, source)
@@ -79,9 +79,10 @@ def _catalogue(case: SelectionCase, frozen: dict, graph: dict) -> list[Edit]:
         for source in sorted(ongoing - set(deps) - {target})
     ]
     if not frozen.get("shared_hidden_initials", False):
+        measured = frozen.get("measured_initial_bindings", {})
         for initial in graph["latent_initializers"]:
             state, rule = initial["state"], initial["rule"]
-            if state not in names:
+            if state not in names or state in measured:
                 continue
             for source in sorted(initial_names - set(rule.get("public_initials", ()))):
                 edits.append(Edit("add_public_initial", state, source))
@@ -161,6 +162,12 @@ def assess_and_repair(
     except ValidationError:
         result["repair_status"] = "invalid_parent_schema"
         return result
+    if parent.get("repairable_by_additions") is False:
+        result["repair_status"] = "outside_additive_repair_scope"
+        return result
+    # Apply patches to a single authoritative RHS. Retain the raw parent above
+    # so both the submitted declaration and its deterministic merge are auditable.
+    graph = topology.normalize_declarations(case, graph)
     edits = _catalogue(case, frozen, graph)
     result["atomic_edits"] = len(edits)
     successful_singles = set()

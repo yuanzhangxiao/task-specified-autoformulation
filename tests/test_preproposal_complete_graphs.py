@@ -1,12 +1,15 @@
 """Complete graph selections reference the same preverified pool."""
 
 import json
+import random
 from copy import deepcopy
 
 import pytest
 from pydantic import ValidationError
 
 from autoformalism.research import preproposal_complete_graphs as graphs
+from autoformalism.research import preproposal_topology as topology
+from autoformalism.research.preproposal_observed_gate import check_bound_memories
 from autoformalism.research.preproposal_topology import assess_topology
 from tests.test_preproposal_topology import case_and_choice
 
@@ -94,3 +97,35 @@ def test_common_hidden_preparation_does_not_create_initial_maps():
             r["rule"] == {"mode": "value", "scope": "shared_training"}
             for r in row["graph"]["latent_initializers"]
         )
+
+
+def test_constructed_route_carries_the_driver_through_the_assigned_state():
+    case, frozen = inputs()
+    frozen["public_brief"]["requirements"] = [
+        {
+            "id": "storage",
+            "drivers": ["upstream"],
+            "targets": ["level"],
+            "public_requirement": "Upstream conditions affect level via stored water.",
+            "requires_dynamic_memory": True,
+        }
+    ]
+    bindings = [{"requirement_id": "storage", "memory_states": ["store"]}]
+    frozen["mechanism_bindings"] = bindings
+    evidence, brief = topology._inputs(case, frozen)
+    states = topology._state_names(case)
+    observed, permitted = topology._initial_channels(states, evidence, frozen)
+    for seed in range(24):
+        graph = graphs._graph_proposal(
+            case,
+            frozen,
+            {"variables": {}},
+            states,
+            observed,
+            permitted,
+            brief,
+            0,
+            random.Random(seed),
+            2,
+        )
+        check_bound_memories(graph["sources"], states, brief, bindings)

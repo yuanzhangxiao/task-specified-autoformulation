@@ -275,7 +275,9 @@ def validate_contract(
         )
         if extra := set(contract.permitted_public_initials) - public:
             raise ValueError(f"unknown public initial channels: {sorted(extra)}")
-        measured = set(context.targets) | set(context.auxiliaries)
+        # Explicitly attested t0 measurements may be per-trajectory fixed
+        # covariates, e.g. the surveyed initial depth of an upstream basin.
+        measured = set(context.targets + context.auxiliaries + context.fixed_covariates)
         if extra := set(contract.observed_initial_channels.values()) - measured:
             raise ValueError(
                 f"identity-observed source is not a measured channel: {sorted(extra)}"

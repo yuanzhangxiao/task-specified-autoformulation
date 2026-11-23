@@ -7,6 +7,7 @@ from functools import lru_cache
 from itertools import combinations
 from math import comb
 
+from autoformalism.research.t2_breadth import MissingTopologyPath
 from autoformalism.search.mechanism_realizations import _memory_target_witness
 from autoformalism.search.preproposal_screen import _forcing_value
 from autoformalism.search.topology_compatibility import (
@@ -360,7 +361,7 @@ def check_bound_memories(graph, states, brief, bindings):
                 for source in sorted(drivers)
                 for target in sorted(targets)
             ):
-                raise ValueError(
+                raise MissingTopologyPath(
                     f"{rid} has no qualified path from a public driver through "
                     f"assigned memory {memory} to a public target"
                 )
@@ -378,7 +379,7 @@ def _path_via_memory(outgoing, source, memory, target, drivers):
         current, prefix = pending.pop()
         examined += 1
         if examined > 8192:
-            raise ValueError(
+            raise MissingTopologyPath(
                 "Could not certify the bound memory path within 8192 prefixes"
             )
         for child in sorted(outgoing.get(current, ())):
