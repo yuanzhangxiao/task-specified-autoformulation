@@ -110,6 +110,25 @@ def test_paired_insulin_arm_changes_only_training_gap(archives):
     }
 
 
+def test_proposer_checklist_explains_each_measured_target_and_public_paths(archives):
+    first = cases.source_checklist(archives[cases.T2_CASE])
+    second = cases.source_checklist(archives[cases.T2_GAP_CASE])
+    assert first["variables"]["I"]["must_have_groups"][0]["at_least_one_of"] == [
+        "history:EGP",
+        "history:Gt",
+    ]
+    assert len(second["variables"]["I"]["must_have_groups"]) == 3
+    assert second["variables"]["I"]["insufficient_example"]["conflicting_pairs"] == 7
+    assert first["variables"]["Gp"] == second["variables"]["Gp"]
+    assert first["variables"]["U"]["status"] == "algebraic"
+    assert first["variables"]["Uid"]["status"] == "no_public_target_trajectory_check"
+    assert "meal_pathway" in {r["id"] for r in first["public_required_paths"]}
+    assert first["public_target_dependencies"][0]["target"] == "U"
+    basin = cases.source_checklist(archives[cases.BASIN_CASE])
+    assert basin["variables"]["h_down"]["must_have_groups"] == []
+    assert basin["public_required_paths"]
+
+
 def test_declared_auxiliary_loses_its_future_history(archives):
     fresh = archives[cases.T2_CASE]
     row = cases._case(
@@ -187,6 +206,17 @@ def test_live_variable_exit_supports_typed_inputs_and_explicit_permissions():
     case = cases.from_variable_exit(**kw)
     assert case["histories"] == ["rain"] and case["initials"] == []
     assert cases.selection_case(case)["candidates"][0]["sources"] == ["history:rain"]
+    common = cases.from_variable_exit(
+        **(kw | {"initials": ("level", "upstream", "spill")}),
+        shared_hidden_initials=True,
+    )
+    assert common["screen_initials"] == ["upstream"]
+    assert cases.screen_case(common).optional_options == (
+        "history:rain",
+        "initial:upstream",
+    )
+    guide = cases.source_checklist(common)
+    assert "shared across trajectories" in guide["latent_initial_values"]
     assert (
         cases.from_variable_exit(**kw, minimum_target_gap=1.0)["minimum_target_gap"]
         == 1.0

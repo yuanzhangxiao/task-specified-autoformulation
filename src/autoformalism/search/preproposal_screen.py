@@ -251,6 +251,101 @@ def assess_options(result: ScreenResult, options: tuple[str, ...]) -> SubsetAsse
     )
 
 
+def _example(row: ScreenWitness) -> dict:
+    return {
+        "trajectories": list(row.trajectories),
+        "time": row.time,
+        "observed_target_values": list(row.observations),
+    }
+
+
+def source_constraints(result: ScreenResult, input_histories: tuple[str, ...]) -> dict:
+    """Project pair comparisons to necessary alternatives and a witnessed failure.
+
+    If the fixed sources could already distinguish a pair, that pair cannot
+    require another source. Otherwise, a distinguishing source must be among
+    the different *or unknown* options. A subset of such a clause implies its
+    supersets. Only the stronger clauses need to be shown to the proposer.
+    """
+    fixed = set(result.required_options)
+    alternatives: dict[frozenset[str], ScreenWitness] = {}
+    for row in result.witnesses:
+        possible_sources = frozenset((*row.different, *row.unknown))
+        if not fixed.isdisjoint(possible_sources):
+            continue
+        previous = alternatives.get(possible_sources)
+        if previous is None or row.pair_error_floor > previous.pair_error_floor:
+            alternatives[possible_sources] = row
+    minimal: list[frozenset[str]] = []
+    clauses = []
+    for options in sorted(alternatives, key=lambda s: (len(s), sorted(s))):
+        if any(previous <= options for previous in minimal):
+            continue
+        minimal.append(options)
+        if not options:
+            break
+        row = alternatives[options]
+        clauses.append(
+            {
+                "at_least_one_of": sorted(options),
+                "example": _example(row),
+                **(
+                    {"uncertain_for_this_pair": list(row.unknown)}
+                    if row.unknown
+                    else {}
+                ),
+            }
+        )
+
+    # Try the familiar model with all external inputs, then the fixed roots
+    # alone. Show an actual contradiction only if equality is established.
+    example = None
+    optional_inputs = tuple(
+        sorted(
+            set(result.optional_options).intersection(
+                f"history:{name}" for name in input_histories
+            )
+        )
+    )
+    for selected in (optional_inputs, ()):
+        available = fixed.union(selected)
+        failing = [
+            w
+            for w in result.witnesses
+            if available.isdisjoint((*w.different, *w.unknown))
+        ]
+        if failing:
+            example = {
+                "using_only": sorted(available),
+                "conflicting_pairs": len(failing),
+                **_example(max(failing, key=lambda w: w.pair_error_floor)),
+            }
+            break
+
+    return {
+        "status": result.status,
+        "additional_target_gap": result.minimum_target_gap,
+        "fixed_sources": list(result.required_options),
+        "training_pairs": result.pair_count,
+        "must_have_groups": clauses,
+        "minimal_additional_source_sets": [list(c.options) for c in result.candidates],
+        "insufficient_example": example,
+        **(
+            {
+                "no_catalogued_source_can_distinguish": _example(
+                    alternatives[frozenset()]
+                )
+            }
+            if frozenset() in alternatives
+            else {}
+        ),
+        "unresolved_pairs_with_all_sources": assess_options(
+            result, result.optional_options
+        ).unresolved_pairs,
+        **({"unavailable": list(result.unavailable)} if result.unavailable else {}),
+    }
+
+
 def _enumerate(
     target: str,
     required: tuple[str, ...],

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import random
 from typing import Annotated, Literal
 
 from pydantic import Field, create_model, model_validator
 
 from autoformalism.schemas.base import Identifier, StrictSchema
+from autoformalism.staged_topology import content_hash
 
 Option = Annotated[str, Field(pattern=r"^(history|initial):[A-Za-z_][A-Za-z0-9_]*$")]
 Token = Annotated[str, Field(min_length=1, max_length=128)]
@@ -106,7 +108,23 @@ def skipped_outcome(case: SelectionCase) -> dict:
     }
 
 
-def selection_schema(case: SelectionCase) -> type[SelectionReply]:
+def matched_count(case: SelectionCase) -> int:
+    """Select half a nonempty menu, rounded down, with one to three choices."""
+    return min(MAX_CHOICES, max(1, len(case.candidates) // 2))
+
+
+def uniform_ids(case: SelectionCase, seed: int) -> list[str]:
+    """Draw from the same immutable menu independently of the proposer."""
+    ids = sorted(row.candidate_id for row in case.candidates)
+    rng = random.Random(
+        content_hash(["uniform-source-sets-v2", case.case_id, ids, seed])
+    )
+    return rng.sample(ids, matched_count(case))
+
+
+def selection_schema(
+    case: SelectionCase, *, matched: bool = False
+) -> type[SelectionReply]:
     """Restrict the live JSON grammar to IDs from this specific inventory."""
     if not needs_selection(case):
         raise ValueError("no decision required for this case")
@@ -121,12 +139,19 @@ def selection_schema(case: SelectionCase) -> type[SelectionReply]:
         __base__=SelectionReply,
         selections=(
             tuple[choice, ...],
-            Field(min_length=1, max_length=min(len(ids), MAX_CHOICES)),
+            Field(
+                min_length=matched_count(case) if matched else 1,
+                max_length=matched_count(case)
+                if matched
+                else min(len(ids), MAX_CHOICES),
+            ),
         ),
     )
 
 
-def messages(case: SelectionCase) -> tuple[str, str]:
+def messages(
+    case: SelectionCase, *, source_checklist: dict | None = None
+) -> tuple[str, str]:
     """Freeze the target and scientific choice, independently of later topology."""
     if not needs_selection(case):
         raise ValueError("no decision required for this case")
@@ -145,7 +170,23 @@ def messages(case: SelectionCase) -> tuple[str, str]:
     packet = case.model_dump(
         mode="json", exclude={"case_id", "target", "evidence_sha256"}
     )
-    return system, json.dumps({"target": case.target, **packet}, ensure_ascii=False)
+    if source_checklist is not None:
+        system = (
+            f"Select exactly {matched_count(case)} distinct listed source combinations "
+            f"for {case.target}, in order of scientific preference. "
+            "Read the checklist of information that must reach each measured target. "
+            "Each listed choice clears the selected target's training comparison. "
+            "Which connections best explain the public mechanisms? history:X means "
+            "X is available through time. initial:X means its observed initial value. "
+            "Return the IDs and your reasons."
+        )
+        packet.pop("evidence_summary")
+        packet["source_checklist"] = source_checklist
+    return system, json.dumps(
+        {"target": case.target, **packet},
+        ensure_ascii=False,
+        sort_keys=source_checklist is not None,
+    )
 
 
 def assess(case: SelectionCase, reply: SelectionReply) -> dict:

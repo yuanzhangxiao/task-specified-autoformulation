@@ -43,3 +43,57 @@ sha256sum --quiet -c SHA256SUMS && bash scripts/hpc/start_preproposal_selection_
 ```
 
 Use `status` on the same launcher to see scheduler and trial status, `resume` for an interrupted submission, and `inspect` for the inspection archive. Checkpoints store the exact requests, choices, replies and graph assessments. The default result root is `/scratch/group/p.nairr260351.000/u.yx126462/phase-c-preproposal-selection-20b-results-v1`.
+
+## Matched selection and graph-first repair
+
+This experiment uses the same public training cases and five seeds per insulin menu. For each measured target, each displayed “at least one” requirement lists alternative sources that could distinguish a pair of training trajectories in time. A choice must satisfy every such requirement. The menu contains the smallest combinations passing this test. The public mechanism requirements and the full graph still need checking.
+
+| Arm | What it does |
+| --- | --- |
+| Scientific selection | GPT-OSS-20B chooses one of the two exact-screen options, or three of the six options at 1 pmol/L. For each choice it writes a complete graph. |
+| Uniform selection | The runtime samples the same number of options without replacement. For the same case, seed and option both arms use the same graph request and share its response. |
+| Graph first | GPT-OSS-20B writes a graph before choosing any options. The runtime then generates and checks bounded edits. Report the original graph and any surviving edits separately. |
+
+The scientific and uniform arms compare how well their selections yield eligible graphs. Their graph-generation budget is equal and the scientific arm also pays for selection. The graph-first arm evaluates whether a proposed graph can pass the checks or be repaired by the runtime. The maximum is 60 physical generation requests on one H100 for one hour. This measures graph yield on the training evidence. Function construction, fitting and forecast evaluation come later.
+
+For a failed graph-first reply with a valid schema, the runtime tries adding an RHS source from the existing inventory or permitted supplied quantities, adding a permitted observed initial value to a latent initializer, and pairs of these edits. It checks each edited graph against the public graph rules and all measured differential targets. It retains the passing edits for which no smaller patch passed. A common hidden preparation excludes changes to initializer arguments. The cap is 1,024 checked patches per parent, with an explicit flag if enumeration stops early. Counts of independently proposed graphs and their algorithm-generated descendants are reported separately.
+
+The offline seed-102 replay reads the original topology and formula receipts. The formula reply chose a trajectory-specific initial value for `Uid`. To compare wiring inside this time-zero pilot, the replay also evaluates the same topology with a shared initial value for `Uid`, recording both outcomes.
+
+```bash
+.venv/bin/python -m scripts.replay_preproposal_graph_repair --source output/preproposal-public-cases-gap-20261122/frozen-cases.json --out output/preproposal-matched-review-20261122/seed102-repairs.json
+```
+
+From the Mac checkout, build or upload the delivery as follows. Packaging reads tracked source from the current commit.
+
+```bash
+af_case=output/preproposal-public-cases-gap-20261122/selection-intake.json
+af_out=output/preproposal-matched-delivery-20261122
+.venv/bin/python -m scripts.package_preproposal_selection_20b --matched --case "$af_case" --out "$af_out" --harmony output/initialization-provider-recovery-delivery/assets/harmony
+scp "$af_out/phase-c-preproposal-matched-20b-v2.tar.gz" aces:/scratch/group/p.nairr260351.000/u.yx126462/
+```
+
+In the ACES login shell, verify the bundle, preflight every prompt and submit the job.
+
+```bash
+cd /scratch/group/p.nairr260351.000/u.yx126462
+tar -xzf phase-c-preproposal-matched-20b-v2.tar.gz && cd phase-c-preproposal-matched-20b-v2
+sha256sum --quiet -c SHA256SUMS && bash scripts/hpc/start_preproposal_matched_aces.sh preflight && bash scripts/hpc/start_preproposal_matched_aces.sh run
+```
+
+Run `status` on the same launcher to check Slurm and the experiment. If Slurm times out while acknowledging submission, repeating `run` reconciles the original intent. Use `resume` after an interrupted job. Once the job has finished, package and download the results.
+
+```bash
+# On ACES, from the extracted directory
+bash scripts/hpc/start_preproposal_matched_aces.sh inspect
+# On the Mac
+scp aces:/scratch/group/p.nairr260351.000/u.yx126462/phase-c-preproposal-matched-20b-results-v2/inspection.tar.gz ~/Downloads/preproposal-matched-20b-inspection.tar.gz
+```
+
+To regenerate the prompt review locally:
+
+```bash
+af_review=output/preproposal-matched-review-20261122
+.venv/bin/python -m scripts.preproposal_selection_20b prepare --matched --source "$af_case" --root "$af_review/plan"
+.venv/bin/python -m scripts.review_preproposal_pilot --matched-root "$af_review/plan" --out "$af_review"
+```

@@ -10,11 +10,16 @@ case "${2:-repair}" in
     AF_CLI="$AF_REPO_ROOT/scripts/topology_repair_20b.py"
     AF_SOURCE="$AF_REPO_ROOT/inputs/case.json"
     AF_JOB_NAME=phasec-topo-edit-20b ;;
-  selection)
-    export AF_OUTPUT_ROOT=${AF_PREPROPOSAL_ROOT:-$AF_GROUP/phase-c-preproposal-selection-20b-results-v1}
+  selection|matched-selection)
     AF_CLI="$AF_REPO_ROOT/scripts/preproposal_selection_20b.py"
     AF_SOURCE="$AF_REPO_ROOT/inputs/preproposal.json"
-    AF_JOB_NAME=phasec-preselect-20b ;;
+    if [[ "$2" == matched-selection ]]; then
+      export AF_OUTPUT_ROOT=${AF_PREPROPOSAL_MATCHED_ROOT:-$AF_GROUP/phase-c-preproposal-matched-20b-results-v2}
+      AF_JOB_NAME=phasec-matched-20b
+    else
+      export AF_OUTPUT_ROOT=${AF_PREPROPOSAL_ROOT:-$AF_GROUP/phase-c-preproposal-selection-20b-results-v1}
+      AF_JOB_NAME=phasec-preselect-20b
+    fi ;;
   *) echo 'Unknown topology experiment.' >&2; exit 2 ;;
 esac
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
@@ -25,8 +30,10 @@ if ! "$AF_PYTHON" "$AF_CLI" --help >/dev/null 2>&1; then
 fi
 case "${1:-}" in
   run|resume|preview|preflight)
-    if [[ "$1" == preflight && "${2:-repair}" != selection ]]; then echo "The preflight action is for screened selection." >&2; exit 2; fi
-    "$AF_PYTHON" "$AF_CLI" prepare --root "$AF_OUTPUT_ROOT" --source "$AF_SOURCE" >/dev/null
+    if [[ "$1" == preflight && "${2:-repair}" == repair ]]; then echo "The preflight action is for screened selection." >&2; exit 2; fi
+    AF_PREPARE=(prepare --root "$AF_OUTPUT_ROOT" --source "$AF_SOURCE")
+    [[ "${2:-repair}" != matched-selection ]] || AF_PREPARE+=(--matched)
+    "$AF_PYTHON" "$AF_CLI" "${AF_PREPARE[@]}" >/dev/null
     if [[ "$1" == preview || "$1" == preflight ]]; then exec "$AF_PYTHON" "$AF_CLI" "$1" --root "$AF_OUTPUT_ROOT"; fi
     export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
     if [[ -z "${AF_HF_HOME:-}" ]]; then

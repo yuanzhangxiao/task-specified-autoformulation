@@ -10,6 +10,7 @@ from autoformalism.research import preproposal_selection as selection
 from autoformalism.research import preproposal_topology as topology
 from autoformalism.search.preproposal_screen import assess_options
 from autoformalism.search.topology_compatibility import TrainingCompatibilityEvidence
+from scripts import preproposal_selection_20b as campaign
 from scripts.audit_preproposal_transfer import all_time_conflicts
 
 
@@ -342,13 +343,59 @@ def render(project, folder, transfer, out):
     (out / "replay.json").write_text(json.dumps(records, indent=2))
 
 
+def render_matched(root: Path, out: Path) -> Path:
+    """Show the requests and schemas taken from the prepared matched plan."""
+    plan, _ = campaign.load(root)
+    if plan["protocol"] != campaign.pilot.PREPROPOSAL_MATCHED_20B:
+        raise ValueError("A prepared matched selection plan is required")
+    sections = [
+        "<p>Both selectors receive the same source combinations. One uses a 20B "
+        "scientific judgment; the other draws uniformly. For the same seed and "
+        "combination they share one graph response. A third arm asks for a graph "
+        "first and lets the runtime generate repairs.</p>",
+        f"<p>Plan <code>{escape(plan['artifact_sha256'])}</code>. "
+        f"Maximum {plan['maximum_generation_requests']} generation requests.</p>",
+    ]
+    for case in campaign.preview(root):
+        sections.append(f"<h2>{escape(case['case_id'])}</h2>")
+        if "system" not in case:
+            sections.append(pre(case["status"]))
+            continue
+        for title, request in (
+            ("Scientific selection", case),
+            ("Graph for an example source combination", case["graph_example"]),
+            ("Graph before repair", case["graph_first"]),
+        ):
+            sections.extend(
+                [
+                    f"<h3>{title}</h3>",
+                    pre(request["system"]),
+                    pre(request["user"]),
+                    "<details><summary>Reply schema</summary>"
+                    + pre(request["schema"])
+                    + "</details>",
+                ]
+            )
+    out.mkdir(parents=True, exist_ok=True)
+    target = out / "PROMPTS.html"
+    target.write_text(page("20B topology comparison prompts", sections))
+    return target
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--project", type=Path, default=Path(__file__).resolve().parents[1]
     )
-    parser.add_argument("--cases", type=Path, required=True)
-    parser.add_argument("--transfer", type=Path, required=True)
+    runs = parser.add_mutually_exclusive_group(required=True)
+    runs.add_argument("--matched-root", type=Path)
+    runs.add_argument("--cases", type=Path)
+    parser.add_argument("--transfer", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
-    render(args.project, args.cases, args.transfer, args.out)
+    if args.matched_root:
+        print(render_matched(args.matched_root, args.out))
+    else:
+        if not args.transfer:
+            parser.error("--cases requires --transfer")
+        render(args.project, args.cases, args.transfer, args.out)

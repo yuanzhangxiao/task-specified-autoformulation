@@ -22,7 +22,7 @@ from scripts.submit_structural_revision_aces import (
 
 
 def _trial(protocol):
-    if protocol == campaign.PREPROPOSAL_20B:
+    if protocol in (campaign.PREPROPOSAL_20B, campaign.PREPROPOSAL_MATCHED_20B):
         from scripts import preproposal_selection_20b
 
         return preproposal_selection_20b
@@ -43,6 +43,7 @@ def execution(plan, image, snapshot):
         campaign.FRESH_20B,
         campaign.TOPOLOGY_20B,
         campaign.PREPROPOSAL_20B,
+        campaign.PREPROPOSAL_MATCHED_20B,
     )
     values = aces.execution_identity(
         plan,
@@ -56,11 +57,13 @@ def execution(plan, image, snapshot):
             campaign.FITTED_20B,
             campaign.TOPOLOGY_20B,
             campaign.PREPROPOSAL_20B,
+            campaign.PREPROPOSAL_MATCHED_20B,
         )
         else "120b",
     )
     protocols = {
         campaign.PREPROPOSAL_20B: "preproposal-selection-aces-1",
+        campaign.PREPROPOSAL_MATCHED_20B: "preproposal-matched-selection-aces-2",
         campaign.TOPOLOGY_20B: "topology-repair-aces-1",
         campaign.PROTOCOL: "t2-three-origin-aces-2",
         campaign.fitted.PROTOCOL: "t2-fitted-residual-aces-1",
@@ -107,6 +110,7 @@ def _assets(plan):
             campaign.FITTED_20B,
             campaign.TOPOLOGY_20B,
             campaign.PREPROPOSAL_20B,
+            campaign.PREPROPOSAL_MATCHED_20B,
         )
         else aces._assets()
     )
@@ -245,6 +249,12 @@ def submit(root, resume=False):
             job_name, tag, worker = (
                 "phasec-preselect-20b",
                 "preselect",
+                "preproposal-selection",
+            )
+        elif plan["protocol"] == campaign.PREPROPOSAL_MATCHED_20B:
+            job_name, tag, worker = (
+                "phasec-matched-20b",
+                "matched-select",
                 "preproposal-selection",
             )
         argv = [

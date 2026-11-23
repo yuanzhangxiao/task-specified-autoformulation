@@ -14,6 +14,7 @@ from autoformalism.search.preproposal_screen import (
     ScreenResult,
     assess_options,
     screen_target,
+    source_constraints,
 )
 from autoformalism.search.topology_compatibility import (
     TrainingCompatibilityEvidence,
@@ -168,6 +169,7 @@ def from_variable_exit(
     initials: Iterable[str],
     required_histories: Iterable[str] | None = None,
     minimum_target_gap: float = 0.0,
+    shared_hidden_initials: bool = False,
 ) -> dict:
     """Start a new case between an accepted variable stage and its first topology.
 
@@ -183,7 +185,7 @@ def from_variable_exit(
         != event["artifact_sha256"]
     ):
         raise ValueError("Variable-stage event digest differs")
-    return _case(
+    case = _case(
         case_id,
         target,
         inventory,
@@ -203,6 +205,19 @@ def from_variable_exit(
         required_histories,
         minimum_target_gap,
     )
+    if shared_hidden_initials:
+        case["shared_hidden_initials"] = True
+        # Without a latent initial map, an observed initial value can still
+        # propagate via its own differential state or as a fixed covariate.
+        typed = TrainingCompatibilityEvidence.model_validate(case["evidence"])
+        initial_sources = set(typed.context.fixed_covariates) | {
+            v["name"]
+            for v in inventory
+            if v["kind"] == "differential"
+            and v["name"] in _observed_readings(case["evidence"])
+        }
+        case["screen_initials"] = sorted(set(case["initials"]) & initial_sources)
+    return case
 
 
 def _observed_readings(evidence: dict) -> set[str]:
@@ -297,10 +312,87 @@ def screen_case(case: dict) -> ScreenResult:
         TrainingCompatibilityEvidence.model_validate(case["evidence"]),
         case["target"],
         histories=tuple(case["histories"]),
-        initials=tuple(case["initials"]),
+        initials=tuple(case.get("screen_initials", case["initials"])),
         required_histories=tuple(case["required_histories"]),
         minimum_target_gap=case.get("minimum_target_gap", 0.0),
     )
+
+
+def source_checklist(case: dict) -> dict:
+    """Summarize necessary source alternatives and public graph obligations.
+
+    Screen each declared measured differential target using its own initial
+    value, public requirements, and target-unit gap. The selected target's
+    experimental margin never carries over to another measured variable.
+    """
+    evidence = TrainingCompatibilityEvidence.model_validate(case["evidence"])
+    validate_evidence(evidence)
+    brief = PublicScientificBrief.model_validate(case["public_brief"])
+    permitted_initials = set(case["initials"]) | {case["target"]}
+    source_initials = set(case.get("screen_initials", case["initials"])) | {
+        case["target"]
+    }
+    histories = tuple(case["histories"])
+    by_variable = {}
+    for item in case["inventory"]:
+        name = item["name"]
+        if item["kind"] == "algebraic":
+            by_variable[name] = {"status": "algebraic"}
+            continue
+        if name not in evidence.context.targets:
+            by_variable[name] = {"status": "no_public_target_trajectory_check"}
+            continue
+        if name not in permitted_initials:
+            by_variable[name] = {
+                "status": "unresolved",
+                "unavailable": [
+                    "The observed initial value is unavailable at forecast time."
+                ],
+            }
+            continue
+        required = {
+            r.drivers[0]
+            for r in brief.requirements
+            if name in r.targets and len(r.drivers) == 1 and r.drivers[0] in histories
+        }
+        gap = 0.0
+        if name == case["target"]:
+            required.update(case["required_histories"])
+            gap = case.get("minimum_target_gap", 0.0)
+        result = screen_target(
+            evidence,
+            name,
+            histories=histories,
+            initials=tuple(sorted(source_initials - {name})),
+            required_histories=tuple(sorted(required)),
+            minimum_target_gap=gap,
+        )
+        by_variable[name] = source_constraints(result, evidence.context.external_inputs)
+    return {
+        "latent_initial_values": (
+            "One unknown constant per latent state, shared across trajectories."
+            if case.get("shared_hidden_initials")
+            else "A shared constant or a map of permitted initial values."
+        ),
+        "how_to_read": (
+            "At least one member of each must-have group must reach its target "
+            "in time. With the fixed sources, a minimal additional set covers "
+            "all measured differences. Further sources can matter scientifically. "
+            "history:X is supplied X through time. initial:X is the permitted "
+            "initial value of X. Either can act through other variables. In each "
+            "insufficient example, the listed information is equal and the target "
+            "values differ. The check assumes shared deterministic dynamics, "
+            "unique solutions and the stated initialization rules. Include all "
+            "public pathways."
+        ),
+        "variables": by_variable,
+        "public_required_paths": [
+            r.model_dump(mode="json", exclude_defaults=True) for r in brief.requirements
+        ],
+        "public_target_dependencies": [
+            d.model_dump(mode="json") for d in brief.target_dependencies
+        ],
+    }
 
 
 def selection_case(case: dict, screen: ScreenResult | None = None) -> dict:

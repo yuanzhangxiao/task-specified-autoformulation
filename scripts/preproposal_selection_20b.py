@@ -62,9 +62,17 @@ def _plan(payload: dict) -> dict:
 
     intake = selection.SelectionIntake.model_validate(payload["selection"])
     active = [c for c in intake.cases if selection.needs_selection(c)]
+    matched = "source_checklists" in payload
     branches = sum(min(selection.MAX_CHOICES, len(c.candidates)) for c in active)
-    return {
-        "protocol": PROTOCOL,
+    if matched:
+        branches = sum(
+            min(2 * selection.matched_count(c), len(c.candidates)) for c in active
+        ) + len(active)
+    entrypoints = ENTRYPOINTS
+    if matched:
+        entrypoints += ("scripts/hpc/start_preproposal_matched_aces.sh",)
+    plan = {
+        "protocol": pilot.PREPROPOSAL_MATCHED_20B if matched else PROTOCOL,
         "intake_sha256": content_hash(payload),
         "maximum_generation_requests": len(SEEDS) * (len(active) + branches),
         "maximum_selection_requests": len(SEEDS) * len(active),
@@ -76,24 +84,54 @@ def _plan(payload: dict) -> dict:
         "request_sha256": {
             c.case_id: content_hash(
                 [
-                    selection.messages(c),
-                    selection.selection_schema(c).model_json_schema(),
-                    topology.topology_schema(c).model_json_schema(),
+                    selection.messages(
+                        c,
+                        source_checklist=payload.get("source_checklists", {}).get(
+                            c.case_id
+                        ),
+                    ),
+                    selection.selection_schema(c, matched=matched).model_json_schema(),
+                    topology.topology_schema(
+                        c,
+                        shared_hidden_initials=matched
+                        and payload["frozen_cases"][c.case_id].get(
+                            "shared_hidden_initials", False
+                        ),
+                    ).model_json_schema(),
                 ]
             )
             for c in active
         },
         "runtime_source": runtime_source_hash(),
-        "entrypoints": {p: file_hash(pilot.REPO / p) for p in ENTRYPOINTS},
+        "entrypoints": {p: file_hash(pilot.REPO / p) for p in entrypoints},
         "test_data_opened": False,
         "optimizer_calls": 0,
         "automatic_followup": False,
     }
+    if matched:
+        plan.update(
+            sampling_design="one_candidate_topology_per_case_seed_and_source_set",
+            choices_per_arm={c.case_id: selection.matched_count(c) for c in active},
+            uniform_selections={
+                c.case_id: {str(s): selection.uniform_ids(c, s) for s in SEEDS}
+                for c in active
+            },
+            maximum_graph_first_requests=len(SEEDS) * len(active),
+            maximum_selected_topology_requests=len(SEEDS) * (branches - len(active)),
+        )
+    return plan
 
 
-def prepare(root: Path, source: Path) -> dict:
+def prepare(root: Path, source: Path, *, matched: bool = False) -> dict:
     """Rebuild public menus from frozen train-only evidence before submission."""
     payload = input_payload(source)
+    if matched:
+        from autoformalism.research.preproposal_cases import source_checklist
+
+        payload["source_checklists"] = {
+            key: source_checklist(frozen)
+            for key, frozen in payload["frozen_cases"].items()
+        }
     plan = _plan(payload)
     with _lock(root / "prepare-lock"):
         sealed_write(root / "intake.json", payload)
@@ -186,6 +224,52 @@ def _prefix(case, seed):
     return f"{case.case_id}--seed-{seed}"
 
 
+def _candidate_step(candidate_id: str) -> str:
+    return "source-" + content_hash(candidate_id)
+
+
+def _matched_draw(case, frozen, checklist, plan, seed, prefix, ask):
+    """Generate a blind graph per unique choice, including failed selections."""
+    from autoformalism.research import preproposal_graph_repair as repair
+    from autoformalism.research import preproposal_topology as topology
+
+    graph_schema = topology.topology_schema(
+        case, shared_hidden_initials=frozen.get("shared_hidden_initials", False)
+    )
+    ask(
+        prefix + "--graph-first",
+        "graph-first",
+        repair.graph_first_messages(case, frozen),
+        graph_schema,
+        lambda value: repair.assess_and_repair(case, value, frozen),
+    )
+    chosen = ask(
+        prefix + "--select",
+        "select",
+        selection.messages(case, source_checklist=checklist),
+        selection.selection_schema(case, matched=True),
+        lambda v: selection.assess(case, selection.SelectionReply.model_validate(v)),
+    )
+    selected_ids = {c["candidate_id"] for c in chosen.get("selected", [])}
+    selected_ids.update(plan["uniform_selections"][case.case_id][str(seed)])
+    for option in case.candidates:
+        if option.candidate_id not in selected_ids:
+            continue
+        choice = selection.SelectionChoice(
+            **option.model_dump(), rationale="Selected source set."
+        )
+        step = _candidate_step(option.candidate_id)
+        ask(
+            prefix + "--" + step,
+            step,
+            topology.topology_messages(
+                case, choice, frozen, source_checklist=checklist
+            ),
+            graph_schema,
+            lambda v, choice=choice: topology.assess_topology(case, choice, v, frozen),
+        )
+
+
 def run(root: Path, endpoint: str, *, transport=None, token_transport=None) -> dict:
     """Commit ranked choices, then realize each one in a separate cached call."""
     from autoformalism.research import preproposal_topology as topology
@@ -198,6 +282,33 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None) -> d
                 continue
             for seed in plan["seeds"]:
                 prefix = _prefix(case, seed)
+                if "source_checklists" in payload:
+
+                    def ask(slot, step, messages, schema, assessor, seed=seed):
+                        return _generate(
+                            root,
+                            plan,
+                            slot,
+                            step,
+                            seed,
+                            messages,
+                            schema,
+                            assessor,
+                            transport,
+                            token_transport,
+                            endpoint,
+                        )
+
+                    _matched_draw(
+                        case,
+                        payload["frozen_cases"][case.case_id],
+                        payload["source_checklists"][case.case_id],
+                        plan,
+                        seed,
+                        prefix,
+                        ask,
+                    )
+                    continue
                 chosen = _generate(
                     root,
                     plan,
@@ -234,6 +345,91 @@ def run(root: Path, endpoint: str, *, transport=None, token_transport=None) -> d
         return status(root)
 
 
+def _matched_status(root, plan, case, group):
+    """Compare paired seed outcomes and track checker/selection failures separately."""
+    portfolios = {"scientific": [], "uniform": []}
+    paired = Counter()
+    finished = 0
+    for seed in plan["seeds"]:
+        prefix = _prefix(case, seed)
+        first = _read_stage(root, plan, prefix + "--graph-first") or {
+            "status": "pending"
+        }
+        picked = _read_stage(root, plan, prefix + "--select") or {"status": "pending"}
+        ids = {
+            "scientific": [item["candidate_id"] for item in picked.get("selected", [])],
+            "uniform": plan["uniform_selections"][case.case_id][str(seed)],
+        }
+        draw = {"seed": seed, "graph_first": first, "scientific_selection": picked}
+        passed = {}
+        complete = first["status"] != "pending" and picked["status"] != "pending"
+        for arm, choices in ids.items():
+            branches = []
+            for candidate_id in choices:
+                slot = prefix + "--" + _candidate_step(candidate_id)
+                graph = _read_stage(root, plan, slot) or {"status": "pending"}
+                branches.append(
+                    {"candidate_id": candidate_id, "slot": slot, "topology": graph}
+                )
+                complete &= graph["status"] != "pending"
+            portfolios[arm].append(branches)
+            draw[arm] = branches
+            passed[arm] = any(
+                b["topology"]["status"] == "topology_screen_passed" for b in branches
+            )
+        if complete:
+            finished += 1
+            if picked["status"] != "selected":
+                paired["scientific_selection_failed"] += 1
+            elif passed["scientific"] and passed["uniform"]:
+                paired["both_passed"] += 1
+            elif passed["scientific"]:
+                paired["scientific_only"] += 1
+            elif passed["uniform"]:
+                paired["uniform_only"] += 1
+            else:
+                paired["neither_passed"] += 1
+        group["draws"].append(draw)
+    arm_summary = {}
+    for arm, draws in portfolios.items():
+        branches = [b for items in draws for b in items]
+        passing = [
+            b for b in branches if b["topology"]["status"] == "topology_screen_passed"
+        ]
+        arm_summary[arm] = {
+            "selection_frequencies": dict(Counter(b["candidate_id"] for b in branches)),
+            "topology_status_counts": dict(
+                Counter(b["topology"]["status"] for b in branches)
+            ),
+            "draws_with_passing_topology": sum(
+                any(b["topology"]["status"] == "topology_screen_passed" for b in items)
+                for items in draws
+            ),
+            "distinct_passing_topologies": len(
+                {b["topology"]["structure_sha256"] for b in passing}
+            ),
+        }
+    group.update(
+        seed_count=len(plan["seeds"]),
+        selections_per_arm=selection.matched_count(case),
+        scientific_selection_status_counts=dict(
+            Counter(d["scientific_selection"]["status"] for d in group["draws"])
+        ),
+        paired_draws=dict(paired),
+        selectors=arm_summary,
+        graph_first_initial_status_counts=dict(
+            Counter(d["graph_first"]["status"] for d in group["draws"])
+        ),
+        graph_first_repair_status_counts=dict(
+            Counter(
+                d["graph_first"].get("repair_status", "unassessed")
+                for d in group["draws"]
+            )
+        ),
+    )
+    return finished
+
+
 def status(root: Path) -> dict:
     """Keep model selection yield, topology admission and provider errors separate."""
     plan, payload = load(root)
@@ -253,6 +449,12 @@ def status(root: Path) -> dict:
             else selection.skipped_outcome(case)["status"],
             "draws": [],
         }
+        if "source_checklists" in payload:
+            if active:
+                expected += len(plan["seeds"])
+                finished += _matched_status(root, plan, case, group)
+            groups.append(group)
+            continue
         choices = Counter()
         ranked = Counter()
         first_choices = Counter()
@@ -356,15 +558,41 @@ def preview(root: Path) -> list[dict]:
         if not selection.needs_selection(case):
             values.append({"case_id": case.case_id, **selection.skipped_outcome(case)})
             continue
-        system, user = selection.messages(case)
-        values.append(
-            {
-                "case_id": case.case_id,
-                "system": system,
-                "user": json.loads(user),
-                "schema": selection.selection_schema(case).model_json_schema(),
-            }
-        )
+        checklist = payload.get("source_checklists", {}).get(case.case_id)
+        system, user = selection.messages(case, source_checklist=checklist)
+        entry = {
+            "case_id": case.case_id,
+            "system": system,
+            "user": json.loads(user),
+            "schema": selection.selection_schema(
+                case, matched=checklist is not None
+            ).model_json_schema(),
+        }
+        if checklist is not None:
+            from autoformalism.research import preproposal_graph_repair as repair
+            from autoformalism.research import preproposal_topology as topology
+
+            frozen = payload["frozen_cases"][case.case_id]
+            choice = selection.SelectionChoice(
+                **case.candidates[0].model_dump(), rationale="Selected source set."
+            )
+            for key, (system, user) in {
+                "graph_example": topology.topology_messages(
+                    case, choice, frozen, source_checklist=checklist
+                ),
+                "graph_first": repair.graph_first_messages(case, frozen),
+            }.items():
+                entry[key] = {
+                    "system": system,
+                    "user": json.loads(user),
+                    "schema": topology.topology_schema(
+                        case,
+                        shared_hidden_initials=frozen.get(
+                            "shared_hidden_initials", False
+                        ),
+                    ).model_json_schema(),
+                }
+        values.append(entry)
     return values
 
 
@@ -386,15 +614,35 @@ def preflight(root: Path) -> dict:
         )
         if not active:
             continue
-        selection.messages(case)
-        strict_provider_schema(selection.selection_schema(case).model_json_schema())
-        strict_provider_schema(topology.topology_schema(case).model_json_schema())
+        checklist = payload.get("source_checklists", {}).get(case.case_id)
+        if checklist is not None:
+            from autoformalism.research import preproposal_graph_repair as repair
+
+            repair.graph_first_messages(case, payload["frozen_cases"][case.case_id])
+        selection.messages(case, source_checklist=checklist)
+        strict_provider_schema(
+            selection.selection_schema(
+                case, matched=checklist is not None
+            ).model_json_schema()
+        )
+        strict_provider_schema(
+            topology.topology_schema(
+                case,
+                shared_hidden_initials=checklist is not None
+                and payload["frozen_cases"][case.case_id].get(
+                    "shared_hidden_initials", False
+                ),
+            ).model_json_schema()
+        )
         for option in case.candidates:
             choice = selection.SelectionChoice(
                 **option.model_dump(), rationale="Check assembly of this request."
             )
             topology.topology_messages(
-                case, choice, payload["frozen_cases"][case.case_id]
+                case,
+                choice,
+                payload["frozen_cases"][case.case_id],
+                **({"source_checklist": checklist} if checklist is not None else {}),
             )
     return {
         "status": "preflight_passed",
@@ -412,6 +660,15 @@ def preflight(root: Path) -> dict:
         },
         "generation_requests_started": 0,
         "optimizer_calls": 0,
+        **{
+            k: plan[k]
+            for k in (
+                "choices_per_arm",
+                "maximum_graph_first_requests",
+                "maximum_selected_topology_requests",
+            )
+            if k in plan
+        },
     }
 
 
@@ -423,13 +680,18 @@ def main() -> None:
     )
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--source", type=Path)
+    p.add_argument(
+        "--matched",
+        action="store_true",
+        help="Prepare the paired selector and graph-first experiment.",
+    )
     p.add_argument("--endpoint")
     p.add_argument("--runtime-record", type=Path)
     args = p.parse_args()
     if args.action == "prepare":
         if not args.source:
             p.error("prepare needs --source")
-        result = prepare(args.root, args.source)
+        result = prepare(args.root, args.source, matched=args.matched)
     elif args.action == "run":
         if not args.endpoint or not args.runtime_record:
             p.error("run needs a bound ACES runtime and endpoint")

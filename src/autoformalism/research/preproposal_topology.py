@@ -44,7 +44,13 @@ class LatentInitial(StrictSchema):
     justification: str = Field(min_length=1, max_length=2000)
 
 
-def topology_schema(case: SelectionCase) -> type[StrictSchema]:
+class CommonLatentInitial(LatentInitial):
+    rule: SharedInitial
+
+
+def topology_schema(
+    case: SelectionCase, *, shared_hidden_initials: bool = False
+) -> type[StrictSchema]:
     """Pin each receiver and its type to the completed variable stage."""
     # Aliases allow legal scientific identifiers that shadow Pydantic attributes.
     equations = create_model(
@@ -55,12 +61,13 @@ def topology_schema(case: SelectionCase) -> type[StrictSchema]:
             for i, v in enumerate(case.inventory)
         },
     )
+    initial = CommonLatentInitial if shared_hidden_initials else LatentInitial
     return create_model(
         "SelectedTopology",
         __base__=StrictSchema,
         hypothesis=(str, Field(min_length=1, max_length=1500)),
         sources=(equations, ...),
-        latent_initializers=(tuple[LatentInitial, ...], Field(max_length=64)),
+        latent_initializers=(tuple[initial, ...], Field(max_length=64)),
     )
 
 
@@ -102,15 +109,19 @@ def _initial_channels(states, evidence, frozen):
     return observed, sorted(permitted)
 
 
-def topology_messages(case, choice, frozen_case):
+def topology_messages(case, choice, frozen_case, *, source_checklist=None):
     """Expose the choice, permitted channels and public graph obligations."""
-    row, rationale = _choice(case, choice)
+    row, rationale = _choice(case, choice) if choice is not None else (None, None)
     evidence, brief = _inputs(case, frozen_case)
     observed, permitted = _initial_channels(_state_names(case), evidence, frozen_case)
     packet = {
         "target": case.target,
-        "selected_information": row.sources,
-        "rationale": rationale,
+        **({"selected_information": row.sources} if row is not None else {}),
+        **(
+            {"rationale": rationale}
+            if row is not None and source_checklist is None
+            else {}
+        ),
         "public_task": case.public_task,
         "training_evidence": case.evidence_summary,
         "inventory": [v.model_dump() for v in case.inventory],
@@ -126,15 +137,36 @@ def topology_messages(case, choice, frozen_case):
             v.model_dump() for v in brief.target_dependencies
         ],
     }
+    if source_checklist is not None:
+        for key in (
+            "training_evidence",
+            "required_paths",
+            "required_target_dependencies",
+        ):
+            del packet[key]
+        packet["source_checklist"] = source_checklist
+        packet["permitted_initial_values"] = packet.pop("permitted_baseline_readings")
+    selected_instruction = (
+        "Give the selected information a scientifically justified path to the target. "
+        if row is not None
+        else ""
+    )
+    latent_instruction = (
+        "give a shared constant (mode value, scope shared_training). Every run "
+        "starts with the same hidden initial values. "
+        if frozen_case.get("shared_hidden_initials")
+        else "give an initializer: a shared constant (mode value, scope "
+        "shared_training) or a map of state_initials and public_initials at time zero. "
+    )
     return (
         "Propose a complete topology for the declared variables. List sources for each "
         "derivative or algebraic value. Use the generated values of modeled variables. "
-        "Give the selected information a scientifically justified path to the target. "
-        "Include the other public pathways. For each latent differential state give "
-        "an initializer: a shared constant (mode value, scope shared_training) or a "
-        "map of state_initials and public_initials at time zero. The runtime supplies "
+        + selected_instruction
+        + "Include the other public pathways. For each latent differential state "
+        + latent_instruction
+        + "The runtime supplies "
         "the observed initials. Give the topology and its scientific hypothesis.",
-        json.dumps(packet, ensure_ascii=False),
+        json.dumps(packet, ensure_ascii=False, sort_keys=source_checklist is not None),
     )
 
 
@@ -157,16 +189,18 @@ def _actual_assessment(target, actual, evidence, minimum_target_gap=0.0):
     }
 
 
-def assess_topology(case, choice, value, frozen_case):
+def assess_topology(
+    case, choice, value, frozen_case, *, root_assessor=_actual_assessment
+):
     """Check public paths and the information upstream of each measured state."""
-    row, _ = _choice(case, choice)
+    row = _choice(case, choice)[0] if choice is not None else None
     evidence, brief = _inputs(case, frozen_case)
     context = evidence.context
     states = _state_names(case)
     generated = {v.name for v in case.inventory}
     observed, permitted = _initial_channels(states, evidence, frozen_case)
     result = {
-        "candidate_id": row.candidate_id,
+        "candidate_id": row.candidate_id if row is not None else None,
         "scientific_correctness_assessed": False,
     }
     try:
@@ -193,6 +227,12 @@ def assess_topology(case, choice, value, frozen_case):
         handoff = GraphDependencyHandoff.model_validate(
             {"records": reply["latent_initializers"]}
         )
+        if frozen_case.get("shared_hidden_initials") and any(
+            record.rule.mode != "value" for record in handoff.records
+        ):
+            raise ValueError(
+                "This task requires one shared initial constant per latent state."
+            )
         contract = build_contract(
             state_names=sorted(states),
             context=context,
@@ -264,9 +304,9 @@ def assess_topology(case, choice, value, frozen_case):
                 if target == case.target
                 else 0.0
             )
-            checks[target] = _actual_assessment(target, actual, evidence, gap)
+            checks[target] = root_assessor(target, actual, evidence, gap)
             if gap:
-                exact_target = _actual_assessment(target, actual, evidence)
+                exact_target = root_assessor(target, actual, evidence, 0.0)
         else:
             checks[target] = {
                 "status": "unresolved",
@@ -275,7 +315,7 @@ def assess_topology(case, choice, value, frozen_case):
             }
 
     missing = sorted(
-        (set(row.sources) | set(case.required_options))
+        (set(row.sources if row is not None else ()) | set(case.required_options))
         - set(checks[case.target]["actual_options"])
     )
     verdicts = {item["status"] for item in checks.values()}

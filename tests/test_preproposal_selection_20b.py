@@ -240,3 +240,74 @@ def test_two_arms_match_sampler_seeds_and_keep_separate_receipts(
     assert summary["physical_generation_requests"] == 20
     assert sampler_seeds[:10] == sampler_seeds[10:]
     assert len(set(sampler_seeds)) == 10
+
+
+def test_matched_selectors_share_graphs_and_uniform_survives_failure(
+    prepared, tmp_path
+):
+    _, source = prepared
+    root = tmp_path / "matched"
+    plan = cli.prepare(root, source, matched=True)
+    assert plan["choices_per_arm"] == {"reservoir": 1}
+    assert plan["maximum_generation_requests"] == 20
+    saved_ids = plan["uniform_selections"]["reservoir"]
+    checks = cli.preflight(root)
+    assert checks["maximum_selected_topology_requests"] == 10
+    assert checks["maximum_graph_first_requests"] == 5
+    assert checks["generation_requests_started"] == 0
+    example = cli.preview(root)[0]
+    menu = [c["candidate_id"] for c in example["user"]["candidates"]]
+    assert "source_checklist" in example["user"]
+    assert "rationale" not in example["graph_example"]["user"]
+    assert "selected_information" not in example["graph_first"]["user"]
+    seeds = {int(content_hash([s, "select", 0])[:8], 16) % 2**31: s for s in cli.SEEDS}
+    requests = []
+
+    def provider(url, body, timeout):
+        requests.append(body)
+        req = json.loads(body["messages"][1]["content"])
+        if "candidates" in req:
+            seed = seeds[body["seed"]]
+            if seed == 100:
+                raise TimeoutError("lost ranking reply")
+            selected = saved_ids[str(seed)][0]
+            if seed == 101:
+                selected = next(row for row in menu if row != selected)
+            return reply(
+                {
+                    "selections": [
+                        {"candidate_id": selected, "rationale": "Flows affect level."}
+                    ]
+                }
+            )
+        if "selected_information" in req:
+            assert isinstance(req["source_checklist"], dict) and "rationale" not in req
+        return reply(
+            {
+                "hypothesis": "Flow changes level.",
+                "sources": {
+                    "level": ["rain", "spill", "upstream"],
+                    "upstream": ["spill"],
+                },
+                "latent_initializers": [],
+            }
+        )
+
+    def run():
+        return cli.run(
+            root, "http://localhost", transport=provider, token_transport=tokenizer
+        )
+
+    summary = run()
+    assert summary == run()
+    group = summary["cases"][0]
+    assert summary["status"] == "complete" and summary["completed_active_draws"] == 5
+    assert summary["physical_generation_requests"] == len(requests) == 16
+    assert group["paired_draws"] == {"scientific_selection_failed": 1, "both_passed": 4}
+    assert group["graph_first_repair_status_counts"] == {"already_passed": 5}
+    assert group["selectors"]["uniform"]["draws_with_passing_topology"] == 5
+    for row in group["draws"][2:]:
+        assert row["scientific"][0]["slot"] == row["uniform"][0]["slot"]
+    assert group["draws"][0]["scientific"] == [] and group["draws"][0]["uniform"]
+    with tarfile.open(cli.inspect(root)["archive"]) as handle:
+        assert json.load(handle.extractfile("summary.json")) == summary

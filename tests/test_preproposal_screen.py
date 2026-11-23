@@ -8,6 +8,7 @@ from autoformalism.search.preproposal_screen import (
     assess_options,
     assess_realized_roots,
     screen_target,
+    source_constraints,
 )
 from tests.test_topology_repair_generator import evidence, row
 
@@ -183,6 +184,43 @@ def test_different_origins_do_not_create_vacuous_empty_support():
     screen = screen_target(evidence(records), "level", histories=("rain",))
     assert screen.status == "unresolved" and screen.candidates == ()
     assert screen.noncomparable_pairs == (("a", "b"),)
+
+
+def test_witness_groups_reproduce_exact_screen_and_keep_joint_alternatives():
+    s = screen_target(
+        evidence(complementary()),
+        "level",
+        histories=("rain", "spill"),
+        initials=("upstream",),
+    )
+    guide = source_constraints(s, ("rain", "spill"))
+    groups = [set(c["at_least_one_of"]) for c in guide["must_have_groups"]]
+    assert groups == [{"history:rain"}, {"history:spill", "initial:upstream"}]
+    for n in range(len(s.optional_options) + 1):
+        for subset in combinations(s.optional_options, n):
+            assert all(set(subset) & group for group in groups) == (
+                assess_options(s, subset).status == "screened"
+            )
+    assert guide["insufficient_example"]["conflicting_pairs"] == 3
+
+
+def test_unknown_information_cannot_be_reported_as_a_required_known_difference():
+    packet = evidence(complementary()[:2], interpolation="unknown")
+    s = screen_target(packet, "level", histories=("rain",))
+    guide = source_constraints(s, ("rain",))
+    assert guide["must_have_groups"][0]["uncertain_for_this_pair"] == ["history:rain"]
+    assert guide["minimal_additional_source_sets"] == []
+    assert guide["insufficient_example"]["using_only"] == ["initial:level"]
+    s = screen_target(
+        packet, "level", histories=("rain",), required_histories=("rain",)
+    )
+    guide = source_constraints(s, ("rain",))
+    assert guide["must_have_groups"] == [] and guide["insufficient_example"] is None
+    assert guide["unresolved_pairs_with_all_sources"] == 1
+    impossible = screen_target(packet, "level", histories=())
+    guide = source_constraints(impossible, ())
+    assert guide["no_catalogued_source_can_distinguish"]["time"] == 1
+    assert guide["must_have_groups"] == []
 
 
 def test_materiality_uses_earliest_qualified_gap_with_unchanged_source_precision():

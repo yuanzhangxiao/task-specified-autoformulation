@@ -103,6 +103,43 @@ def test_conditional_pass_depends_on_both_realized_routes():
     assert result["training_checks"]["level"]["conflicting_pairs"] == 0
 
 
+def test_matched_graph_prompts_do_not_disclose_selector_and_open_choice_is_optional():
+    case, choice, frozen, value = case_and_choice()
+    checklist = {"public_required_paths": [], "public_target_dependencies": []}
+    system, user = topology_messages(case, choice, frozen, source_checklist=checklist)
+    payload = json.loads(user)
+    assert payload["source_checklist"] == checklist and "rationale" not in payload
+    assert "required_paths" not in payload
+    open_system, open_user = topology_messages(case, None, frozen)
+    assert "selected_information" not in json.loads(open_user)
+    assert (
+        "selected information" not in open_system and "selected information" in system
+    )
+    # The submitted graph has a valid selection-free assessment even if it
+    # does not implement the initializer assumed by a different branch.
+    value["latent_initializers"][0]["rule"] = {
+        "mode": "value",
+        "scope": "shared_training",
+    }
+    value["sources"]["level"].append("spill")
+    checked = assess_topology(case, None, value, frozen)
+    assert checked["status"] == "topology_screen_passed"
+    assert checked["candidate_id"] is None
+
+
+def test_common_hidden_preparation_requires_constants_in_both_prompt_and_verifier():
+    case, choice, frozen, value = case_and_choice()
+    frozen["shared_hidden_initials"] = True
+    assert "same hidden initial" in topology_messages(case, choice, frozen)[0]
+    with pytest.raises(ValueError):
+        topology_schema(case, shared_hidden_initials=True).model_validate(value)
+    checked = assess_topology(case, choice, value, frozen)
+    assert (
+        checked["status"] == "invalid_topology"
+        and "shared initial" in checked["reason"]
+    )
+
+
 @pytest.mark.parametrize(
     "field", ["forbidden_source", "missing_state", "free_initial", "algebraic_cycle"]
 )
