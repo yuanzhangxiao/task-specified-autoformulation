@@ -20,6 +20,9 @@ case "${1:-insulin}" in
   trajectory-functions)
     AF_CLI="$AF_REPO_ROOT/scripts/trajectory_functions.py"
     AF_SUBMIT="$AF_REPO_ROOT/scripts/submit_t2_breadth.py" ;;
+  basin-processes)
+    AF_CLI="$AF_REPO_ROOT/scripts/basin_process_proposals.py"
+    AF_SUBMIT="$AF_REPO_ROOT/scripts/submit_t2_breadth.py" ;;
   topology-repair)
     AF_CLI="$AF_REPO_ROOT/scripts/topology_repair_20b.py"
     AF_SUBMIT="$AF_REPO_ROOT/scripts/submit_t2_breadth.py" ;;

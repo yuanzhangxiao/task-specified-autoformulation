@@ -21,9 +21,14 @@ from scripts.submit_structural_revision_aces import (
 )
 
 TRAJECTORY_FUNCTIONS = "trajectory-function-comparison-1"
+BASIN_PROCESSES = "basin-process-proposals-1"
 
 
 def _trial(protocol):
+    if protocol == BASIN_PROCESSES:
+        from scripts import basin_process_proposals
+
+        return basin_process_proposals
     if protocol == TRAJECTORY_FUNCTIONS:
         from scripts import trajectory_functions
 
@@ -48,6 +53,13 @@ def _load(root):
     return module.load(root)
 
 
+def time_limit(seconds: int) -> str:
+    """Format a Slurm time limit without truncating sub-hour jobs."""
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
 def execution(plan, image, snapshot):
     fresh = plan["protocol"] in (
         TRAJECTORY_FUNCTIONS,
@@ -65,6 +77,7 @@ def execution(plan, image, snapshot):
         if plan["protocol"]
         in (
             TRAJECTORY_FUNCTIONS,
+            BASIN_PROCESSES,
             campaign.FRESH_20B,
             campaign.FITTED_20B,
             campaign.TOPOLOGY_20B,
@@ -75,6 +88,7 @@ def execution(plan, image, snapshot):
         else "120b",
     )
     protocols = {
+        BASIN_PROCESSES: "basin-process-proposals-aces-1",
         TRAJECTORY_FUNCTIONS: "trajectory-function-generation-aces-1",
         campaign.COMPLETE_GRAPHS_20B: "complete-graphs-20b-aces-1",
         campaign.PREPROPOSAL_20B: "preproposal-selection-aces-1",
@@ -85,6 +99,9 @@ def execution(plan, image, snapshot):
         campaign.FRESH_20B: "t2-fresh-public-targets-aces-1",
         campaign.FITTED_20B: "t2-fitted-independent-20b-aces-1",
     }
+    worker_seconds, wall_seconds = (3300, 3600) if fresh else (6600, 7200)
+    if plan["protocol"] == BASIN_PROCESSES:
+        worker_seconds, wall_seconds = 900, 1200
     return {
         **values,
         "protocol": protocols[plan["protocol"]],
@@ -93,8 +110,8 @@ def execution(plan, image, snapshot):
         "maximum_output_tokens": plan["settings"]["max_output_tokens"],
         "maximum_generation_requests": plan["maximum_generation_requests"],
         "maximum_charged_tokens": plan["maximum_generation_requests"] * 32768,
-        "worker_seconds": 3300 if fresh else 6600,
-        "scheduler_walltime_seconds": 3600 if fresh else 7200,
+        "worker_seconds": worker_seconds,
+        "scheduler_walltime_seconds": wall_seconds,
     }
 
 
@@ -122,6 +139,7 @@ def _assets(plan):
         if plan["protocol"]
         in (
             TRAJECTORY_FUNCTIONS,
+            BASIN_PROCESSES,
             campaign.FRESH_20B,
             campaign.FITTED_20B,
             campaign.TOPOLOGY_20B,
@@ -288,6 +306,8 @@ def submit(root, resume=False):
                 "trajectory-functions",
                 "trajectory-functions",
             )
+        elif plan["protocol"] == BASIN_PROCESSES:
+            job_name, tag, worker = "phasec-basin-laws", "basin-laws", "basin-processes"
         argv = [
             "sbatch",
             "--parsable",
@@ -299,7 +319,7 @@ def submit(root, resume=False):
             f"--gres=gpu:h100:{identity['tensor_parallel_size']}",
             f"--cpus-per-task={identity['cpus_per_task']}",
             f"--mem={identity['memory_gib']}G",
-            f"--time={identity['scheduler_walltime_seconds'] // 3600:02d}:00:00",
+            "--time=" + time_limit(identity["scheduler_walltime_seconds"]),
             "--signal=B:TERM@300",
             "--exclude=ac042,ac096"
             if identity["model_size"] == "20b"
