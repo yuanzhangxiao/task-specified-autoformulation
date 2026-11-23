@@ -18,7 +18,7 @@ from autoformalism.expressions.diagnostics import (
     ModelValidationError,
     RuntimeExpressionError,
 )
-from autoformalism.expressions.parser import RestrictedParser
+from autoformalism.expressions.parser import APPROVED_FUNCTION_ARITY, RestrictedParser
 from autoformalism.fitting.public_fitting import _lock
 from autoformalism.rebuttal.prefit_replay import sealed_read, sealed_write
 from autoformalism.rebuttal.staged_topology_campaign import runtime_source_hash
@@ -33,9 +33,13 @@ from scripts.submit_trajectory_functions import ENTRYPOINTS
 from scripts.trajectory_function_prompts import Parameter
 
 PROTOCOL = "basin-process-proposals-1"
+REPLAY_PROTOCOL = "basin-process-reply-replay-1"
 INTAKE = "4c28072b2deb510a7712e62d08a7afdc4b959f0d1464d32105006f313849411d"
 PARENT = "a6b51e36260aa5714827d66a0055143a8746a7888a2ba90eb3b3aefc6d0a391c"
 SEEDS = (100, 101, 102)
+FULL = "full"
+OMIT_OUTLET_ROWS = "omit-outlet-rows"
+ARCHIVED_REQUEST = "85cc342b1f2697646c793c2f0380a18a57618e2f1921ea396fac117b11957cfc"
 EXPRESSION = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)
 ]
@@ -96,7 +100,9 @@ def _outlet_observations(rows: list[dict]) -> list[dict]:
     return samples
 
 
-def _request(data: dict) -> dict:
+def _request(data: dict, evidence_profile: str = FULL) -> dict:
+    if evidence_profile not in (FULL, OMIT_OUTLET_ROWS):
+        raise ValueError("Unknown basin evidence profile")
     row = _parent(data)
     case = data["cases"][row["case"]]
     return {
@@ -108,7 +114,9 @@ def _request(data: dict) -> dict:
             "below its crest, Q=0. D averaged over an interval equals mean downstream "
             "inflow minus area_down times the interval depth change / duration. "
             "Head uses the mean of its two endpoints. Bins average these intervals.",
-            "rows": _outlet_observations(data["train"][BASIN]),
+            "rows": _outlet_observations(data["train"][BASIN])
+            if evidence_profile == FULL
+            else [],
         },
     }
 
@@ -119,10 +127,21 @@ def _parent(data: dict) -> dict:
     return next(row for row in data["graphs"] if row["structure_sha256"] == PARENT)
 
 
-def _plan(data: dict) -> dict:
-    request = _request(data)
+def _plan(data: dict, evidence_profile: str = FULL) -> dict:
+    request = _request(data, evidence_profile)
+    schema = DischargeLaws.model_json_schema()
+    comparison = {}
+    if evidence_profile == OMIT_OUTLET_ROWS:
+        full = content_hash([INSTRUCTION, _request(data), schema])
+        if full != ARCHIVED_REQUEST:
+            raise ValueError("Full prompt differs from the registered live comparison")
+        comparison = {
+            "evidence_profile": evidence_profile,
+            "comparison_full_request": full,
+        }
     return {
         "protocol": PROTOCOL,
+        **comparison,
         "intake_sha256": INTAKE,
         "parent": PARENT,
         "seeds": list(SEEDS),
@@ -135,17 +154,15 @@ def _plan(data: dict) -> dict:
             path: file_hash(pilot.REPO / path)
             for path in (*ENTRYPOINTS, "scripts/basin_process_proposals.py")
         },
-        "request_sha256": content_hash(
-            [INSTRUCTION, request, DischargeLaws.model_json_schema()]
-        ),
+        "request_sha256": content_hash([INSTRUCTION, request, schema]),
         "test_data_opened": False,
     }
 
 
-def prepare(root: Path, campaign: Path) -> dict:
+def prepare(root: Path, campaign: Path, evidence_profile: str = FULL) -> dict:
     """Freeze the training intake, public prompt, three settings and budgets."""
     data = sealed_read(campaign / "intake.json")
-    plan = _plan(data)
+    plan = _plan(data, evidence_profile)
     with _lock(root / "prepare-lock"):
         sealed_write(
             root / "intake.json",
@@ -155,7 +172,7 @@ def prepare(root: Path, campaign: Path) -> dict:
             root / "prompt.json",
             {
                 "system": INSTRUCTION,
-                "user": _request(data),
+                "user": _request(data, evidence_profile),
                 "schema": DischargeLaws.model_json_schema(),
             },
         )
@@ -166,17 +183,48 @@ def load(root: Path) -> tuple[dict, dict]:
     """Verify the immutable experiment against the installed worker."""
     data = sealed_read(root / "intake.json")
     plan = sealed_read(root / "plan.json")
-    if plan["artifact_sha256"] != content_hash(_plan(data)):
+    if plan.get("protocol") == REPLAY_PROTOCOL:
+        from scripts.replay_basin_process_proposals import replay_plan
+
+        expected = replay_plan(data)
+    else:
+        expected = _plan(data, plan.get("evidence_profile", FULL))
+    if plan["artifact_sha256"] != content_hash(expected):
         raise ValueError("Basin process plan or training inputs changed")
     return plan, data
 
 
-def _factor(text: str, basin: str, parameters: dict) -> str:
+def _factor(
+    text: str,
+    basin: str,
+    parameters: dict,
+    *,
+    ledger: list[dict] | None = None,
+    used: set[str] | None = None,
+) -> str:
     """Check the local factor, then substitute the known nonnegative head."""
     location = f"{basin}_factor"
     # Only a literal half-integer power of the known nonnegative head has
     # this rewrite. All other syntax still passes through the restricted parser.
     tree = ast.parse(text, mode="eval")
+    alias = "head_" + basin
+    names = [n for n in ast.walk(tree) if isinstance(n, ast.Name)]
+    other = "head_down" if basin == "up" else "head_up"
+    if any(n.id == other for n in names):
+        raise ValueError(f"{location} has undefined name {other!r}; use local head")
+    matches = [n for n in names if n.id == alias]
+    if matches:
+        for name in matches:
+            name.id = "head"
+        if ledger is not None:
+            ledger.append(
+                {
+                    "kind": "local_head_alias",
+                    "field": location,
+                    "from": alias,
+                    "to": "head",
+                }
+            )
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.BinOp)
@@ -188,6 +236,14 @@ def _factor(text: str, basin: str, parameters: dict) -> str:
             and 0 < node.right.value <= 15.5
             and node.right.value % 1 == 0.5
         ):
+            if ledger is not None:
+                ledger.append(
+                    {
+                        "kind": "exact_half_power",
+                        "field": location,
+                        "power": node.right.value,
+                    }
+                )
             power = int(node.right.value)
             root = ast.Call(ast.Name("sqrt", ast.Load()), [node.left], [])
             replacement = (
@@ -202,6 +258,8 @@ def _factor(text: str, basin: str, parameters: dict) -> str:
             # Replace x**p with 1 * normalized, preserving Python's parsed precedence.
             node.left, node.op, node.right = ast.Constant(1), ast.Mult(), replacement
     parsed = RestrictedParser().parse(ast.unparse(tree), location=location)
+    if used is not None:
+        used.update(parsed.symbols & parameters.keys())
     unknown = parsed.symbols - parameters.keys() - {"head"}
     if unknown:
         raise ValueError(f"{location} has undefined names {sorted(unknown)}")
@@ -242,10 +300,29 @@ def assemble(data: dict, raw: dict) -> dict:
     parent = _parent(data)
     laws = DischargeLaws.model_validate(raw)
     parameters = {p.name: p.initial for p in laws.parameters}
-    if len(parameters) != len(laws.parameters) or "head" in parameters:
-        raise ValueError("Declare each parameter once, using names different from head")
-    q = _factor(laws.upstream_factor, "up", parameters)
-    d = _factor(laws.downstream_factor, "down", parameters)
+    frozen = trial.training_case(data, parent)
+    public_names = {v["name"] for v in frozen["public_brief"]["public_variables"]}
+    reserved = (
+        set(APPROVED_FUNCTION_ARITY)
+        | set(parent["graph"]["variable_types"])
+        | public_names
+        | {"head", "head_up", "head_down", frozen["evidence"]["context"]["time_symbol"]}
+    )
+    if len(parameters) != len(laws.parameters):
+        raise ValueError("Declare each parameter once")
+    collisions = sorted(
+        k for k in parameters if k in reserved or k.startswith("state0_")
+    )
+    if collisions:
+        raise ValueError(f"Parameter names shadow reserved symbols: {collisions}")
+    used = set()
+    ledger = []
+    q = _factor(laws.upstream_factor, "up", parameters, ledger=ledger, used=used)
+    d = _factor(laws.downstream_factor, "down", parameters, ledger=ledger, used=used)
+    for name in sorted(parameters.keys() - used):
+        ledger.append(
+            {"kind": "unused_parameter", "name": name, "initial": parameters.pop(name)}
+        )
     formula = {
         "equations": {
             "h_up": f"(inflow_up - {q}) / area_up",
@@ -256,14 +333,19 @@ def assemble(data: dict, raw: dict) -> dict:
     }
     outcome = assess_revision(
         parent["graph"],
-        trial.training_case(data, parent),
+        frozen,
         formula,
         "Include one internal transfer and one outlet in both measured-area balances.",
     )
     if outcome["status"] == "eligible":
         graph = outcome.pop("graph")
         outcome.update(revised_graph=graph, revised_graph_sha256=content_hash(graph))
-    return {**outcome, "authored_factors": raw, "route": "request_topology_change"}
+    return {
+        **outcome,
+        "authored_factors": raw,
+        "normalizations": ledger,
+        "route": "request_topology_change",
+    }
 
 
 def run(root, endpoint, *, runtime_record=None, transport=None, token_transport=None):
@@ -271,6 +353,11 @@ def run(root, endpoint, *, runtime_record=None, transport=None, token_transport=
     from scripts.submit_t2_breadth import bind
 
     plan, data = load(root)
+    if (
+        plan["maximum_generation_requests"] != len(SEEDS)
+        or plan["protocol"] != PROTOCOL
+    ):
+        raise ValueError("A saved-reply replay cannot make generation requests")
     if transport is None:
         if runtime_record is None:
             raise ValueError("Live generation requires the pinned 20B runtime")
@@ -285,7 +372,7 @@ def run(root, endpoint, *, runtime_record=None, transport=None, token_transport=
                 slot,
                 seed,
                 INSTRUCTION,
-                _request(data),
+                _request(data, plan.get("evidence_profile", FULL)),
                 DischargeLaws,
                 endpoint,
                 transport,
@@ -336,12 +423,25 @@ def status(root: Path) -> dict:
         freeze = trial._frozen_candidates(root, plan)
         if freeze["candidates"] != [r["artifact_sha256"] for r in observed]:
             raise ValueError("Candidate identities differ from generation freeze")
+    replay = plan["maximum_generation_requests"] == 0
+    if replay and finished:
+        from scripts.replay_basin_process_proposals import verify_provenance
+
+        verify_provenance(root, observed)
+    calls = len(list((root / "steps").glob("*/calls/*.json")))
+    if replay and finished and calls != len(observed):
+        raise ValueError("Unexpected number of imported calls in the replay")
     return {
         "status": "complete" if finished else "incomplete",
         "recorded": len(observed),
         "expected": len(SEEDS),
         "candidate_statuses": dict(Counter(r["status"] for r in observed)),
-        "physical_requests": len(list((root / "steps").glob("*/calls/*.json"))),
+        "physical_requests": 0 if replay else calls,
+        **(
+            {"retrospective": True, "imported_physical_requests": calls}
+            if replay
+            else {}
+        ),
         "test_data_opened": False,
     }
 
@@ -353,11 +453,14 @@ def main():
     parser.add_argument("--campaign", type=Path)
     parser.add_argument("--endpoint")
     parser.add_argument("--runtime-record", type=Path)
+    parser.add_argument("--evidence-profile", choices=(FULL, OMIT_OUTLET_ROWS))
     args = parser.parse_args()
+    if args.evidence_profile is not None and args.action != "prepare":
+        parser.error("--evidence-profile is fixed at prepare")
     if args.action == "prepare":
         if args.campaign is None:
             parser.error("prepare requires --campaign")
-        result = prepare(args.root, args.campaign)
+        result = prepare(args.root, args.campaign, args.evidence_profile or FULL)
     elif args.action == "run":
         if args.endpoint is None or args.runtime_record is None:
             parser.error("run requires --endpoint and --runtime-record")

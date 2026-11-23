@@ -5,8 +5,14 @@ AF_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 export AF_REPO_ROOT
 AF_GROUP=${AF_GROUP:-/scratch/group/p.nairr260351.000/u.yx126462}
 AF_SOURCE=${AF_BASIN_SOURCE:-$AF_GROUP/phase-c-basin-function-review-results-v1}
-export AF_OUTPUT_ROOT=${AF_BASIN_PROCESS_ROOT:-$AF_GROUP/phase-c-basin-process-proposals-v1}
-AF_NUMERIC=${AF_BASIN_FIT_ROOT:-$AF_GROUP/phase-c-basin-process-fits-v1}
+AF_PROFILE=${AF_BASIN_EVIDENCE_PROFILE:-full}
+case "$AF_PROFILE" in
+  full) AF_LABEL=basin-process-normalized ;;
+  omit-outlet-rows) AF_LABEL=basin-no-outlet-rows ;;
+  *) echo 'Unknown evidence profile.' >&2; exit 2 ;;
+esac
+export AF_OUTPUT_ROOT=${AF_BASIN_PROCESS_ROOT:-$AF_GROUP/phase-c-$AF_LABEL-proposals-v1}
+AF_NUMERIC=${AF_BASIN_FIT_ROOT:-$AF_GROUP/phase-c-$AF_LABEL-fits-v1}
 export AF_PYTHON=${AF_PYTHON:-/scratch/user/u.yx126462/repos/autoformalism-e432fe3/.venv/bin/python}
 export PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0
 export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
@@ -17,7 +23,7 @@ if ! "$AF_PYTHON" -c 'import casadi, numpy, pandas, scipy' >/dev/null 2>&1; then
 fi
 case "${1:-}" in
   preflight|run|resume)
-    "$AF_PYTHON" -m scripts.basin_process_proposals prepare --root "$AF_OUTPUT_ROOT" --campaign "$AF_SOURCE"
+    "$AF_PYTHON" -m scripts.basin_process_proposals prepare --root "$AF_OUTPUT_ROOT" --campaign "$AF_SOURCE" --evidence-profile "$AF_PROFILE"
     if [[ "$1" == preflight ]]; then exit 0; fi
     export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
     if [[ -z "${AF_HF_HOME:-}" ]]; then

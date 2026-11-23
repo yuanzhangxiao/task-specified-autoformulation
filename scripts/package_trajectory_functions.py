@@ -53,6 +53,7 @@ def package(
             "scripts/basin_family_stability.py",
             "scripts/basin_process_proposals.py",
             "scripts/fit_basin_process_proposals.py",
+            "scripts/replay_basin_process_proposals.py",
             "scripts/hpc/start_basin_process_laws.sh",
         ]
     return package_committed(

@@ -259,3 +259,145 @@ def test_fit_requires_freeze_and_keeps_validation_separate(
     assert [r["validation_status"] for r in summary["rows"]] == ["scored"] * 3
     assert sealed_read(out / "ranking.json") == ranking
     assert scoring.validate(run_dir, out, val) == summary
+
+
+def test_law_aliases_keep_outer_power_fixed_literals_and_shared_coefficients(run_dir):
+    _, data = pilot.load(run_dir)
+    raw = {
+        "upstream_factor": "55 * head_up**1.5",
+        "downstream_factor": "55 * head_down**1.5",
+        "parameters": [{"name": "k", "initial": 55}],
+    }
+    candidate = pilot.assemble(data, raw)
+    assert candidate["status"] == "eligible"
+    assert candidate["authored_factors"] == raw
+    assert candidate["formula"]["parameters"] == {}
+    assert candidate["normalizations"][-1] == {
+        "kind": "unused_parameter",
+        "name": "k",
+        "initial": 55,
+    }
+    assert [
+        x["from"]
+        for x in candidate["normalizations"]
+        if x["kind"] == "local_head_alias"
+    ] == ["head_up", "head_down"]
+    f = RestrictedParser().parse(
+        candidate["formula"]["equations"]["h_up"], location="test"
+    )
+    value = _evaluate(f, {"h_up": 4.35, "crest_up": 0.35, "area_up": 1, "inflow_up": 0})
+    assert value == pytest.approx(-55 * 4**2.5)
+    raw["downstream_factor"] = "k * head_down**0.5"
+    assert pilot.assemble(data, raw)["formula"]["parameters"] == {"k": 55}
+
+
+@pytest.mark.parametrize("symbol", ["head", "head_up", "head_down", "area_up", "sqrt"])
+def test_head_alias_cannot_shadow_an_existing_parameter(run_dir, symbol):
+    _, data = pilot.load(run_dir)
+    with pytest.raises(ValueError, match="shadow"):
+        pilot.assemble(
+            data,
+            {
+                "upstream_factor": "1",
+                "downstream_factor": "head_down",
+                "parameters": [{"name": symbol, "initial": 2}],
+            },
+        )
+    with pytest.raises(ValueError, match="undefined"):
+        pilot.assemble(
+            data,
+            {
+                "upstream_factor": "head_down**0.5",
+                "downstream_factor": "1",
+                "parameters": [],
+            },
+        )
+
+
+def test_archived_reply_replay_has_no_live_budget_or_equation_edits(
+    run_dir, tmp_path, monkeypatch
+):
+    from scripts import replay_basin_process_proposals as reread
+
+    def mock(url, body, timeout):
+        return reply(
+            {
+                "upstream_factor": "sqrt(head_up)",
+                "downstream_factor": "sqrt(head_down)",
+                "parameters": [],
+            }
+        )
+
+    pilot.run(run_dir, "http://localhost", transport=mock, token_transport=tokenizer)
+    source = sealed_read(run_dir / "generation.json")
+    plan = sealed_read(run_dir / "plan.json")
+    monkeypatch.setattr(reread, "SOURCE_GENERATION", source["artifact_sha256"])
+    monkeypatch.setattr(reread, "SOURCE_PLAN", plan["artifact_sha256"])
+    root = tmp_path / "replay"
+    assert reread.replay(run_dir, root) == reread.replay(run_dir, root)
+    result = pilot.status(root)
+    assert result["candidate_statuses"] == {"eligible": 3}
+    assert (
+        result["physical_requests"] == 0 and result["imported_physical_requests"] == 3
+    )
+    with pytest.raises(ValueError, match="cannot make generation"):
+        pilot.run(
+            root, "never-called", transport=lambda *args: pytest.fail("Live call")
+        )
+    assert scoring.train(root, tmp_path / "fits")["training_order"] == [0, 1, 2]
+    assert sealed_read(run_dir / "generation.json") == source
+    (physical,) = (run_dir / "steps/slot-000/calls").glob("*.json")
+    physical.write_bytes(physical.read_bytes() + b"\n")
+    with pytest.raises(ValueError, match="receipt"):
+        reread.replay(run_dir, root)
+    assert pilot.status(root) == result
+    (imported,) = (root / "steps/slot-000/calls").glob("*.json")
+    imported.write_bytes(imported.read_bytes() + b"\n")
+    with pytest.raises(ValueError, match="receipt"):
+        pilot.status(root)
+
+
+def test_three_call_ablation_changes_only_isolated_outlet_observation_rows(
+    run_dir, tmp_path, monkeypatch
+):
+    full = sealed_read(run_dir / "prompt.json")
+    full_plan, _ = pilot.load(run_dir)
+    source = tmp_path / "campaign"
+    out = tmp_path / "without-rows"
+    with pytest.raises(ValueError, match="registered live comparison"):
+        pilot.prepare(out, source, pilot.OMIT_OUTLET_ROWS)
+    monkeypatch.setattr(pilot, "ARCHIVED_REQUEST", full_plan["request_sha256"])
+    plan = pilot.prepare(out, source, pilot.OMIT_OUTLET_ROWS)
+    saved = sealed_read(out / "prompt.json")
+    assert plan["maximum_generation_requests"] == 3
+    assert plan["seeds"] == full_plan["seeds"] == [100, 101, 102]
+    assert plan["settings"] == full_plan["settings"]
+    assert plan["protocol"] == full_plan["protocol"]
+    for key in ("system", "schema"):
+        assert saved[key] == full[key]
+    assert set(full["user"]) == {
+        "scientific_task",
+        "public_requirements",
+        "training_observations",
+        "outlet_evidence",
+    }
+    assert full["user"]["outlet_evidence"]["rows"]
+    expected = json.loads(json.dumps(full["user"]))
+    expected["outlet_evidence"]["rows"] = []
+    assert saved["user"] == expected
+    assert plan["comparison_full_request"] == full_plan["request_sha256"]
+    assert plan["request_sha256"] != full_plan["request_sha256"]
+    calls = []
+
+    def mock(url, body, timeout):
+        sent = next(m["content"] for m in body["messages"] if m["role"] == "user")
+        assert json.loads(sent) == expected
+        calls.append(body["seed"])
+        return reply(
+            {"upstream_factor": "1", "downstream_factor": "1", "parameters": []}
+        )
+
+    result = pilot.run(out, "mock", transport=mock, token_transport=tokenizer)
+    assert result["physical_requests"] == 3
+    assert pilot.run(out, "mock", transport=mock, token_transport=tokenizer) == result
+    assert len(calls) == 3 and len(set(calls)) == 3
