@@ -39,6 +39,8 @@ def package(
                 "pyproject.toml",
                 *ENTRYPOINTS,
                 *SELECTION,
+                "scripts/replay_trajectory_function_pointwise.py",
+                "scripts/replay_trajectory_function_revisions.py",
                 "docs/PHASE_C_TRAJECTORY_GUIDED_FUNCTIONS.md",
             ]
         )

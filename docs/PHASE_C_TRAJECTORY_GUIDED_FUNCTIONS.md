@@ -108,3 +108,34 @@ On ACES, from the new extracted directory:
     bash scripts/hpc/start_trajectory_functions_aces.sh run basin-review
     bash scripts/hpc/start_trajectory_functions_aces.sh status basin-review
     bash scripts/hpc/start_trajectory_functions_aces.sh inspect basin-review
+
+## Checks on the functions selected from training trajectories
+
+Three controlled experiments on the Phase C public development data examine different decisions in function construction. Each writes a training plan and intermediate receipts, locks its selection, and then scores the frozen parameters on validation. The public benchmark prompts and data remain the original release.
+
+| Question | Experiment entry points | Scope |
+|---|---|---|
+| Can the data distinguish two discharge functions under a shared water balance? | `scripts/basin_function_family.py`, `scripts/basin_family_stability.py`, `scripts/basin_balance_inference.py` | The declared balances, areas and crests supply the structure. Compare nine discrete power pairs, then estimate continuous powers with training intervals where each flux can be distinguished. Check sensitivity to event, starting vector and sampling interval. |
+| Does showing outlet measurements change the proposed discharge functions? | `scripts/basin_process_proposals.py`, `scripts/replay_basin_process_proposals.py`, `scripts/basin_process_start_control.py` | Two matched 20B prompts ask for the two unknown functions and differ in five numerical rows. Normalize scoped head aliases, fit from common starts and exchange fitted vectors between equivalent formulas. |
+| Can the data rule out a family before fitting and motivate a revision? | `scripts/audit_affine_direction.py`, `scripts/trajectory_boundary_trial.py`, `scripts/t2_equilibrium_repair.py`, `scripts/t2_challenge_folds.py` | Use open-loop training intervals and declared initialization to bound the forcing at a reference trajectory. Test opposing changes on the same side of the reference driver. Where applicable, compare a boundary-preserving rate, a fasting equilibrium and an added restoring term with matched fitting budgets. |
+| Does a local fit to temperature changes predict a whole trajectory? | `scripts/thermal_balance_trial.py`, `scripts/thermal_forecast_continuation.py` | Hold out complete training events to compare four public temperature-law families, then integrate the selected functions. A second experiment continues two families from short training windows to whole-event simulation and verifies resolution before freezing. CSTR-easy supplies the required forcing channels. The control abstains on CSTR-hard. |
+
+The reusable `event_horizons` function in `scripts/trajectory_horizon_audit.py` measures training forecast error at one eighth, one quarter, one half and the full event from its permitted initial condition. It uses elapsed time for irregular grids and records resolution failures separately. Short-horizon warnings identify problematic starts, while complete forecasts qualify retained parameter vectors.
+
+The local comparison, whole-event fit and parameter-transfer check answer separate questions. In the basin, two formulas proposed under different prompts gave identical predictions after the same coefficient starts were supplied. In the reactor, the function with the smallest local error in all 16 training folds diverged in an open-loop forecast. In T2, a change that eliminated negative insulin still left the model too close to zero late in several events. Inspect per-target error and representative curves alongside the pooled NMSE.
+
+The balances and the small families in these controls were supplied by the researchers. The training evidence chooses among or rejects candidates under those assumptions. The controls do not establish an end-to-end autonomous constructor for these benchmarks.
+
+### Enforcing a declared pointwise error before fitting
+
+A campaign can opt into a maximum absolute error for an observed differential target. The JSON policy maps each exact dataset ID to its target names and absolute tolerances, expressed in that target's units. Supply the JSON file with `prepare --pointwise-tolerances <path>` or set `AF_POINTWISE_TOLERANCES` when preparing a new ACES result root. The policy is part of the sealed intake. A fitting objective stated only in terms of NMSE carries no additional pointwise requirement.
+
+All three arms apply the check to the admitted graph and its actual equations. A proven violation records the reference trajectory, opposing measured changes, and edit options allowed by the selected interface. The fitting worker writes an ineligible receipt before reserving an optimizer call. An unverified case retains its previous eligibility. The original run bundles preserve their own source identities.
+
+To exercise this path with the 36 saved replies, use the frozen training archive and a separate output directory:
+
+    printf '%s\n' '{"phase_c_dalla_man_t2_canonical_named_easy_rates_v1":{"I":1}}' > insulin-error.json
+    python -m scripts.replay_trajectory_function_pointwise \
+        --archive output/trajectory-functions-20261123/returned \
+        --root output/trajectory-pointwise-replay \
+        --pointwise-tolerances insulin-error.json

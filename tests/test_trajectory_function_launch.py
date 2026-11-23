@@ -158,6 +158,12 @@ def test_package_requires_matching_separate_validation(tmp_path, monkeypatch):
     sealed_write(tmp_path / "validation.json", valid)
     monkeypatch.setattr(delivery, "package_committed", lambda *a, **k: (a, k))
     args, kwargs = delivery.package(out, tmp_path, tmp_path)
+    assert {
+        "src",
+        "scripts/trajectory_functions.py",
+        "scripts/replay_trajectory_function_pointwise.py",
+        "scripts/replay_trajectory_function_revisions.py",
+    }.issubset(args[2])
     assert args[3] == "inputs/train.json"
     assert kwargs["extra_inputs"] == (
         ("inputs/validation.json", tmp_path / "validation.json"),

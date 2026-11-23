@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -29,6 +30,7 @@ FIXED = "fixed"
 SOURCE_REVIEW = "source-review"
 BASIN_REVIEW = "basin-review"
 BASIN_REPLAY = "basin-replay"
+POINTWISE_REPLAY = "pointwise-replay"
 ARMS = ("proposer", "algorithm", "hybrid")
 SEEDS = (100, 101)
 BUDGET = {"max_evaluations": 1000, "wall_seconds": 180.0, "starts": 2}
@@ -55,7 +57,7 @@ def _plan(payload):
         "fit_budget": BUDGET,
         "maximum_fit_slots": len(ARMS) * count,
         "maximum_generation_requests": 0
-        if payload["profile"] == BASIN_REPLAY
+        if payload["profile"] in (BASIN_REPLAY, POINTWISE_REPLAY)
         else 2 * count,
         "runtime_source": runtime_source_hash(),
         "entrypoints": {p: file_hash(pilot.REPO / p) for p in ENTRYPOINTS},
@@ -81,7 +83,68 @@ def training_case(data: dict, row: dict) -> dict:
     }
 
 
-def prepare(root: Path, source: Path, profile: str = FIXED):
+def read_tolerances(path: Path) -> dict:
+    """Read a user-declared pointwise contract without overwriting repeated keys."""
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"Duplicate pointwise tolerance key {key!r}")
+            result[key] = value
+        return result
+
+    policy = json.loads(path.read_text(), object_pairs_hook=unique)
+    if not isinstance(policy, dict) or not policy:
+        raise ValueError(
+            "The pointwise tolerance file must contain a nonempty JSON object"
+        )
+    return policy
+
+
+def checked_tolerances(src: dict, graphs: list, policy: dict) -> dict:
+    """Bind each threshold to an observed differential target in this cohort."""
+    targets: dict[str, set[str]] = {}
+    for row in graphs:
+        observed = src["cases"][row["case"]]["evidence"]["context"]["targets"]
+        kinds = row["graph"]["variable_types"]
+        targets.setdefault(row["dataset"], set()).update(
+            t for t in observed if kinds.get(t) == "differential"
+        )
+    if not isinstance(policy, dict) or not policy:
+        raise ValueError(
+            "Provide a nonempty mapping from dataset IDs to target tolerances"
+        )
+    clean = {}
+    for dataset, values in policy.items():
+        if dataset not in targets or not isinstance(values, dict) or not values:
+            raise ValueError(
+                f"Expected a registered dataset and target tolerances: {dataset!r}"
+            )
+        clean[dataset] = {}
+        for target, tolerance in values.items():
+            if target not in targets[dataset]:
+                raise ValueError(
+                    f"Expected an observed differential target of {dataset}: {target}"
+                )
+            if (
+                type(tolerance) not in (float, int)
+                or not 0 <= tolerance <= sys.float_info.max
+            ):
+                raise ValueError(
+                    f"Expected a finite nonnegative pointwise tolerance for {target}"
+                )
+            if float(tolerance) != tolerance:
+                raise ValueError(
+                    f"Pointwise tolerance for {target} loses precision"
+                )
+            clean[dataset][target] = float(tolerance)
+    return clean
+
+
+def prepare(
+    root: Path, source: Path, profile: str = FIXED, *, pointwise_tolerances=None
+):
     from autoformalism.research.preproposal_cases import BASIN
     from autoformalism.research.trajectory_function_families import build_shortlist
     from autoformalism.research.trajectory_function_fitting import validate_formula
@@ -96,11 +159,21 @@ def prepare(root: Path, source: Path, profile: str = FIXED):
     ]
     if not graphs:
         raise ValueError("No matching graphs in the registered intake")
+    policy = (
+        checked_tolerances(src, graphs, pointwise_tolerances)
+        if pointwise_tolerances is not None
+        else None
+    )
     with _lock(root / "prepare-lock"):
         if (root / "plan.json").exists():
-            plan, _ = load(root)
-            if plan["profile"] != profile:
-                raise ValueError("This output root belongs to a different profile")
+            plan, existing = load(root)
+            if (
+                plan["profile"] != profile
+                or existing.get("pointwise_tolerances") != policy
+            ):
+                raise ValueError(
+                    "This root belongs to a different profile or pointwise contract"
+                )
             return plan
         menus = []
         for row in graphs:
@@ -115,6 +188,7 @@ def prepare(root: Path, source: Path, profile: str = FIXED):
             {
                 "source": TRAIN,
                 "profile": profile,
+                **({"pointwise_tolerances": policy} if policy is not None else {}),
                 "graphs": graphs,
                 "cases": {r["case"]: src["cases"][r["case"]] for r in graphs},
                 "train": {r["dataset"]: src["train"][r["dataset"]] for r in graphs},
@@ -141,13 +215,23 @@ def slots(payload):
 def _request(payload, g, arm):
     r = payload["graphs"][g]
     interface = prompts if payload["profile"] == FIXED else revision_prompts
-    return interface.request(
+    system, packet, schema = interface.request(
         r["graph"],
         payload["cases"][r["case"]],
         payload["observations"][r["dataset"]],
         payload["menus"][g],
         arm == "hybrid",
     )
+    tolerances = payload.get("pointwise_tolerances", {}).get(r["dataset"])
+    if tolerances:
+        packet["pointwise_accuracy_required"] = {
+            "absolute_tolerances_in_target_units": tolerances,
+            "rule": (
+                "A proof that shared parameters cannot match the training observations "
+                "within a listed tolerance prevents fitting."
+            ),
+        }
+    return system, packet, schema
 
 
 def _read_candidate(root, plan, i):
@@ -240,11 +324,111 @@ def fitting_graph(candidate, row):
     return row["graph"]
 
 
+def pointwise_admission(data: dict, row: dict, candidate: dict) -> dict:
+    """Apply only declared absolute tolerances, after every other admission check."""
+    policy = data.get("pointwise_tolerances", {}).get(row["dataset"])
+    if candidate["status"] != "eligible" or not policy:
+        return candidate
+    from autoformalism.research.affine_direction_certificate import certify
+    from autoformalism.search.topology_compatibility import (
+        TrainingCompatibilityEvidence,
+    )
+
+    graph = fitting_graph(candidate, row)
+    case = training_case(data, row)
+    evidence = TrainingCompatibilityEvidence.model_validate(case["evidence"])
+    checks = {}
+    feedback = []
+    for target, tolerance in sorted(policy.items()):
+        proof = certify(
+            graph, candidate["formula"], target, evidence, tolerance=tolerance
+        )
+        checks[target] = proof
+        if proof["status"] != "conflict":
+            continue
+        feedback.append(_direction_feedback(data, graph, case, proof))
+    result = {**candidate, "pointwise_checks": checks}
+    if feedback:
+        result.update(status="pointwise_conflict", repair_feedback=feedback)
+    return result
+
+
+def _direction_feedback(data, graph, case, proof):
+    """Show the witness intervals and permissible repairs."""
+    target, driver = proof["target"], proof["driver"]
+    ref = proof["reference"]
+    options = [
+        f"Revise the rate law for {target} on its declared sources. "
+        f"A nonlinear response to {driver} is one possibility."
+    ]
+    intervals = {
+        kind: {
+            key: proof[kind][key]
+            for key in (
+                "event",
+                "time",
+                "driver_range",
+                "observed",
+                "required_change",
+                "maximum_permitted_change",
+            )
+        }
+        for kind in ("rise", "fall")
+    }
+    feedback = {
+        "target": target,
+        "absolute_pointwise_tolerance": proof["tolerance"],
+        "rhs": proof["raw_rhs"],
+        "depletion_gate_scale": proof["gate_threshold"],
+        "driver": driver,
+        "driver_side": proof["side"],
+        "message": (
+            f"The observed rise and fall of {target} rule out both slope signs "
+            "in this affine rate. Refitting its coefficients cannot satisfy "
+            "this pointwise requirement."
+        ),
+        "reference": {
+            key: ref[key]
+            for key in (
+                "event",
+                "time",
+                "forcing_values",
+                "initial_target",
+                "observed_final",
+                "derivative_bound",
+            )
+        },
+        **intervals,
+        "assumptions": [
+            "Shared parameters, observed initial target, complete piecewise-linear "
+            "exact forcing or fixed covariates, open-loop dynamics, exhaustive "
+            "dependencies and no resets.",
+            *ref["assumptions"],
+        ],
+        "target_observation_uncertainty": proof["observation_uncertainty"],
+        "current_sources": graph["sources"][target],
+        "repair_options": options,
+    }
+    if data.get("source_profile", data["profile"]) != FIXED:
+        from autoformalism.research.trajectory_function_revision import (
+            permitted_sources,
+        )
+
+        options.append(
+            "Use request_topology_change if a scientifically justified rate "
+            "depends on another available source."
+        )
+        feedback["sources_available_to_add"] = sorted(
+            set(permitted_sources(graph, case)) - set(graph["sources"][target])
+        )
+    return feedback
+
+
 def run(root, endpoint, *, runtime_record=None, transport=None, token_transport=None):
     from scripts import submit_t2_breadth
 
     plan, p = load(root)
-    if p["profile"] == BASIN_REPLAY:
+    if p["profile"] in (BASIN_REPLAY, POINTWISE_REPLAY):
         raise ValueError("Saved reply replay has no generation allowance")
     if transport is None:
         if runtime_record is None:
@@ -295,7 +479,7 @@ def run(root, endpoint, *, runtime_record=None, transport=None, token_transport=
                         record.update(status="invalid_formula", reason=str(exc))
                 elif reply.get("error"):
                     record["reason"] = reply["error"]
-            sealed_write(path, record)
+            sealed_write(path, pointwise_admission(p, row, record))
         identities = [
             _read_candidate(root, plan, i)["artifact_sha256"]
             for i in range(len(slots(p)))
@@ -346,6 +530,8 @@ def fit(root, index):
             return record
         if candidate["status"] != "eligible":
             result = {"status": "ineligible", "reason": candidate["status"]}
+        elif p["profile"] == POINTWISE_REPLAY:
+            raise ValueError("Admission-only replay has no optimizer allowance")
         elif (directory / "reservation.json").exists():
             if (
                 sealed_read(directory / "reservation.json")["candidate"]
@@ -530,6 +716,8 @@ def preflight(root):
     from scripts.trajectory_function_report import prompt_review
 
     plan, p = load(root)
+    if p["profile"] == POINTWISE_REPLAY:
+        raise ValueError("Admission-only replay has no optimizer allowance")
     for i, r in enumerate(p["graphs"]):
         for arm in ("hybrid", "proposer"):
             *_, schema = _request(p, i, arm)
@@ -539,26 +727,42 @@ def preflight(root):
     from autoformalism.research.trajectory_function_fitting import fit_formula
 
     # Exercise the native solver with a training trajectory before queueing GPUs.
-    graph = p["graphs"][0]
-    smoke = fit_formula(
-        graph["graph"],
-        p["menus"][0]["candidates"][0],
-        p["train"][graph["dataset"]][:1],
-        max_evaluations=1,
-        starts=1,
-        wall_seconds=30.0,
-    )
-    if smoke["status"] != "fitted":
-        raise ValueError(f"Training rollout preflight failed: {smoke['status']}")
+    example = (p["graphs"][0], p["menus"][0]["candidates"][0])
+    if "pointwise_tolerances" in p:
+        example = _admitted_smoke_example(p)
+    smoke_status = "skipped_no_admitted_reference"
+    if example is not None:
+        graph, formula = example
+        smoke = fit_formula(
+            graph["graph"],
+            formula,
+            p["train"][graph["dataset"]][:1],
+            max_evaluations=1,
+            starts=1,
+            wall_seconds=30.0,
+        )
+        smoke_status = smoke["status"]
+        if smoke_status != "fitted":
+            raise ValueError(f"Training rollout preflight failed: {smoke_status}")
     prompt_review(root, p, _request)
     return {
         "status": "preflight_passed",
-        "training_rollout_smoke": smoke["status"],
+        "training_rollout_smoke": smoke_status,
         "graphs": len(p["graphs"]),
         "generation_budget": plan["maximum_generation_requests"],
         "fit_slots": plan["maximum_fit_slots"],
         "fit_budget": BUDGET,
     }
+
+
+def _admitted_smoke_example(data):
+    for g, row in enumerate(data["graphs"]):
+        for rank in range(len(data["menus"][g]["candidates"])):
+            candidate = algorithm_candidate(data, g, rank)
+            candidate["graph"] = row["structure_sha256"]
+            if pointwise_admission(data, row, candidate)["status"] == "eligible":
+                return row, candidate["formula"]
+    return None
 
 
 def main():
@@ -569,6 +773,11 @@ def main():
         c.add_argument("--root", type=Path, required=True)
         if name == "prepare":
             c.add_argument("--source", type=Path, required=True)
+            c.add_argument(
+                "--pointwise-tolerances",
+                type=Path,
+                help="JSON mapping dataset IDs to target names and absolute tolerances",
+            )
             c.add_argument(
                 "--profile", choices=(FIXED, SOURCE_REVIEW, BASIN_REVIEW), default=FIXED
             )
@@ -582,7 +791,12 @@ def main():
     args = parser.parse_args()
     root = args.root.resolve()
     if args.action == "prepare":
-        plan = prepare(root, args.source, args.profile)
+        policy = (
+            read_tolerances(args.pointwise_tolerances)
+            if args.pointwise_tolerances
+            else None
+        )
+        plan = prepare(root, args.source, args.profile, pointwise_tolerances=policy)
         result = {
             "plan": plan["artifact_sha256"],
             "fit_slots": plan["maximum_fit_slots"],

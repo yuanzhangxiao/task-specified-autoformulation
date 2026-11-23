@@ -22,7 +22,11 @@ if ! "$AF_PYTHON" "$AF_CLI" --help >/dev/null 2>&1; then
 fi
 case "${1:-}" in
   run|resume|preflight)
-    "$AF_PYTHON" "$AF_CLI" prepare --profile "$AF_PROFILE" --root "$AF_OUTPUT_ROOT" --source "$AF_REPO_ROOT/inputs/train.json" >/dev/null
+    AF_PREPARE=(prepare --profile "$AF_PROFILE" --root "$AF_OUTPUT_ROOT" --source "$AF_REPO_ROOT/inputs/train.json")
+    if [[ -n "${AF_POINTWISE_TOLERANCES:-}" ]]; then
+      AF_PREPARE+=(--pointwise-tolerances "$AF_POINTWISE_TOLERANCES")
+    fi
+    "$AF_PYTHON" "$AF_CLI" "${AF_PREPARE[@]}" >/dev/null
     if [[ "$1" == preflight ]]; then exec "$AF_PYTHON" "$AF_CLI" preflight --root "$AF_OUTPUT_ROOT"; fi
     export AF_VLLM_IMAGE=${AF_VLLM_IMAGE:-/scratch/user/u.yx126462/containers/vllm-openai-v0.27.1.sif}
     if [[ -z "${AF_HF_HOME:-}" ]]; then
