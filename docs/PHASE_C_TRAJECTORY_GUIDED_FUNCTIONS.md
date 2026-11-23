@@ -160,3 +160,16 @@ To replay the original 18 replies, use the directory containing the archived gen
         --generation path/to/generation --output path/to/ordered-training-audit.json
 
 The replay preserves each original decision and audits the admitted equations. For each newly certified conflict it also tries one new linear term per permitted supplied history and reruns the order check. An alternative that escapes this check is a candidate for fitting. No coefficients are estimated in the replay.
+
+### Following a source change through a complete model
+
+The three public training folds each withhold five challenge trajectories. The fasting reference remains available in each fit. The scalar comparison uses observed initial insulin and benchmarks four rate laws under the same timescale grid. A second comparison uses identical piecewise-linear production functions with signed or nonnegative coefficients. The latter constraint keeps insulin nonnegative between observations when its initial value is nonnegative. A saved coefficient identifies both its supplied channel and its basis knot, which allows forecasts to be independently checked after serialization.
+
+Run these commands from the checkout with the archived paired generation and cold-fold receipts in `$AF_EVIDENCE`. Each command verifies an existing matching checkpoint on resume.
+
+    python -m scripts.compare_insulin_order_repairs run --paired "$AF_EVIDENCE/paired" --root "$AF_EVIDENCE/ordering-fit"
+    python -m scripts.compare_positive_insulin_rates run --paired "$AF_EVIDENCE/paired" --root "$AF_EVIDENCE/positive-rates-final"
+    python -m scripts.transfer_insulin_order_law run --paired "$AF_EVIDENCE/paired" --single "$AF_EVIDENCE/ordering-fit" --cold "$AF_EVIDENCE/aces-cold-folds/results" --root "$AF_EVIDENCE/order-transfer"
+    python -m scripts.transfer_positive_insulin_law verify --evidence-root "$AF_EVIDENCE" --root "$AF_EVIDENCE/positive-transfer"
+
+The coupled comparisons replace the insulin rate in each saved model and keep the other fold-specific fitted equations and initializers. The outputs report glucose, insulin, disposal, and pooled NMSE on the same events. EGP is a supplied endogenous glucose production trajectory in this easy task. Its value as a predictor and its causal role are separate questions. The model bundles contain fitting-fold coefficients and do not incorporate held-trajectory initial estimates or held-trajectory parameter fits.
