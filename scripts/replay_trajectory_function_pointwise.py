@@ -99,6 +99,10 @@ def replay(archive: Path, root: Path, policy: dict) -> dict:
                         k: v["status"]
                         for k, v in after.get("pointwise_checks", {}).items()
                     },
+                    "ordered_checks": {
+                        k: v["status"]
+                        for k, v in after.get("ordered_checks", {}).items()
+                    },
                     "candidate_sha256": saved["artifact_sha256"],
                 }
             )

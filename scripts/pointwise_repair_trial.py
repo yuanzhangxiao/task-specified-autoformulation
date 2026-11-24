@@ -392,7 +392,7 @@ def assess(data: dict, index: int, raw: dict) -> dict:
     }
     result = trial.pointwise_admission(
         {
-            "profile": trial.SOURCE_REVIEW,
+            "profile": trial.TARGET_RHS,
             "cases": data["cases"],
             "train": {DATASET: data["train"]},
             "pointwise_tolerances": {DATASET: {TARGET: TOLERANCE}},
@@ -415,6 +415,12 @@ def assess(data: dict, index: int, raw: dict) -> dict:
         "graph_dict": child,
         "status": result["status"],
         "pointwise_checks": result["pointwise_checks"],
+        "ordered_checks": result["ordered_checks"],
+        **(
+            {"repair_feedback": result["repair_feedback"]}
+            if "repair_feedback" in result
+            else {}
+        ),
         "pointwise_outcome": "conflict_proved"
         if result["status"] == "pointwise_conflict"
         else "no_conflict_proved",

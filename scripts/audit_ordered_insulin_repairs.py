@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
+from collections.abc import Iterator
 from itertools import count
 from pathlib import Path
 
@@ -18,15 +19,14 @@ from scripts import trajectory_functions as trial
 GENERATION = "cf4767812bd09006295142790aec22b874d7241ffe42d456309c3df8e1f2372a"
 
 
-def single_source_checks(
+def linear_source_extensions(
     graph: dict,
     formula: dict,
     target: str,
     case: dict,
     evidence: TrainingCompatibilityEvidence,
-    tolerance: float,
-) -> dict:
-    """Try adding one linear term for each permitted, independently supplied history."""
+) -> Iterator[tuple[str, dict, dict]]:
+    """Enumerate one new linear term per permitted supplied history."""
     ctx = evidence.context
     supplied = set(ctx.external_inputs) | set(ctx.auxiliaries)
     allowed = supplied & set(permitted_sources(graph, case)) & set(case["histories"])
@@ -40,7 +40,6 @@ def single_source_checks(
         | formula["parameters"].keys()
     )
     gain = next(f"order_gain{i}" for i in count() if f"order_gain{i}" not in used)
-    results = {}
     for source in choices:
         sources = {
             **graph["sources"],
@@ -52,18 +51,21 @@ def single_source_checks(
             "equations": {**formula["equations"], target: rhs},
             "parameters": {**formula["parameters"], gain: 1.0},
         }
-        results[source] = certify(
-            {**graph, "sources": sources},
-            changed,
-            target,
-            evidence,
-            tolerance=tolerance,
+        yield source, {**graph, "sources": sources}, changed
+
+
+def single_source_checks(graph, formula, target, case, evidence, tolerance) -> dict:
+    """Reproduce the original ordering-only screen over the same candidates."""
+    return {
+        source: certify(child, changed, target, evidence, tolerance=tolerance)
+        for source, child, changed in linear_source_extensions(
+            graph, formula, target, case, evidence
         )
-    return results
+    }
 
 
-def audit(root: Path, tolerance: float = 1.0) -> dict:
-    """Check the three originally admitted repairs and preserve earlier decisions."""
+def frozen_panel(root: Path) -> tuple[dict, list[dict]]:
+    """Authenticate the original panel without resuming its generation campaign."""
     plan = sealed_read(root / "plan.json")
     intake = sealed_read(root / "intake.json")
     freeze = trial._frozen_candidates(root, plan)
@@ -75,7 +77,7 @@ def audit(root: Path, tolerance: float = 1.0) -> dict:
     ):
         raise ValueError("Expected the original sealed 18-repair training panel")
 
-    rows = []
+    records = []
     for index, (slot, seed, condition) in enumerate(panel.slots()):
         candidate = trial._read_candidate(root, plan, index)
         receipt = candidate["artifact_sha256"]
@@ -85,12 +87,22 @@ def audit(root: Path, tolerance: float = 1.0) -> dict:
             candidate["condition"],
         ) != (slot, seed, condition):
             raise ValueError("Candidate receipt differs from the registered repair")
+        records.append(candidate)
+    return intake, records
+
+
+def audit(root: Path, tolerance: float = 1.0) -> dict:
+    """Check the three originally admitted repairs and preserve earlier decisions."""
+    intake, records = frozen_panel(root)
+    rows = []
+    for candidate in records:
+        slot = candidate["parent_slot"]
         row = {
-            "index": index,
+            "index": candidate["index"],
             "parent_slot": slot,
-            "seed": seed,
-            "condition": condition,
-            "receipt": receipt,
+            "seed": candidate["seed"],
+            "condition": candidate["condition"],
+            "receipt": candidate["artifact_sha256"],
             "original_status": candidate["status"],
             "audit_status": "previously_ineligible",
         }
@@ -118,7 +130,7 @@ def audit(root: Path, tolerance: float = 1.0) -> dict:
         rows.append(row)
     return {
         "protocol": "ordered-driver-repair-replay-1",
-        "source_generation": freeze["artifact_sha256"],
+        "source_generation": GENERATION,
         "training_intake": intake["artifact_sha256"],
         "target": panel.TARGET,
         "tolerance": tolerance,

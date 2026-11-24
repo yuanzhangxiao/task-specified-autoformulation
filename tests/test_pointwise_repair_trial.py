@@ -133,6 +133,7 @@ def test_proof_rechecked_and_target_only_patch_preserves_every_other_field(train
     changed = panel.assess(training, 2, patch("dy/dt = k*x - y(t)", k=2))
     assert changed["status"] == "eligible"
     assert changed["pointwise_outcome"] == "no_conflict_proved"
+    assert changed["ordered_checks"]["y"]["status"] == "unverified"
     assert changed["trajectory_accuracy"] == "unmeasured"
     assert changed["formula"]["equations"]["z"] == "a*w"
     assert changed["formula"]["parameters"] == {"a": 3, "k": 2}
@@ -146,6 +147,8 @@ def test_proof_rechecked_and_target_only_patch_preserves_every_other_field(train
     remains = panel.assess(training, 2, patch("a+b*x+x"))
     assert remains["pointwise_outcome"] == "conflict_proved"
     assert remains["status"] == "pointwise_conflict"
+    assert "repair_feedback" in remains
+    assert "request_topology_change" not in str(remains["repair_feedback"])
 
 
 @pytest.mark.parametrize(

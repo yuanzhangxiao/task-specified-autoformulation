@@ -152,14 +152,28 @@ The standalone ACES entry point is `scripts/hpc/start_pointwise_repair.sh`. Its 
 
 For a rate of the form `y' = a*y + b*x + q(w)`, consider two training events with equal observed initial `y` and identical supplied histories `w`. Their predicted difference at time `t` is the integral of `b*(x1(s)−x2(s))*exp(a*(t−s))` over the interval. If one history of `x` stays above the other, the sign of that difference is fixed by the shared coefficient `b`. One contrary pair rules out a nonnegative coefficient and a second contrary pair rules out a nonpositive coefficient. Half the smaller of the two observed separations gives a lower bound on the largest absolute error at the observed times.
 
-The research check uses exact forcing, observed initial values, and complete linear or previous-value interpolation on matching grids. It abstains when the required ordering or equation form cannot be verified. Its conclusion concerns a declared pointwise accuracy requirement. A pooled NMSE objective can still improve in the presence of such an error.
+For new function proposals with a declared per-target absolute error tolerance, the pre-fit gate now runs the interval proof and the ordered-pair proof together after graph admission. The graph admission step already checks whether equal initial conditions and equal forcing histories require identical trajectories. The same function gate applies to proposer-generated, algorithm-generated and hybrid candidates. Each proof records its own outcome. Either can exclude a candidate if its lower bound strictly exceeds the target tolerance. The ordering proof uses exact forcing, observed initial values, and complete linear or previous-value interpolation on matching grids. It abstains when these assumptions or the scalar equation form cannot be verified. A pooled NMSE objective can still improve in the presence of a pointwise error.
 
 To replay the original 18 replies, use the directory containing the archived generation plan, intake, candidate and call receipts:
 
     python -m scripts.audit_ordered_insulin_repairs \
         --generation path/to/generation --output path/to/ordered-training-audit.json
 
-The replay preserves each original decision and audits the admitted equations. For each newly certified conflict it also tries one new linear term per permitted supplied history and reruns the order check. An alternative that escapes this check is a candidate for fitting. No coefficients are estimated in the replay.
+The historical replay preserves each original decision and audits the admitted equations. For each newly certified conflict it tries one linear term per additional permitted supplied history and reruns the ordering proof.
+
+To submit all original replies and each of those single-source edits to the current, complete repair gate offline, use
+
+    python -m scripts.screen_ordered_repair_options \
+        --generation path/to/generation --output path/to/screened-options.json
+
+Of the 18 original replies, 15 failed the equal-history graph check and three failed the ordering proof. Of the 13 algorithm-generated edits to those three equations, ten had a proven conflict and three reached the shortlist. All three added supplied EGP. Two extended replies for parent 002 and one extended a reply for parent 015. All replies for parent 014 had already failed the graph check.
+
+To bypass the proposer and generate options directly from the three original parents, use
+
+    python -m scripts.screen_ordered_repair_options \
+        --intake path/to/generation/intake.json --output path/to/parent-options.json
+
+This generates a separate set of 13 edits, five for parent 002 and four each for 014 and 015. One edit per parent passed the current gate, each adding EGP to the original insulin rate. Both modes record the full shortlisted models, their identifiers, and the individual check results. Selection by a proposer, parameter fitting, and empirical accuracy are separate experiments.
 
 ### Following a source change through a complete model
 

@@ -13,6 +13,7 @@ from scripts import replay_trajectory_function_pointwise as saved
 from scripts import trajectory_functions as trial
 from tests.test_affine_direction_certificate import evidence, family
 from tests.test_construction_initialization_graph_cli import reply, tokenizer
+from tests.test_ordered_driver_certificate import model, observations
 
 
 @pytest.fixture
@@ -156,6 +157,55 @@ def test_revised_source_graph_is_checked_and_only_permitted_edits_offered(setup_
     for status in ("invalid_formula", "provider_failed"):
         previous = {"status": status}
         assert trial.pointwise_admission(data, row, previous) is previous
+
+
+def test_order_proof_blocks_after_affine_abstention_on_effective_graph():
+    evidence = observations().model_dump(mode="json")
+    events = evidence.pop("trajectories")
+    graph, form = model("a*y+b*x")
+    parent, _ = model("a*y + b*w")
+    row = {
+        "case": "c",
+        "dataset": "d",
+        "graph": parent,
+        "structure_sha256": content_hash(parent),
+    }
+    data = {
+        "profile": trial.SOURCE_REVIEW,
+        "cases": {"c": {"evidence": evidence, "histories": ["x", "w"]}},
+        "train": {"d": events},
+        "pointwise_tolerances": {"d": {"y": 1}},
+    }
+    candidate = {
+        "status": "eligible",
+        "route": "request_topology_change",
+        "revised_graph": graph,
+        "revised_graph_sha256": content_hash(graph),
+        "graph": row["structure_sha256"],
+        "formula": form,
+    }
+    out = trial.pointwise_admission(data, row, candidate)
+    assert out["status"] == "pointwise_conflict"
+    assert out["pointwise_checks"]["y"]["status"] == "unverified"
+    assert out["ordered_checks"]["y"]["exact_lower_bound"] == "2"
+    (item,) = out["repair_feedback"]
+    assert item["check"] == "ordered_driver" and item["driver"] == "x"
+    assert item["rhs"] == "a*y+b*x"
+    assert item["witnesses"] == out["ordered_checks"]["y"]["witnesses"]
+    assert item["sources_available_to_add"] == ["t", "w"]
+
+    higher = trial.pointwise_admission(
+        data | {"pointwise_tolerances": {"d": {"y": 2}}},
+        row,
+        candidate,
+    )
+    assert higher["status"] == "eligible"
+    assert higher["ordered_checks"]["y"]["status"] == "unverified"
+    assert "repair_feedback" not in higher
+    assert (
+        trial.pointwise_admission(data | {"pointwise_tolerances": {}}, row, candidate)
+        is candidate
+    )
 
 
 @pytest.mark.parametrize(

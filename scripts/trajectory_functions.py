@@ -31,6 +31,7 @@ SOURCE_REVIEW = "source-review"
 BASIN_REVIEW = "basin-review"
 BASIN_REPLAY = "basin-replay"
 POINTWISE_REPLAY = "pointwise-replay"
+TARGET_RHS = "target-rhs"
 ARMS = ("proposer", "algorithm", "hybrid")
 SEEDS = (100, 101)
 BUDGET = {"max_evaluations": 1000, "wall_seconds": 180.0, "starts": 2}
@@ -325,11 +326,14 @@ def fitting_graph(candidate, row):
 
 
 def pointwise_admission(data: dict, row: dict, candidate: dict) -> dict:
-    """Apply only declared absolute tolerances, after every other admission check."""
+    """Check both function-level proofs for each declared pointwise tolerance."""
     policy = data.get("pointwise_tolerances", {}).get(row["dataset"])
     if candidate["status"] != "eligible" or not policy:
         return candidate
     from autoformalism.research.affine_direction_certificate import certify
+    from autoformalism.research.ordered_driver_certificate import (
+        certify as certify_order,
+    )
     from autoformalism.search.topology_compatibility import (
         TrainingCompatibilityEvidence,
     )
@@ -338,16 +342,42 @@ def pointwise_admission(data: dict, row: dict, candidate: dict) -> dict:
     case = training_case(data, row)
     evidence = TrainingCompatibilityEvidence.model_validate(case["evidence"])
     checks = {}
+    ordered_checks = {}
     feedback = []
     for target, tolerance in sorted(policy.items()):
         proof = certify(
             graph, candidate["formula"], target, evidence, tolerance=tolerance
         )
         checks[target] = proof
-        if proof["status"] != "conflict":
-            continue
-        feedback.append(_direction_feedback(data, graph, case, proof))
-    result = {**candidate, "pointwise_checks": checks}
+        if proof["status"] == "conflict":
+            feedback.append(_direction_feedback(data, graph, case, proof))
+        order = certify_order(
+            graph, candidate["formula"], target, evidence, tolerance=tolerance
+        )
+        ordered_checks[target] = order
+        if order["status"] == "conflict":
+            feedback.append(
+                {
+                    "check": "ordered_driver",
+                    "target": target,
+                    "absolute_pointwise_tolerance": tolerance,
+                    "rhs": candidate["formula"]["equations"][target],
+                    "driver": order["driver"],
+                    "worst_sampled_absolute_error_lower_bound": order[
+                        "worst_sampled_absolute_error_lower_bound"
+                    ],
+                    "witnesses": order["witnesses"],
+                    "message": (
+                        f"Within each pair, {target} starts at the same measured "
+                        "value and the other forcing histories agree through the "
+                        f"listed time. Higher {order['driver']} throughout gives "
+                        f"opposite observed orderings of {target}. No shared "
+                        "linear driver gain can match both within the tolerance."
+                    ),
+                    **_repair_options(data, graph, case, target, order["driver"]),
+                }
+            )
+    result = {**candidate, "pointwise_checks": checks, "ordered_checks": ordered_checks}
     if feedback:
         result.update(status="pointwise_conflict", repair_feedback=feedback)
     return result
@@ -357,10 +387,6 @@ def _direction_feedback(data, graph, case, proof):
     """Show the witness intervals and permissible repairs."""
     target, driver = proof["target"], proof["driver"]
     ref = proof["reference"]
-    options = [
-        f"Revise the rate law for {target} on its declared sources. "
-        f"A nonlinear response to {driver} is one possibility."
-    ]
     intervals = {
         kind: {
             key: proof[kind][key]
@@ -406,21 +432,35 @@ def _direction_feedback(data, graph, case, proof):
             *ref["assumptions"],
         ],
         "target_observation_uncertainty": proof["observation_uncertainty"],
-        "current_sources": graph["sources"][target],
-        "repair_options": options,
+        **_repair_options(data, graph, case, target, driver),
     }
-    if data.get("source_profile", data["profile"]) != FIXED:
+    return feedback
+
+
+def _repair_options(data, graph, case, target, driver):
+    """Describe source changes in the edit interface for this campaign."""
+    options = [
+        f"Revise the rate law for {target} on its declared sources. "
+        f"A nonlinear response to {driver} is one possibility."
+    ]
+    feedback = {"current_sources": graph["sources"][target], "repair_options": options}
+    profile = data.get("source_profile", data["profile"])
+    if profile != FIXED:
         from autoformalism.research.trajectory_function_revision import (
             permitted_sources,
         )
 
-        options.append(
-            "Use request_topology_change if a scientifically justified rate "
-            "depends on another available source."
-        )
         feedback["sources_available_to_add"] = sorted(
             set(permitted_sources(graph, case)) - set(graph["sources"][target])
         )
+        if feedback["sources_available_to_add"]:
+            options.append(
+                f"Include another permitted source directly in the revised {target} "
+                "rate if scientifically justified."
+                if profile == TARGET_RHS
+                else "Use request_topology_change if a scientifically justified rate "
+                "depends on another available source."
+            )
     return feedback
 
 
