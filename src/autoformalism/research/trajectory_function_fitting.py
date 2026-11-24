@@ -191,6 +191,19 @@ class _Rollout:
             self.flows[size] = ca.Function("rollout", [p, z, u, d], [ys, xs])
         return self.flows[size]
 
+    def _initial_args(self, row):
+        public = (
+            {"t": row.time[0]}
+            | {k: v[0] for k, v in (row.inputs | row.auxiliaries).items()}
+            | row.covariates
+        )
+        initial = public | {k: v[0] for k, v in row.targets.items()}
+        if missing := set(self.forcings) - public.keys():
+            raise ValueError(f"Unavailable ongoing forcings: {sorted(missing)}")
+        if missing := set(self.readings) - initial.keys():
+            raise ValueError(f"Unavailable public initial readings: {sorted(missing)}")
+        return [initial[n] for n in self.readings], [public[n] for n in self.forcings]
+
     def record(self, row):
         t = np.asarray(row.time)
         public = (
@@ -201,19 +214,24 @@ class _Rollout:
         )
         # The only target observations available to an equation are generated states.
         # Measured target histories enter this routine solely to obtain t0 readings.
-        initial = {k: v[0] for k, v in (public | row.targets).items()}
-        if missing := set(self.forcings) - public.keys():
-            raise ValueError(f"Unavailable ongoing forcings: {sorted(missing)}")
-        if missing := set(self.readings) - initial.keys():
-            raise ValueError(f"Unavailable public initial readings: {sorted(missing)}")
+        readings, _ = self._initial_args(row)
         args = (
-            [initial[n] for n in self.readings],
+            readings,
             np.array([public[n] for n in self.forcings]).reshape(
                 len(self.forcings), len(t)
             ),
             np.diff(t).reshape(1, -1),
         )
         return self._flow(len(t)), args
+
+    def observe_initial(self, row, parameters):
+        """Evaluate the prescribed initial states and readouts without a time step."""
+        readings, forcings = self._initial_args(row)
+        states = self.initialize(parameters, readings)
+        values = np.asarray(self.observe(states, parameters, forcings)).ravel()
+        if not np.isfinite(states).all() or not np.isfinite(values).all():
+            raise ArithmeticError("Nonfinite initial state or observed readout")
+        return dict(zip(self.targets, values.tolist(), strict=True))
 
     def run(self, records, params):
         result = []
@@ -227,7 +245,7 @@ class _Rollout:
         return result
 
 
-def _rows(raw, split):
+def _rows(raw, split, *, min_samples=2):
     rows = [CompleteTrajectory.model_validate(row) for row in raw]
     if not rows:
         raise ValueError(f"Empty {split} split")
@@ -235,7 +253,7 @@ def _rows(raw, split):
     if len(set(ids)) != len(ids) or not all(i.startswith(split + "_") for i in ids):
         raise ValueError(f"Expected unique {split} trajectory IDs")
     for row in rows:
-        if len(row.time) < 2 or any(
+        if len(row.time) < min_samples or any(
             set(getattr(row, k)) != set(getattr(rows[0], k))
             for k in ("targets", "auxiliaries", "inputs", "covariates")
         ):
@@ -255,6 +273,39 @@ def _targets(rows, names):
     return np.concatenate(
         [np.array([row.targets[n] for n in names]) for row in rows], axis=1
     )
+
+
+def initial_target_events(
+    graph: dict, formula: dict, rows: list[dict], targets: list[str]
+) -> list[dict]:
+    """Evaluate a fixed vector on observed algebraic targets at training time zero."""
+    training = _rows(rows, "train", min_samples=1)
+    if (
+        not targets
+        or len(set(targets)) != len(targets)
+        or any(
+            graph["variable_types"].get(name) != "algebraic"
+            or name not in training[0].targets
+            for name in targets
+        )
+    ):
+        raise ValueError("Expected distinct observed algebraic targets")
+    if any(row.time[0] != 0 for row in training):
+        raise ValueError("Training trajectory starts after or before time zero")
+    model = _Rollout(graph, formula, targets, 1)
+    parameters = [formula["parameters"][name] for name in model.parameters]
+    events = []
+    for row in training:
+        values = model.observe_initial(row, parameters)
+        events.append(
+            {
+                "event": row.trajectory_id,
+                "time": [row.time[0]],
+                "observed": {n: [row.targets[n][0]] for n in targets},
+                "predicted": {n: [v] for n, v in values.items()},
+            }
+        )
+    return events
 
 
 def _residual(result, targets, scales):

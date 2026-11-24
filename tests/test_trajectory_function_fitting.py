@@ -7,6 +7,7 @@ import pytest
 
 from autoformalism.research.trajectory_function_fitting import (
     fit_formula,
+    initial_target_events,
     score_formula,
     validate_formula,
 )
@@ -46,6 +47,28 @@ def problem():
         }
 
     return graph, formulas, [event("train", 0), event("train", 1)], [event("val", 2)]
+
+
+def test_initial_algebraic_target_runs_initializer_without_any_steps(monkeypatch):
+    from autoformalism.research.trajectory_function_fitting import _Rollout
+
+    g, f, rows, val = problem()
+    monkeypatch.setattr(_Rollout, "_flow", lambda *_: pytest.fail("simulated"))
+    for row in rows:
+        row["time"] = [0.0]
+        row["targets"]["output"] = [-5.0]
+        row["inputs"]["u"] = [0.0]
+    events = initial_target_events(g, f, rows, ["output"])
+    assert [e["predicted"]["output"] for e in events] == [[1.0], [2.0]]
+    assert all(e["observed"]["output"] == [-5.0] for e in events)
+    with pytest.raises(ValueError, match="unique train"):
+        initial_target_events(g, f, val, ["output"])
+    for target in ["x", "missing"]:
+        with pytest.raises(ValueError, match="algebraic targets"):
+            initial_target_events(g, f, rows, [target])
+    rows[0]["time"] = [1.0]
+    with pytest.raises(ValueError, match="time zero"):
+        initial_target_events(g, f, rows, ["output"])
 
 
 def test_analytic_fit_on_distinct_grids_and_genuine_free_validation():

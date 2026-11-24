@@ -541,6 +541,48 @@ def _frozen_candidates(root, plan):
     return frozen
 
 
+def initial_order_advisory(graph: dict, formula: dict, case: dict) -> dict:
+    """Compare one vector's algebraic readouts using public measurement bounds."""
+    from autoformalism.research.initial_algebraic_order import check_initial_order
+    from autoformalism.research.trajectory_function_fitting import initial_target_events
+
+    evidence = case["evidence"]
+    targets = [
+        name
+        for name in evidence["context"]["targets"]
+        if graph["variable_types"].get(name) == "algebraic"
+    ]
+    if not targets:
+        return {"status": "unverified", "reason": "No observed algebraic target."}
+    bounds = evidence.get("contract", {}).get("absolute_error_bounds", {})
+    checks = {}
+    for name in targets:
+        tolerance = bounds.get(name)
+        if tolerance is None:
+            checks[name] = {
+                "status": "unverified",
+                "reason": "Unknown measurement error bound.",
+            }
+            continue
+        try:
+            events = initial_target_events(
+                graph, formula, evidence["trajectories"], [name]
+            )
+            check = check_initial_order(events, name, tolerance=tolerance)
+            if not check["comparable_pairs"]:
+                check.update(status="unverified", reason="No resolvable observed pair.")
+            checks[name] = check
+        except (ArithmeticError, ValueError, RuntimeError, ModelValidationError) as exc:
+            checks[name] = {"status": "unverified", "reason": str(exc)}
+    return {
+        "status": "evaluated"
+        if any(c["status"] != "unverified" for c in checks.values())
+        else "unverified",
+        "tolerance_source": "public_absolute_measurement_error",
+        "targets": checks,
+    }
+
+
 def fit(root, index):
     """Consume one fit allowance only after the common candidate freeze."""
     from autoformalism.research.trajectory_function_fitting import fit_formula
@@ -573,24 +615,43 @@ def fit(root, index):
         elif p["profile"] == POINTWISE_REPLAY:
             raise ValueError("Admission-only replay has no optimizer allowance")
         elif (directory / "reservation.json").exists():
-            if (
-                sealed_read(directory / "reservation.json")["candidate"]
-                != identity["candidate"]
-            ):
+            previous = sealed_read(directory / "reservation.json")
+            if previous["candidate"] != identity["candidate"]:
                 raise ValueError("Changed fitting reservation")
             result = {
                 "status": "interrupted",
                 "reason": "Previous fit consumed its reserved allowance",
             }
+            if "initial_order_start" in previous:
+                result["initial_algebraic_order"] = {
+                    "start": previous["initial_order_start"],
+                    "endpoint": {
+                        "status": "unverified",
+                        "reason": "No saved fitted vector.",
+                    },
+                }
         else:
-            sealed_write(directory / "reservation.json", identity)
+            graph = fitting_graph(candidate, row)
+            formula = candidate["formula"]
+            case = training_case(p, row)
+            start = initial_order_advisory(graph, formula, case)
+            sealed_write(
+                directory / "reservation.json",
+                {**identity, "initial_order_start": start},
+            )
             result = fit_formula(
-                fitting_graph(candidate, row),
-                candidate["formula"],
+                graph,
+                formula,
                 p["train"][row["dataset"]],
                 seed=SEEDS[rank],
                 **plan["fit_budget"],
             )
+            endpoint = {"status": "unverified", "reason": "No fitted vector."}
+            if result.get("parameters") is not None:
+                endpoint = initial_order_advisory(
+                    graph, {**formula, "parameters": result["parameters"]}, case
+                )
+            result["initial_algebraic_order"] = {"start": start, "endpoint": endpoint}
         return sealed_write(path, {**identity, "result": result})
 
 

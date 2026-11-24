@@ -194,3 +194,24 @@ For a separate check on the original four development-validation events, prepare
     python -m scripts.validate_positive_insulin_transfer validate --root "$AF_EVIDENCE/positive-validation" --archive "$AF_EVIDENCE/aces-equilibrium/results" --validation output/trajectory-functions-20261123/inputs/validation.json
 
 The revised insulin equation and all other model coefficients remain fixed throughout this comparison. The evaluator reproduces the archived parent forecasts, independently integrates the revised insulin equation and scores all three targets. The development results identify changes in predictive accuracy on these four previously studied events.
+
+### Checking initial algebraic outputs before and after fitting
+
+The trajectory-function fitter now compares the order of observed initial values with the order predicted by each supplied and selected parameter vector. It evaluates the declared initializers and algebraic equations directly. Two measured values are distinguishable when their difference exceeds twice the public per-measurement error bound. The fit receipt records the worst reversal, ties, counts and errors. A missing measurement bound or unavailable initial comparison receives an explicit unresolved status. This diagnostic supplies feedback about the particular vector. To exclude an equation family would require a bound covering every allowed vector and an explicit accuracy requirement.
+
+For the T2-easy disposal study, the training-only replay and matched continuation run locally from the checkout containing Orion's original training freeze:
+
+    PYTHONPATH=src:. .venv/bin/python -m scripts.audit_t2_initial_disposal_order
+    PYTHONPATH=src:. .venv/bin/python -m scripts.fit_t2_initial_disposal_order
+
+The replay checks the computed initial observations against all six saved parameter vectors. The family analysis bounds the smallest attainable maximum initial error for the two affine disposal equations. For three training events, the middle event's initial inputs are exactly the midpoint of the two endpoints. Its measured output differs from their mean by 0.003732 mg/kg/min, forcing a maximum error of at least half that value. The exported shared parameter vector attains that bound to numerical precision on all 16 initial observations.
+
+The continuation uses the same delayed equation, frozen insulin law, physical constraints, full-trajectory training objective, two starts and budget for each fit. The control fits all training observations. Two additional fits require predicted initial differences to retain at least 1% or 50% of each distinguishable measured gap. These fractions are experimental settings. There are 29 comparisons across three distinct measured initial disposal levels. Each arm saves the selected vector, both starts' outcomes, and an independent full-trajectory replay.
+
+To test one change to construction under the same 50% condition, run
+
+    PYTHONPATH=src:. .venv/bin/python -m scripts.probe_t2_initial_tissue_map
+
+The nested model adds a shared gain on the measured initial tissue glucose relative to the fasting reference in the initializer for insulin action. At zero gain it reproduces the parent. The two fits start from the same values of every common coefficient as the parent comparison. Both starts preserved the disposal ordering. The selected fit improved pooled training NMSE from 0.16076 to 0.10768 relative to the parent under the same constraint, while its worst initial level error grew from 0.0510 to 0.2309 mg/kg/min. The unconstrained parent reached 0.09433 pooled training NMSE and reversed all 29 distinguishable comparisons. Across these training events, the sum of the initial tissue and plasma glucose masses is constant, so replacing centered initial tissue glucose with centered initial plasma glucose and reversing the coefficient sign gives identical initial predictions.
+
+The action derivative depends only on insulin. For the same insulin trajectory, a change in initial action therefore persists throughout the event. Compared with the parent fitted under the same 50% constraint, the change improved pooled NMSE on all 14 events with the common initial glucose but worsened both events with a different initial glucose. Any event-omission evaluation should identify coefficients, starts and normalization constants learned using the omitted event. A fresh forecast evaluation needs training-fold-only preparation.
