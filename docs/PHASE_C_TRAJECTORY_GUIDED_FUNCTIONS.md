@@ -1,5 +1,10 @@
 # Using training trajectories to construct functions
 
+The [complete discharge law experiment](PHASE_C_COMPLETE_LAW_NOMINATION.md)
+compares four entire rate equations, fits them from interval water balances,
+and predicts each of six omitted basin training events. Synthetic controls
+measure recovery of the equation separately from predictive error.
+
 **Design for discussion.** Phase C already passes training evidence to the function stage. Given an admitted topology, the proposer writes expressions for its processes and equations. I propose that the runtime first compare a few function families against measurements conditional on the sources of that particular equation. The proposer can use scientific knowledge to choose among them or offer another expression.
 
 The new topology export gives each variable’s type, RHS sources and initialization. It leaves open how to group the sources into terms. For example, the same edges from glucose and insulin can represent an additive production and loss law or a joint response. First assemble candidate balances under the public requirements. In the basin task one volumetric transfer contributes $-Q/A_{\rm up}$ upstream and $+Q/A_{\rm down}$ downstream. Then choose forms for the unknown processes.
