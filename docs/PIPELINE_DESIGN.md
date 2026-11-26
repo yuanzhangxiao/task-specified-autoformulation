@@ -1,5 +1,11 @@
 # Phase 1 Pipeline Design
 
+The [ODE construction decision framework](PHASE_C_MODEL_CONSTRUCTION_DECISIONS.md)
+specifies how reconstruction, contradiction checks, fitting and whole-event
+forecasts can guide graph and equation choice under a shared budget.
+The [T2 disposal experiment](PHASE_C_BALANCED_DISPOSAL.md) tests these decisions
+on a component reconstructed from the observations.
+
 The T2 worker visits all branches at each repair depth. A new result root can import authenticated first-wave responses and interrupted reservations. The same-name Slurm dependency serializes the upgrade with a previous job even when its submission acknowledgment was lost. [Protocol and ACES commands](PHASE_C_T2_BREADTH.md)
 
 Candidate 15's feedback repair applies one new 120B patch to the constrained
