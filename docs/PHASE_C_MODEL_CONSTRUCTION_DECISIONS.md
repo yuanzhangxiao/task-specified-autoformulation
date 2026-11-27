@@ -48,6 +48,8 @@ Suppose $K$ fitted alternatives remain and there are $m$ selection events, equal
 
 The winner and its score agree exactly with exhaustive selection on the same fitted candidates. The winning model always undergoes all $m$ evaluations. Strict inequality preserves ties. Worst-case cost is $Km$ forecasts plus $O(K\log K + m\log m)$ ordering work (apart from the cost of the forecasts themselves). With an eligible first candidate, as few as $m+K-1$ forecasts may suffice. Sorting by training loss is a heuristic for finding a strong incumbent early. Only the stopping criterion has an optimality guarantee about the selected outcome. If hard constraints involve other events or pooled scores have candidate-dependent weights or denominators, a new valid lower bound is required. The implementation checks the bounded decision against an exhaustive decision on the same receipts.
 
+The [implemented sequential decision policy and matched two-benchmark replay](PHASE_C_EVIDENCE_DECISION_PROBLEM.md) price the choice between screening, fitting and stopping. Each recorded decision includes the estimated risk of its alternative actions.
+
 ## Evaluating the workflow as a scientific contribution
 
 1. Freeze the task splits, permitted evidence, grammar, fitter, budgets, forecast loss, coverage measure and tie-breaking rules. Preserve a sealed test split for final claims.
